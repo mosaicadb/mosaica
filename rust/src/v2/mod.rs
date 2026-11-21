@@ -1273,9 +1273,6 @@ pub struct Index2 {
     /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
     /// None for an index without stored vectors.
     pub order: Option<Arc<order::OrderState>>,
-    /// The approximate k-NN's correction to its deterministic levels' width, per cluster and level (k x ndl,
-    /// `adaptive::level_ratios`; a compaction shares its parent's); None for an index without stored vectors.
-    pub lratio: Option<Arc<Vec<f32>>>,
     /// The W2 width's stored forms (`wrule::WForms`; a compaction shares its parent's); None for an index without
     /// stored vectors.
     pub wforms: Option<Arc<wrule::WForms>>,
@@ -1498,7 +1495,6 @@ impl Index2 {
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
             order: self.order.clone(),
-            lratio: self.lratio.clone(),
             wforms: self.wforms.clone(),
         }
     }
@@ -2349,14 +2345,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         x2,
         full,
         nrows,
-        lratio: None,
         wforms: None,
     };
     if real {
-        let tr = Timer::new();
-        let (ratio, nq) = adaptive::build_level_ratios(&ix, o.seed);
-        ix.lratio = Some(Arc::new(ratio));
-        log(format!("level ratios: {nq} rows as queries, {:.1}s", tr.s()));
         let tw = Timer::new();
         ix.wforms = Some(Arc::new(wrule::build(&ix, &vinv, &p.centres[..k * n])));
         log(format!("W2 forms: {:.1}s", tw.s()));

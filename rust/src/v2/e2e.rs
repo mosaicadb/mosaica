@@ -409,7 +409,7 @@ fn the_order_state_is_built_saved_and_opened() {
     assert!(e.contains(&format!("format {}", store::STORE_FORMAT - 1)) && e.contains("rebuild"), "{e}");
     std::fs::write(&json, &text).unwrap();
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    for name in order::FILES.into_iter().chain([adaptive::RATIO_FILE]).chain(wrule::FILES) {
+    for name in order::FILES.into_iter().chain(wrule::FILES) {
         let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/{name}.kept"));
         std::fs::rename(&path, &keep).unwrap();
         let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
@@ -925,7 +925,6 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
-    assert_eq!(a.lratio.as_ref().map(|r| f32b(r)), b.lratio.as_ref().map(|r| f32b(r)));
     assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.g), f32b(&w.c))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.g), f32b(&w.c))));
     for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
         assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
@@ -2346,21 +2345,16 @@ fn the_levels_statistical_width_is_a_participation_ratio() {
     assert!(lo.iter().zip(&hi).all(|(&a, &b)| a > 0.0 && a <= b && b <= 1.0), "{lo:?} {hi:?}");
 }
 
-/// The build stores a level ratio above 0 for every cluster and deterministic level, not all 1, and the W2 forms (M
-/// and N second moments, gamma at least 0, U above 0); a saved index opens with the same ratios and forms, and one
-/// without either file is refused at the open, naming the file and a rebuild, as an index without ratios is by the
-/// approximate queries.
+/// The build stores the W2 forms (M and N second moments, gamma at least 0, U above 0 for every cluster with rows); a
+/// saved index opens with the same forms, and one without either file is refused at the open, naming the file and a
+/// rebuild, as an index without forms is by the approximate queries.
 #[test]
-fn the_level_ratios_are_stored_and_survive_a_reopen() {
+fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let tmp = tmp_dir("ratios");
     let edir = tmp.join("encoded");
     let edir = edir.to_str().unwrap();
     let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
-    let r = built.lratio.as_ref().unwrap();
-    assert_eq!(r.len(), built.k() * built.meta.ndl());
-    assert!(r.iter().all(|&x| x.is_finite() && x > 0.0) && r.iter().any(|&x| (x - 1.0).abs() > 1e-3), "{r:?}");
-    assert_eq!(r[..], fixture().ix.lratio.as_ref().unwrap()[..], "a saved build measures the ratios the build in memory does");
     let w = built.wforms.as_ref().unwrap();
     let (ndl, wr) = (built.meta.ndl(), w.r);
     assert_eq!((w.g.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * ndl * wrule::WForms::rec(wr)));
@@ -2375,14 +2369,15 @@ fn the_level_ratios_are_stored_and_survive_a_reopen() {
     }
     let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(r), bits(opened.lratio.as_ref().unwrap()));
     let ow = opened.wforms.as_ref().unwrap();
     assert_eq!((wr, bits(&w.g), bits(&w.c)), (ow.r, bits(&ow.g), bits(&ow.c)));
-    opened.lratio = None;
+    let fw = fixture().ix.wforms.as_ref().unwrap();
+    assert_eq!((bits(&w.g), bits(&w.c)), (bits(&fw.g), bits(&fw.c)), "a saved build stores the forms the build in memory does");
+    opened.wforms = None;
     let e = adaptive::Adaptive::new(&opened, fixed_costs()).map(|_| ()).unwrap_err();
-    assert!(e.contains("level ratios") && e.contains("rebuild"), "{e}");
+    assert!(e.contains("W2 forms") && e.contains("rebuild"), "{e}");
     drop((built, opened));
-    for name in [adaptive::RATIO_FILE, wrule::FILES[0], wrule::FILES[1]] {
+    for name in wrule::FILES {
         let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/kept"));
         std::fs::rename(&path, &keep).unwrap();
         let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
@@ -2392,30 +2387,7 @@ fn the_level_ratios_are_stored_and_survive_a_reopen() {
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
 }
 
-/// A query the index cannot answer (a zero row, which a fit accepts) is left out of the level ratios: with one added
-/// they are the ratios without it, bit for bit, from the same queries. The ratios do not depend on the threads that
-/// measure them.
-#[test]
-fn a_zero_row_is_left_out_of_the_level_ratios() {
-    let ix = &fixture().ix;
-    let row = |r: usize| -> (Vec<f32>, Option<usize>) { (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r)) };
-    let qs: Vec<_> = (0..40).map(|i| row(i * 97 % ix.nrows)).collect();
-    let mut with_zero = qs.clone();
-    with_zero.insert(7, (vec![0f32; ix.n()], Some(5)));
-    assert!(query_ok(&with_zero[7].0).is_err());
-    let (a, na) = adaptive::level_ratios(ix, &qs);
-    let (b, nb) = adaptive::level_ratios(ix, &with_zero);
-    assert_eq!((na, nb), (qs.len(), qs.len()));
-    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(&a), bits(&b));
-    for threads in [1, 3] {
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
-        assert_eq!(bits(&pool.install(|| adaptive::level_ratios(ix, &qs).0)), bits(&a), "{threads} threads");
-    }
-}
-
-/// An index with a zero row (which a fit accepts) builds: its level ratios and W2 forms are finite, it opens with the
-/// same ones, and the zero row as a training query is left out.
+/// An index with a zero row (which a fit accepts) builds: its W2 forms are finite, and it opens with the same ones.
 #[test]
 fn an_index_with_a_zero_row_builds_and_opens() {
     let tmp = tmp_dir("zero-row");
@@ -2431,12 +2403,10 @@ fn an_index_with_a_zero_row_builds_and_opens() {
     let (_, built) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
     let zero: Vec<usize> = (0..built.nrows).filter(|&r| built.full_row_f16(r).iter().all(|&h| crate::util::f16_to_f32(h) == 0.0)).collect();
     assert_eq!(zero.len(), 1);
-    let (r, w) = (built.lratio.as_ref().unwrap(), built.wforms.as_ref().unwrap());
-    assert!(r.iter().all(|&x| x.is_finite() && x > 0.0) && w.g.iter().chain(&w.c).all(|x| x.is_finite()));
+    let w = built.wforms.as_ref().unwrap();
+    assert!(w.g.iter().chain(&w.c).all(|x| x.is_finite()));
     let (_, opened) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(opened.store_hash(), built.store_hash());
-    let q = (vec![0f32; built.n()], Some(zero[0]));
-    assert_eq!(adaptive::level_ratios(&built, &[q]).1, 0);
 }
 
 /// The W2 forms do not depend on the threads that build them.
@@ -2454,20 +2424,6 @@ fn the_w2_forms_do_not_depend_on_the_threads() {
         let x = pool.install(|| wrule::build(ix, &vinv, &p.centres[..ix.k() * n]));
         assert_eq!((bits(&x.g), bits(&x.c)), (bits(&w.g), bits(&w.c)), "{threads} threads");
     }
-}
-
-/// The level ratios measure each training query as k-NN reads it, at unit scale: queries scaled by 2^-10 give the
-/// ratios the queries give, to within the f16 rounding of their smallest values (unscaled, they were percents low).
-#[test]
-fn the_level_ratios_do_not_depend_on_the_queries_scale() {
-    let ix = &fixture().ix;
-    let qs: Vec<(Vec<f32>, Option<usize>)> = (0..40).map(|i| {
-        let r = i * 97 % ix.nrows;
-        (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r))
-    }).collect();
-    let small: Vec<_> = qs.iter().map(|(q, r)| (q.iter().map(|&x| x * 2f32.powi(-10)).collect(), *r)).collect();
-    let (a, b) = (adaptive::level_ratios(ix, &qs).0, adaptive::level_ratios(ix, &small).0);
-    assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-3 * x), "{a:?} {b:?}");
 }
 
 /// A cluster read on the index path at the W2 width (each deterministic level at min(1, psi tau / (dwa sqrt U)) of its
@@ -2536,54 +2492,6 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
     assert!(capped > 0 && fewer > 0, "{capped} reads at psi 50 the certified one, {fewer} dropping more rows than the certified width");
 }
 
-/// Study (ignored; run by hand on a fit, which it rebuilds when its saved index is stale, as the bindings do): the level
-/// ratios measured with given training queries, for a check against the replay that chose the rule
-/// (`bench/suite/notes/visit-order/results/stored-correction/check_ratios.py`). DIAG_DIR the fit, DIAG_PREP a directory
-/// with `queries.npy` (corpus rows as queries) and `query_rows.npy` (their entities, each left out of its own
-/// cluster), DIAG_OUT the output prefix: `.study.f32` (k x ndl, from those queries) and `.build.f32` (the build's
-/// own). Also the time of each and of reading the ratios as the reader does (`CQ2::set_width`'s arithmetic over every
-/// cluster).
-#[test]
-#[ignore]
-fn study_level_ratios() {
-    let dir = std::env::var("DIAG_DIR").unwrap();
-    let prep = std::env::var("DIAG_PREP").unwrap();
-    let out = std::env::var("DIAG_OUT").unwrap();
-    let mut log = |s: String| eprintln!("{s}");
-    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut log) {
-        Ok(x) => x,
-        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut log).unwrap(),
-    };
-    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
-    let (qs, d) = qn.rows_f32("queries").unwrap();
-    let ents: Vec<i64> = crate::util::read_npy(&format!("{prep}/query_rows.npy")).i64s();
-    let queries: Vec<(Vec<f32>, Option<usize>)> = ents.iter().enumerate().map(|(i, &e)| {
-        let mut v = vec![0f32; ix.n()];
-        v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]);
-        (v, Some(ix.row_of_ent(e as u32)))
-    }).collect();
-    let t = Timer::new();
-    let (r, _) = adaptive::level_ratios(&ix, &queries);
-    eprintln!("{dir}: level ratios from {} given queries in {:.1}s on {} threads", queries.len(), t.s(), rayon::current_num_threads());
-    let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
-    std::fs::write(format!("{out}.study.f32"), bytes(&r)).unwrap();
-    std::fs::write(format!("{out}.build.f32"), bytes(ix.lratio.as_ref().unwrap())).unwrap();
-    let t = Timer::new();
-    let (reps, ndl) = (1000, ix.meta.ndl());
-    let mut acc = 0f32;
-    for i in 0..reps {
-        let psi = 4.0 + i as f64 * 1e-6;
-        for ci in 0..ix.k() {
-            let gp = &ix.groups[ix.cl[ci].g];
-            let lr = &ix.lratio.as_ref().unwrap()[ci * ndl..(ci + 1) * ndl];
-            for (l, &x) in lr.iter().enumerate() {
-                acc += std::hint::black_box((psi * gp.rho[l] as f64 * x as f64).min(1.0) as f32);
-            }
-        }
-    }
-    eprintln!("reading the ratios as the reader does: {:.1} ns per cluster ({acc})", t.s() * 1e9 / (reps * ix.k()) as f64);
-}
-
 /// Study (ignored; run by hand on a fit, rebuilt when stale): whether a cluster's rms half-width at a deterministic
 /// level is a query-independent multiple of |D| (D = qv d_l, `GQ2::cq`) or of its code term, dwa_l rms(r) (`CQ2::dwa`, r
 /// the rows' stored norms, `det_norm`). Over each query's first DIAG_M clusters by the probe's window key, one line per
@@ -2650,7 +2558,7 @@ fn study_w2_forms() {
     let dir = std::env::var("DIAG_DIR").unwrap();
     let prep = std::env::var("DIAG_PREP").unwrap();
     let refp = std::env::var("DIAG_REF").unwrap();
-    let mut log = |s: String| if s.contains("W2 forms") || s.contains("level ratios") || s.contains("assembled") { eprintln!("{s}") };
+    let mut log = |s: String| if s.contains("W2 forms") || s.contains("assembled") { eprintln!("{s}") };
     let (_, ix) = match open(&dir, &OpenOptions::default(), &mut log) {
         Ok(x) => x,
         Err(_) => rebuild(&dir, &BuildOptions::default(), &mut log).unwrap(),
