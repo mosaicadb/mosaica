@@ -102,3 +102,26 @@ session; logs in /home/joe/code/vexact-data/sc-study/out-fixed2/]
 Reading, theirs: the per-query stop costs 5 to 25% against a fixed count on four datasets unfiltered and wins by more
 elsewhere and under filters; there is room to improve the stop at high recall on those four, and no case for a fixed
 count. A2.6's LAION statement does not hold for the pooled stop; its glove statement does.
+
+## Approximate mode: the level width (21 November, from the visit-order session's dumps; all [measured, by that session])
+
+Files: /home/joe/code/vexact-data/suite/rho-dump/; scripts under bench/suite/notes/visit-order/hierarchy/layered/ in
+/home/joe/code/vexact-visitorder (rho_check.py, psi_eff.py, kappa_check.py, pair_check.py, rand_sample.py).
+
+- Rule 1's derived rho is 1.29 too narrow on iNaturalist at 12 groups and 2.04 at 1 group; right within 6% on yahoo
+  and LAION. Cause as predicted here: few groups for the dimension.
+- The width that works is measured per cluster: the sd of (score − midpoint) over 32 to 64 sampled rows. The PI's
+  forms 1 (variance bookkeeping) and 2 (pooled increments) fail.
+- The PI's Gaussian account of why an oracle spread keeps only 0.8 of the neighbours was wrong on the numbers, and so
+  was the mixture reading. What holds: a neighbour's error in units of the level's spread tracks its score's height in
+  units of the cluster's spread (slope 0.92 to 1.24 through the origin, correlation 0.6 to 0.7).
+- The rule built on that: keep a row when a ≥ t̂ − (ζ_c + ψ0·√f)·tau, every term from the per-cluster sample. At
+  ψ0 = 2 / 3 it keeps 0.92 to 0.98 / 0.97 to 0.99 of the true ten on all five indexes, at rows within 7% of the most
+  efficient rule (κ = 1 − f). It is a tendency, not a law; iNaturalist's slope is 1.2.
+- A4.4's identity holds on the real codes: a sample read at the first randomised level where every block is coded
+  estimates tau, μ_c and σ_c with bias of 2 to 6% (low on LAION) and modest extra noise, at about 10 KB against 256 KB
+  of stored vectors on iNaturalist. It needs the group's rotations set up, so it pays only where they are cheap or
+  already done.
+
+Owed: the theorist's checked write-up (A4) to that session; a derivation of the slope; what breaks the rule under
+filters and for clusters smaller than the sample.

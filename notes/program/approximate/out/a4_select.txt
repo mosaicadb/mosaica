@@ -1,0 +1,34 @@
+A. normal scores (2e6 rows a cell): share kept among rows with s within 0.05 sigma above t | formula at s = t ; among all rows with s >= t
+   f 0.8 zeta 3.0: rows above t 2649;  psi 4.0: 1.000 | 0.999 ; 1.000  psi 5.0: 1.000 | 1.000 ; 1.000  psi_eff(psi0 2.0) = 3.13: 0.981 | 0.977 ; 0.991
+   f 0.8 zeta 4.0: rows above t 80;  psi 4.0: 1.000 | 0.993 ; 1.000  psi 5.0: 1.000 | 1.000 ; 1.000  psi_eff(psi0 2.0) = 3.58: 1.000 | 0.977 ; 1.000
+   f 0.5 zeta 3.0: rows above t 2716;  psi 4.0: 0.993 | 0.996 ; 0.996  psi 5.0: 1.000 | 1.000 ; 1.000  psi_eff(psi0 2.0) = 3.54: 0.970 | 0.977 ; 0.986
+   f 0.5 zeta 4.0: rows above t 57;  psi 4.0: 1.000 | 0.951 ; 0.982  psi 5.0: 1.000 | 0.999 ; 1.000  psi_eff(psi0 2.0) = 4.24: 1.000 | 0.977 ; 0.982
+   f 0.3 zeta 3.0: rows above t 2705;  psi 4.0: 0.998 | 0.997 ; 0.997  psi 5.0: 1.000 | 1.000 ; 1.000  psi_eff(psi0 2.0) = 3.61: 0.981 | 0.977 ; 0.981
+   f 0.3 zeta 4.0: rows above t 65;  psi 4.0: 0.833 | 0.884 ; 0.892  psi 5.0: 1.000 | 0.999 ; 0.985  psi_eff(psi0 2.0) = 4.44: 1.000 | 0.977 ; 0.969
+
+B. exponential upper tail: a Laplace (so the standardised scores decay at rate sqrt(2/f) a spread), e normal, independent
+   f 0.8 rate 1.58 zeta 4.0 (964 rows at t): E[e|s=t]/tau measured 0.76, tau x decay rate 0.71, normal model 1.79; sd[e|s=t]/tau measured 1.02, normal model 0.89; kept at s = t: psi 4.0: 1.000 (decay-rate form 1.000, normal form 0.993); normal psi_eff 3.58: 0.998; decay-rate psi_eff 2.71: 0.975 (aim 0.977)
+   f 0.5 rate 2.00 zeta 4.0 (509 rows at t): E[e|s=t]/tau measured 1.43, tau x decay rate 1.41, normal model 2.83; sd[e|s=t]/tau measured 0.97, normal model 0.71; kept at s = t: psi 4.0: 1.000 (decay-rate form 0.995, normal form 0.951); normal psi_eff 4.24: 1.000; decay-rate psi_eff 3.41: 0.984 (aim 0.977)
+   f 0.3 rate 2.58 zeta 4.0 (231 rows at t): E[e|s=t]/tau measured 2.09, tau x decay rate 2.16, normal model 3.35; sd[e|s=t]/tau measured 0.92, normal model 0.55; kept at s = t: psi 4.0: 0.983 (decay-rate form 0.967, normal form 0.884); normal psi_eff 4.44: 0.996; decay-rate psi_eff 4.16: 0.987 (aim 0.977)
+
+C. psi_eff from m sampled rows (normal cluster; 4,000 samples a cell): keep probability at s = t, measured | formula ; and the plain psi with the sampled tau
+   f 0.8 zeta 4.0 m 32:  psi0 2.0: 0.937 | 0.945 (exact stats 0.9772)  psi0 3.0: 0.987 | 0.990 (exact stats 0.9987)  ; plain psi 5.0: 0.998 (exact tau 1.000)
+   f 0.8 zeta 4.0 m 64:  psi0 2.0: 0.958 | 0.961 (exact stats 0.9772)  psi0 3.0: 0.994 | 0.995 (exact stats 0.9987)  ; plain psi 5.0: 0.999 (exact tau 1.000)
+   f 0.8 zeta 4.0 m 128:  psi0 2.0: 0.968 | 0.969 (exact stats 0.9772)  psi0 3.0: 0.997 | 0.997 (exact stats 0.9987)  ; plain psi 5.0: 1.000 (exact tau 1.000)
+   f 0.8 zeta 5.0 m 32:  psi0 2.0: 0.919 | 0.929 (exact stats 0.9772)  psi0 3.0: 0.979 | 0.985 (exact stats 0.9987)  ; plain psi 5.0: 0.994 (exact tau 0.999)
+   f 0.8 zeta 5.0 m 64:  psi0 2.0: 0.949 | 0.953 (exact stats 0.9772)  psi0 3.0: 0.991 | 0.993 (exact stats 0.9987)  ; plain psi 5.0: 0.997 (exact tau 0.999)
+   f 0.8 zeta 5.0 m 128:  psi0 2.0: 0.963 | 0.965 (exact stats 0.9772)  psi0 3.0: 0.996 | 0.997 (exact stats 0.9987)  ; plain psi 5.0: 0.998 (exact tau 0.999)
+   f 0.5 zeta 4.0 m 32:  psi0 2.0: 0.938 | 0.943 (exact stats 0.9772)  psi0 3.0: 0.988 | 0.990 (exact stats 0.9987)  ; plain psi 5.0: 0.989 (exact tau 0.999)
+   f 0.5 zeta 4.0 m 64:  psi0 2.0: 0.958 | 0.960 (exact stats 0.9772)  psi0 3.0: 0.995 | 0.995 (exact stats 0.9987)  ; plain psi 5.0: 0.995 (exact tau 0.999)
+   f 0.5 zeta 4.0 m 128:  psi0 2.0: 0.969 | 0.969 (exact stats 0.9772)  psi0 3.0: 0.997 | 0.997 (exact stats 0.9987)  ; plain psi 5.0: 0.997 (exact tau 0.999)
+   f 0.5 zeta 5.0 m 32:  psi0 2.0: 0.918 | 0.928 (exact stats 0.9772)  psi0 3.0: 0.979 | 0.984 (exact stats 0.9987)  ; plain psi 5.0: 0.932 (exact tau 0.981)
+   f 0.5 zeta 5.0 m 64:  psi0 2.0: 0.948 | 0.952 (exact stats 0.9772)  psi0 3.0: 0.992 | 0.993 (exact stats 0.9987)  ; plain psi 5.0: 0.958 (exact tau 0.981)
+   f 0.5 zeta 5.0 m 128:  psi0 2.0: 0.964 | 0.965 (exact stats 0.9772)  psi0 3.0: 0.996 | 0.996 (exact stats 0.9987)  ; plain psi 5.0: 0.970 (exact tau 0.981)
+
+D. rows passed at equal recall of the rows above t: one psi against psi_eff (30 clusters of 2,000 rows, zeta 3 to 7, normal model)
+   f 0.8:  recall 0.9: plain psi 2.23 rows 70, psi0 0.87 rows 72 (1.03x);  recall 0.95: plain psi 2.57 rows 112, psi0 1.26 rows 117 (1.04x);  recall 0.99: plain psi 3.22 rows 256, psi0 1.97 rows 268 (1.05x);
+        at recall 0.95 the plain psi 2.57 keeps a row at s = t with probability 0.92 (zeta 3), 0.81 (zeta 4), 0.65 (zeta 5), 0.45 (zeta 6)
+   f 0.5:  recall 0.9: plain psi 3.04 rows 694, psi0 1.05 rows 873 (1.26x);  recall 0.95: plain psi 3.32 rows 1166, psi0 1.42 rows 1495 (1.28x);  recall 0.99: plain psi 3.83 rows 2689, psi0 2.11 rows 3584 (1.33x);
+        at recall 0.95 the plain psi 3.32 keeps a row at s = t with probability 0.95 (zeta 3), 0.75 (zeta 4), 0.38 (zeta 5), 0.09 (zeta 6)
+   f 0.3:  recall 0.9: plain psi 3.35 rows 2322, psi0 1.12 rows 3984 (1.72x);  recall 0.95: plain psi 3.58 rows 3626, psi0 1.49 rows 6437 (1.78x);  recall 0.99: plain psi 4.01 rows 7173, psi0 2.18 rows 13465 (1.88x);
+        at recall 0.95 the plain psi 3.58 keeps a row at s = t with probability 0.97 (zeta 3), 0.66 (zeta 4), 0.13 (zeta 5), 0.00 (zeta 6)
