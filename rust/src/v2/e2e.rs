@@ -368,7 +368,7 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let variants = [
         ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, u32::MAX, 2),
         ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ..BuildOptions::default() }, 0b10, 2),
-        ("3 levels, 4/16/40", BuildOptions { dlv: Some(vec![4, 16, 40]), ..BuildOptions::default() }, u32::MAX, 3),
+        ("3 levels, 4/16/28", BuildOptions { dlv: Some(vec![4, 16, 28]), ..BuildOptions::default() }, u32::MAX, 3),
         ("6 levels, none deciding", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0, 6),
         ("6 levels, deciding at the first and last", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0b100001, 6),
     ];
@@ -428,8 +428,9 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     }
     drop((built, opened));
     std::fs::remove_dir_all(&tmp).unwrap();
-    // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes)
-    for dlv in [vec![], vec![16, 8], vec![0, 8], vec![4, 8, 12, 16, 20, 24, 32], vec![16, 48]] {
+    // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes) or the
+    // integer kernel (at most 32 bytes)
+    for dlv in [vec![], vec![16, 8], vec![0, 8], vec![4, 8, 12, 16, 20, 24, 32], vec![16, 48], vec![4, 16, 40], vec![33]] {
         let o = BuildOptions { dlv: Some(dlv.clone()), ..BuildOptions::default() };
         assert!(prepare(dir, &o).is_err(), "accepted dlv {dlv:?}");
     }

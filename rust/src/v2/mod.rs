@@ -2371,6 +2371,10 @@ fn prepare_with(dir: &str, o: &BuildOptions, anchors: Option<&Option<Vec<f64>>>)
     if p.meta.dlv.is_empty() || p.meta.dlv.len() > NDL_MAX {
         return Err(format!("the fit's deterministic levels {:?} are not 1 to {NDL_MAX} levels; give others with BuildOptions::dlv (--dlv)", p.meta.dlv));
     }
+    // 8 bits a byte, 4 a unit
+    if 2 * p.meta.dlv[p.meta.dlv.len() - 1] > kern::DET_UNITS_MAX {
+        return Err(format!("the deterministic levels {:?} end past {} bytes, the most the integer kernel's 16-bit sums hold; give levels ending at {} bytes or fewer with BuildOptions::dlv (--dlv)", p.meta.dlv, kern::DET_UNITS_MAX / 2, kern::DET_UNITS_MAX / 2));
+    }
     if let Some(new) = &o.rlv {
         let top = p.meta.dlv.last().copied().unwrap_or(0);
         if new.is_empty() || !new.windows(2).all(|w| w[0] < w[1]) || new[0] <= top {

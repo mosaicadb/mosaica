@@ -581,7 +581,7 @@ impl CQ2 {
         let sigma = if self.gtab {
             let ts: Vec<&GTab> = (0..ndl).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
             let (s, m) = unsafe { det_spans(&ts, &ix.ctab[ci][..ndl], &gp.levels[..ndl], self.alr) };
-            let units: usize = gp.levels[..ndl].iter().map(|l| l.units).sum();
+            let units = det_units(&gp.levels[..ndl]);
             let budget = (256 * IHMAX - 3 * units as i64) as f64;
             ((s * (1.0 + 1.0 / 512.0) / budget).max(m * (1.0 + 1.0 / 512.0) / 65533.0) as f32).max(1e-30)
         } else {
