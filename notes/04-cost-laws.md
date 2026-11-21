@@ -7,7 +7,9 @@ and says which of them bind on the data. Section 4.3 states the cost law of the 
 is read by the rows in a shell below the threshold, and the growth of that shell with N is set by the tail of the
 query's scores. Sections 4.4 to 4.6 give the measured exponents, the visible set and the dimension. The approximate
 mode obeys a different law, measured in different units on different data, so section 4.7 states it apart and then
-compares the two. Section 4.8 sets cluster size against N.
+compares the two. Section 4.8 sets cluster size against N. Section 4.9 then holds N fixed and asks how one row's bytes
+are best split between deterministic and randomised levels, what an item at a given margin must read, and what the
+stored scalars of a coded block cost in time.
 
 ## Local symbols
 
@@ -46,6 +48,24 @@ The symbols of chapter 0 hold. This chapter adds the following, and gives the so
 | n̄ | rows per cluster, N/K (`layered.md` writes S) |
 | u, v | the exponents of the approximate law, rows read ∝ n̄^u·N^v (`layered.md` writes γ, η) |
 | Φ(K) | the share of the rows the approximate order reads at K clusters (`layered.md` writes φ(K)) |
+| T, n_T, d_T | in §4.9, a set of eigen-coordinates (those of chapter 0's γᵢ), its size, and d_T = n_T − 1 |
+| F_T | Σ_{i∈T} √γᵢ, chapter 0's F restricted to T |
+| W_T(H) | in §4.9, chapter 2's floor on the mean half-width of a sound certificate of T with H nats, Σ_{i∈T} min(√γᵢ, λ_w) with Σ_{i∈T} ln⁺(√γᵢ/λ_w) = H (Lemma 2.21, Theorem 2.24); always subscripted, unlike the work W(N; k) (the source writes W_T and λ) |
+| ω_T(H) | W_T(H)/F_T |
+| h*(B) | the least half-width, as a share of F, over the layouts of §4.9.1 at B bits; B*(·) is its inverse |
+| n_⋆(ũ) | the dimension in play: the bits that halve the width along the frontier at normalised margin ũ (the source writes k(u)) |
+| η_i | in §4.9 only, always subscripted: item i's scale. In the law as stated it is the zero-bit Cauchy–Schwarz bound in the group's metric; in the dump test it is Σ_j ‖y_j‖‖Δ_j‖ over the four blocks after the 32-byte prefix (the sources write η; Proposition 4.2's unsubscripted η is unrelated) |
+| ũ_i, w̃_ℓ, w̄_ℓ | item i's normalised margin \|s_i − t\|/η_i; level ℓ's half-width over η_i; the geometric mean of w̃_ℓ over a level's entrants (the sources write u_i, w and w̄; u is this chapter's exponent) |
+| c_e | the ratio of a level's half-width to the sd of its estimate's error: c at a randomised level, about √n_eff at a deterministic one |
+| J | the number of coded blocks at a level |
+| b_blk | the bytes charged per coded block in the layout programme (the source writes s) |
+| τ_rise, τ_lvl, τ_byte | the time of one (item, coded block, rise), of entering one level per item, and of decoding one byte of code per item (the source writes τ, τ_0, τ_byte; chapter 0's τ_k is unrelated) |
+| e_56, e_96 | the shares of N entering the levels at 56 B and at 96 B of code |
+| D, H_D, H_j | in §4.9.1, the coordinates a layout certifies deterministically, the nats of deterministic code on D and the nats of prefix on block T_j (chapter 0's D, a level's weights, does not appear in §4.9) |
+| R, R_j, t(R) | in §4.9, a rate in bits per position (of block T_j), and t(R) = 1/(4^R − 1), the cap bound on tan²φ at rate R (chapter 0's R_j, a rotation, does not appear in §4.9; the threshold t appears there only in s_i − t) |
+| ρ_c(R) | in §4.9, the built block code's tan φ over the sphere bound at one rate R; the subscript is a label, not a cluster index |
+| B₀, B₁ | in §4.9.2, the bits at which a rotated block of T becomes narrower than its own zero-bit Cauchy–Schwarz bound, and than the same bits spent deterministically (the source writes B₀ and B*; B*(·) here is the inverse of h*) |
+| Ê, ξ², Θ | in §4.9, chapter 3's estimate of Δ·r, and Theorem 3.12's ξ² = c²/Θ with Θ = Σ_j d_j/tan²φ_j |
 
 The sources label claims **proved**, **measured**, **cited**, **argued**, **conjectured**, **derived** and
 **estimated**. Here "argued" becomes [model] when the argument is a derivation under a stated model of the data, and
@@ -323,7 +343,12 @@ which is an interval, and the rows with lower bound below t form a sublevel set 
 interval. The undecided rows are their intersection. ∎
 
 Chapter 1's Lemma 1.5 is the same result for a stored key and for the support table's bound as well, with the proof
-written out; the bound above is chapter 1's annulus bound (§1.2, item 1) at x₂ = 1.
+written out; the bound above is chapter 1's annulus bound (§1.2, item 1) at x₂ = 1. Chapter 1's Lemma 1.5 is now the
+current statement for the index. It is restated for the stored key with a widening δ_â, and it says that the out rows
+and the in rows can each lie at either end of the range. Its statement and proof are the range referee's own
+(`program/kernel/referee-range.md`), so chapter 1 tags it [proved, unrefereed]. The exact-key statement above is that
+lemma's part (d) in its annulus case, which the same referee found correct; whether its tag is raised is chapter 1's
+Editor's query 17.
 
 The **support table** stores, for anchor directions a′_j (here the K centres), the maximum and minimum over cluster c of
 a′_j·x. For q = a′_j + (q − a′_j) the cluster's maximum of q·x is at most the stored maximum plus a bound on the maximum
@@ -692,6 +717,352 @@ N^(u/2+v) to N^v. The approximate path would read leaves while the exact path ke
 need exact queries timed on such a build before adoption [§0; the leaves' gain is model at 100M and 1B, and measured
 in that shape at 1M as 4 to 9 times fewer rows than reading parents whole].
 
+## 4.9 Spending a row's bytes: the hand-over, the rate–margin law and the price of a scalar
+
+The earlier sections count what a query reads as N grows. This section holds N fixed and asks three questions of one
+row's stream: at how many bytes a randomised level starts to beat a deterministic one, how many bytes an item at a
+given margin must read, and what each coded block costs once the time of its stored scalars is counted. The sources are
+under `notes/program/`: `confidence/DESIGN-CLAIMS.md` (claims C3 to C5, cited as DESIGN-CLAIMS), the dump test
+`confidence/dump-test/RESULTS.md` (cited as RESULTS), the referee's report `confidence/referee/referee-design.md`
+(cited as the referee), and `codes/REPORT.md` for the nesting figures. The referee checked the derivations, reran the
+programme and corrected several readings; it refereed nothing as proved, so no statement here is [proved, refereed]
+except where it quotes chapter 3's Theorems 3.11 and 3.12. Where the referee corrected a figure, the corrected figure is given and
+sourced to the referee. DESIGN-CLAIMS tags some numbers [estimate], which is not a tag of these notes; they enter as
+[model], with the model named (Editor's query 21).
+
+The index's stream, as the sources describe it: six deterministic levels at 4, 8, 12, 16, 24 and 32 B of code, which
+together are the 256-bit prefix; then four randomised levels, named by their cumulative code bytes 56, 96, 160 and
+256 B (chapter 3 §3.1). The first randomised level codes block 0 (96 positions) at 2 bits and leaves the other three
+blocks to their Cauchy–Schwarz bounds. An item entering it reads 29.5 B: 24 B of code and 5.5 B of scalars, which are
+‖y_j‖ in 8 bits for each of the four blocks, coded or not, and κ in 8 bits and tan φ in 4 bits for the one coded block
+[measured; `rust/results/system/bd_p2c.out` build line and SYSTEM.md §2.1, §5, as read in DESIGN-CLAIMS C5.1; checked
+by the referee §4.1]. A coded block **rises** at a level when it is newly coded there or its rate grows, and each rise
+makes the item read and decode that block's κ and tan φ again.
+
+### 4.9.1 The model
+
+Everything in §4.9.2, the frontier of §4.9.3, §4.9.5 and §4.9.6 that carries [model] or [computed] is derived in one model
+[DESIGN-CLAIMS §0]. Write Δ·r = Σᵢ √γᵢ·gᵢzᵢ in the eigen-coordinates of chapter 0, with g and z independent standard
+Gaussians. A **layout** is a set D of coordinates certified deterministically and blocks T_1, …, T_J that are rotated
+and coded at R_j bits a position, with H_D nats of deterministic code on D and H_j nats of prefix on block j. Its
+half-width and its bits are
+
+    h = W_D(H_D) + c·√( Σ_j W_{T_j}(H_j)²·t(R_j)/d_j ),     bits = (H_D + Σ_j H_j)/ln 2 + Σ_j n_j R_j,
+
+with t(R) = 1/(4^R − 1), the cap bound on tan²φ from `codes/REPORT.md` [proved, unrefereed there]. The deterministic
+term is chapter 2's floor (Theorem 2.24) and the block term is Lemma 3.1 at the sphere bound, so an "ideal" comparison
+sets a floor against an achievable ideal, and does not say which built code wins [referee §1]. The **built** curves
+multiply tan φ by the codes track's one-rate ratio ρ_c(R) (1.305 at 1 bit, 1.41 at 2, 1.69 at 7) and by 1.0245 for the
+stored scale, and multiply the deterministic floor by 1.19 [measured; `codes/out_built.txt`,
+`reports/bounds3/scale_check.log`, `quant/REPORT.md`, as read in DESIGN-CLAIMS §0]. In the layout programme that factor
+instead rises from 1 at no bits to 1.19, a ramp the source calls an estimate, and each coded block is charged 16 bits
+of scalars [model; DESIGN-CLAIMS C3b.2]. The spectra are groups 12 and 6 of
+`agent1/spec_v1.json`, a 200k PCA subset with pseudo-query offsets, not the 1M index's dual basis, and c is 8 unless
+stated.
+
+The referee adds four omissions [referee §1]. First, **nesting**: the built block 0 at 56 B is a nested code that also
+serves the later rises, and it is 1.625 times the sphere bound at its 2-bit rise (`codes/REPORT.md`, nesting 1.157), or
+1.65 with the stored scale on the dump, where the model uses the one-rate 1.41. The model's first-level block is
+therefore about 15% too good in tan φ. Second, the factor 1.19 is held constant at every rate, and that alone drives the
+built-curve optimum's long prefixes, so those prefixes are a consequence of the assumption and not a finding. Third, the
+index stores ‖y_j‖ for every block, where the model's D carries one 0.5 B norm. Fourth, the scale η_i of an item is
+1.28 to 1.52 times the model's on the dump (§4.9.3).
+
+### 4.9.2 The hand-over from deterministic to randomised levels
+
+A rotated block T of n_T positions at R bits a position is narrower than its own zero-bit Cauchy–Schwarz bound exactly
+when c²·tan²φ < d_T. At the sphere bound this needs B₀ = (n_T/2)·log₂(1 + c²/d_T) bits, which tends to
+c²/(2 ln 2) = 0.721·c² as d_T grows: 35.7 bits at c = 8 and n_T = 96, and 46.2 bits for a long block [model; DESIGN-CLAIMS C3a.1; recomputed by the
+referee §2]. A sign per position needs c²π/2 bits in the limit, 100.5 at c = 8, which is π ln 2 = 2.18 times more.
+
+Beating the same bits spent deterministically is harder. The block wins at B = n_T·R bits exactly when
+
+    c²/(d_T·(4^R − 1)) < ω_T(B ln 2)²,
+
+so a flat block wins iff d_T > c² and B > B₁ = (n_T/2)·log₂(d_T/(d_T − c²)), which is 77.6 bits at c = 8 and
+n_T = 96 [model; DESIGN-CLAIMS C3a.2; recomputed by the referee §2]. At high rate the condition becomes
+d_T·(GM/AM)² > c², with AM and GM
+the arithmetic and geometric means of the block's amplitudes: a rotation pays the block's spread of amplitudes and a
+deterministic code does not [model; same source].
+
+The first randomised level sits just on the losing side of this margin. With built codes the block of 96 at 2 bits
+wins when c·(tan φ over the sphere bound)·1.0245/1.19 < √(d_T·(1 − 4^(−2))) = 9.44. With its own constant 6.931 and the
+measured nested code (1.625) the left side is 9.70, 3% on the losing side; with a one-rate
+code it would win by 11% [model; the referee §2, E1, which corrects DESIGN-CLAIMS C3a.2]. The nesting of §4.9.1 is
+therefore what puts the first level on the wrong side.
+
+Over the whole frontier the hand-over follows [computed in the model; DESIGN-CLAIMS C3b.3; `c3b_g12_c8_ideal.log`,
+`c3b_g12_c8_built.log`]. With ideal curves a layout found by the search first beats the deterministic code at 16 B,
+and none found does at 12 B. With the built codes the first such budget is 40 B, by 3%, and none found does at 32 B, so
+the hand-over lies between 32 and 40 B in the search. The search is local, so each figure is an upper bound on the
+hand-over budget; a wider search by the referee, with ideal curves, improved the frontier by at most 0.2% at 32 and
+56 B [referee §3, §3a]. The built schedule hands over at 32 B, where the built codes put it. Group 6 gives the same
+budgets [computed; `c3_tables.log`, `c3b_g6_c8_*.log`, `c3c_g6_c8.log`]. The hand-over moves as c²: at c = 4 it is at most 4 B with ideal curves and at most 8 B with built
+ones [computed in the model; DESIGN-CLAIMS C3b.4 item 2, with the referee's "at most"]. These c = 4 figures describe a
+certificate of the same form at a larger failure probability; they do not describe the approximate mode as built,
+whose deterministic levels are read with a statistical width rather than against W [DESIGN-CLAIMS C3b.4 item 4]. At
+equal bytes the best layout found is at least 1.4, 2.1 and 2.7 times narrower than the deterministic code alone (W) at
+32, 96 and 256 B with ideal curves, and at least 1.2, 1.5 and 1.9 times narrower than the built deterministic code
+(1.19·W) at 56, 96 and 256 B with built ones [computed in the model; same sources].
+
+In time the first rotated block is itself at the margin. With a block-rise charged at its decode time (§4.9.4), coding
+no block at the first level is between 3% wider and 11% narrower than coding one, and the crossover, 1.7 ns a
+block-rise, lies inside the decode-alone range of 1.4 to 2.8 ns [model; DESIGN-CLAIMS C5.3 item 3; the referee §4.2, who finds "one rather
+than none" not robust]. The "none" side also uses 1.19·W at 556 to 1,044 bits, beyond the 296 bits at which 1.19 was
+measured, so this point stays open.
+
+Under chapter 3's Theorem 3.11 (R8), taken at its worst-case half-width (Ê = 0), a coded block is never wider than its
+own Cauchy–Schwarz bound, so B₀ disappears; and a flat block with d_T > c² beats the same bits spent deterministically
+from its first bit, while one with d_T ≤ c² never does [the interval is proved, refereed (chapter 3); the numbers are
+model; the referee §4.4, restating DESIGN-CLAIMS C5.4 for R8]. On the built layout this is worth little, because
+chapter 3 records ξ² = 0.092 at 56 B on the dump and 0.6% of bytes.
+
+### 4.9.3 The rate–margin law for bytes read
+
+**The law** [model; DESIGN-CLAIMS C4.1 items 1 to 3; the algebra checked by the referee §5]. Item i has margin
+|s_i − t|, scale η_i and normalised margin ũ_i = |s_i − t|/η_i.
+
+1. *Per item.* An item is decided at the first level whose half-width is below its margin, up to the error of the
+   estimate: it survives a level of normalised width w̃ exactly when |ũ_i + (w̃/c_e)·Z| ≤ w̃, with Z the standardised
+   error. So the bytes an item reads are a function of ũ_i alone, a staircase that steps at the level widths.
+2. *Per query.* bytes = Σ_ℓ b_ℓ·#{i : ũ_i < w̃_(ℓ−1)}, which is Lemma 4.4's shell count with the margin measured in
+   units of each item's own scale.
+3. *Local form.* Along the frontier, dB*/d log₂(1/ũ) = n_⋆(ũ), so the bits per item are
+   ∫₀¹ n_⋆(ũ)·Pr[ũ_i < ũ] d log₂(1/ũ), with i a random item: each halving of the width costs n_⋆ bits for every item still inside the shell of
+   that width. At an optimum n_⋆ = Σ_j n_j cos²φ_j for a rotated layout and W_T/λ_w for a deterministic one, and this
+   identity holds along the computed frontier to within 4% from 24 to 256 B [model and computed; DESIGN-CLAIMS C3b.1
+   item 4 and C3b.3 item 6; derivation checked by the referee §3].
+4. *Corrected.* Query type enters through ũ and through the class's own level widths w̄_ℓ, not through ũ alone. Within
+   a class the answer size enters only through ũ, and the visible set is untested [measured; RESULTS §2; the referee
+   §5, which replaces DESIGN-CLAIMS C4.1 item 4].
+
+On the model's frontier (group 12, c = 8, ideal curves) an item at a tenth of its zero-bit bound needs at most about
+56 B (the frontier is at 0.102 there), one at a hundredth at most about 215 B, and each further halving tends to n bits (96 B), so the law is not a power law
+[computed in the model; DESIGN-CLAIMS C4.1; the referee §3 and §5 make these upper bounds and find 217 B by
+interpolation]. The deterministic floor alone needs about 96 B at a tenth [computed in the model; same source].
+
+**The dump test** [measured; RESULTS §1 and §2]. The 50k verify dump holds 9,736,897 index-plan records from 10 item
+and 10 text queries at seven answer sizes (0.01% to 75%) over 49,500 BioCLIP-2 rows (n = 768); scripts
+`c4_dump_test.py`, `c4_dump_test_replay.py`, `t2_criteria.py` and `t5.py`. It was recorded at the constant 9.33, and
+smaller constants are replays of the same records in which a record counts only if its item survived every earlier
+level; without the replay the test reads T3 as 0.957 at today's constants, with it 1.000. The scale η_i is the
+blockwise Cauchy–Schwarz bound after the 32-byte prefix, so the dump tests the law in that normalisation and not in
+the zero-bit one of the frontier above [referee §5]. Its findings, with the same verdicts at every constant tested:
+
+- Each level's normalised width is a property of the level: the sd of ln w̃ is 0.061 to 0.146 in every (class, level)
+  cell, against a refutation threshold of 0.3.
+- Survival against ũ is the predicted step: the half-survival point is at 0.990 to 1.005 of w̄_ℓ in all 24 cells, and
+  the 10–90 span is 0.67 to 1.13 of the predicted one.
+- **The law predicts each query's bytes (T3).** Predicted over actual bytes of the randomised levels and full vectors
+  is 1.001 pooled at 9.33 and at 8, and 1.000 at 6.724/7.639; the rms relative error per (query, size) is 0.049 to
+  0.051, the worst 0.17 to 0.18 at item 0.01%, where the answer is 5 rows. T3 uses each class's own w̄_ℓ.
+- Item and text survival differ by up to 28, 14, 20 and 40 points at the same ũ at the four levels (at 9.33; 27, 12,
+  19 and 35 at 6.724/7.639), because text's w̄_ℓ
+  is 5% to 19% larger; with ũ divided by each class's w̄_ℓ they agree within 2.4 to 6.1 points. This is item 4 above.
+- The bits added per halving of w̄_ℓ are 0.92 to 1.23 of Σ_j n_j cos²φ_j at the level entered (T5, at 9.33 and 8), and the one step
+  below 1 is within the scalars' share of that step.
+- The estimate's error costs nothing net: decided on true margins with the same half-widths the law reads 238.0 B per
+  item of N at item 50% (c = 8) and the index 237.9 [measured; RESULTS §3.1].
+
+The dump has no record below 56 B, so the hand-over, the deterministic staircase and a query's absolute bytes are out
+of its reach [RESULTS §5; DESIGN-CLAIMS C4.4].
+
+**Where the model's inputs are wrong** [measured; RESULTS §3.2, `step3.py`, `chain_table.py`, `step3_c8.log`,
+`chain_table.log`, 50k dump, c = 8]. DESIGN-CLAIMS C4.2 evaluated the law with Gaussian scores and one scale per group,
+and it under-predicted in-distribution queries at large answers by a factor of 2. A chain of substitutions from that
+model (130.8 B per item of N at item 50%) to the index (272.0 B) changes one input at a time, so the factors multiply
+to the whole:
+
+| Cell | Model | Index | Factor | Margins | Deterministic levels | Scale η | Normalised widths | Estimate |
+|---|---|---|---|---|---|---|---|---|
+| item 10% | 67.5 | 69.6 | 1.03 | 0.69 | 1.27 | 1.27 | 0.92 | 1.00 |
+| item 50% | 130.8 | 272.0 | 2.08 | 1.68 | 1.035 | 1.28 | 0.935 | 1.000 |
+| text 50% | 297.6 | 398.2 | 1.34 | 1.10 | 1.01 | 1.17 | 1.03 | 1.00 |
+
+The factor is the model's error, not the index's. Given each item's margin and scale, the index's randomised levels
+read what the law says (the estimate term is 1.000), and their normalised widths are 0.81 to 1.03 of the model's built
+schedule. The model is wrong in two inputs. Its **Gaussian margins** are wrong by a factor 1.68 at item 50%, because
+in-distribution scores are 1.5 to 2.1 times as dense within 0.0025 to 0.04 of the median threshold as a Gaussian of the
+same sd; this term is specific to in-distribution queries at large answers, being 1.10 for text at 50% and 0.69 for
+items at 10%. Its **scale η** is wrong by a factor 1.28 in bytes: each entrant's scale after the prefix averages 0.0796
+at item 50% against the model's equivalent 0.0524, 1.52 times, which makes the absolute half-widths 1.23 to 1.59 times
+the model's. This term is common to both classes (1.16 to 1.23 for text, where the scale factor 1.742 fitted in DESIGN-CLAIMS
+C4.2, the source's κ, had absorbed it at 1M). For item queries η_i falls with the answer size (0.103 at 0.01%, 0.080 at 30% to 75%),
+which refutes in direction the cause C4.2 had suggested [measured; RESULTS §3.2; the referee §5]. The dump holds only
+the product Σ_j ‖y_j‖‖Δ_j‖, so the η term cannot be split between the offset, the residual and the 50k index's
+three-group basis. If both terms carried to 1M, the model's 131.7 B at item 50% would become 131.7 × 1.68 × 1.24 =
+274 B against the 276.2 B measured there; that is arithmetic on two factors, not a measurement [model; RESULTS §5;
+the second factor is not the scale term's 1.28 (Editor's query 27)].
+
+DESIGN-CLAIMS C4.3 splits the model's bytes into floor, level spacing, layout, code distance, and scalars and key. That
+is a split of the model's bytes, not of what the index reads, and its "code distance" column understates the first
+level, whose block is nested (§4.9.1) [the referee §5 and §7]. The code distance is a distance to the sphere bound and
+not a recoverable saving: the codes track puts the best package that keeps the decode at about 3% of bytes
+[estimate in `codes/REPORT.md`, entered here as model; the referee §6 item 7].
+
+### 4.9.4 The price of a stored scalar
+
+**In bytes** [measured; `bd_p2c.out` build line, read in DESIGN-CLAIMS C5.1; the referee §4.1]. The stored bytes per
+item, cumulative by level with the key, are 6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8 and 276.3. One
+(item, coded block, rise) costs 1 to 1.5 B (κ at 4 or 8 bits and tan φ at 4 bits), and each block costs 1 B of ‖y‖
+once. That is about 1% of what an item reaching 256 B stores, and the scalars are 4% to 5% of what a query reads at
+item 50% (about 14 of 301 B) [model on measured sizes; DESIGN-CLAIMS C5.1].
+
+**In time** [measured; SYSTEM.md §4.2 = `bd_p2c.out`, profiled, 999,000 BioCLIP-2 rows, one thread; as in §4.4's timed
+cost]:
+
+| ms per query at 1M | Item 1% | Item 50% | Text 1% | Text 50% |
+|---|---|---|---|---|
+| Level decode | 1.24 | 18.23 | 7.36 | 19.55 |
+| Bounds and decisions | 1.19 | 21.23 | 8.23 | 22.66 |
+| of which the randomised scalars' decode | 0.58 | 10.78 | 4.20 | 11.61 |
+| Re-pack and compaction | 1.66 | 9.14 | 7.97 | 8.90 |
+| Full vectors | 0.86 | 10.90 | 1.11 | 13.54 |
+| Profiled wall | 12.79 | 87.69 | 47.97 | 93.34 |
+| Scalars' decode, share of the wall | 4.5% | 12.3% | 8.8% | 12.4% |
+
+To turn the scalar phase into a cost per rise needs the number of rises decoded, which the breakdown does not print.
+DESIGN-CLAIMS C5.1 infers 5.4 to 6.0 rises per item of N at item 50% from the shares entering each level, and so
+**about 1.4 to 2.8 ns per (item, coded block, rise)** for the decode alone [model: a measured phase over inferred
+counts; DESIGN-CLAIMS C5.1]. **The referee finds this figure uncertain by a factor of 2 and biased high** [referee §4.1].
+The entering shares come from SYSTEM.md §4.1, which is the final build (constants 6.931/7.963), while the phases come
+from the p2c build (7.413/9.086), which sends more items deeper; the inferred count is therefore low and τ_rise high. The dump test's 5.60 rises per item of N at item 50% (5.73 at c = 8) agrees with the
+inferred count, on a different index [measured; RESULTS §4]. The all-in figure, 3 to 10 ns per extra (item, coded
+block) at the first level, rests on one sentence of `rust/REPORT_BOUNDS.md` Part 2 ("8–24% slower at 1M") that names
+no cell or build, and that trial changed every level's rates as well as the number of blocks, so it is uncertain by a
+factor 3.3 and confounded [referee §4.1].
+
+For scale, from measured phases over inferred counts at item 50%: τ_byte is about 0.133 ns per code byte, τ_lvl about
+3.2 ns per (item, level) (2.4 to 3.6 ns depending on which phases are counted), and a full vector about 104 ns [model;
+DESIGN-CLAIMS C5.1; the referee §4.1]. So one block-rise costs 1 to 1.5 B but as much time as decoding 11 to 21 B of
+code at the decode-alone figure. By 256 B an item has paid 11 block-rises, 15 to 110 ns, against about 34 ns to decode
+its 253 B of code [model; DESIGN-CLAIMS C5.5, entered by the referee §7]. The direction this points is fewer rises per
+item, not more blocks per level.
+
+The constant is a second cost of a coded block: it is 6.931 with one block coded and 7.963 with several at 1M (chapter
+3 §3.9), so a level that codes a second block pays 15% on its whole random term [computed; DESIGN-CLAIMS C5.1].
+
+**The design rule that follows.** A proposal that changes the codes or the schedule is costed twice: in bytes, and in
+time per stored scalar read and decoded, with each (item, coded block, rise) and each level entered counted. The
+analyses of DESIGN-CLAIMS C3 and C4 counted the first and not the second, and the conclusions that changed are listed
+in §4.9.6 [a rule of method, from DESIGN-CLAIMS C5 and the measurements above; no status tag applies].
+
+### 4.9.5 The first randomised level with the scalars charged
+
+**The cost of one more coded block** [model with measured costs; DESIGN-CLAIMS C5.2, `c5a.py`, `c5a.log`]. A
+narrower first level changes one count, the share of items entering 96 B, because an item enters a later level when its
+margin is inside the previous level's width and the later widths do not move. Per item of N, with J blocks coded at
+56 B in place of one,
+
+    Δtime = e_56·(J − 1)·τ_rise − Δe_96·(τ_lvl + 36·τ_byte + 3·τ_rise),
+    Δbytes = e_56·(J − 1)·1.5 − Δe_96·(36 + 4.5),
+
+with Δe_96 the fall in the share entering 96 B. On the margins of DESIGN-CLAIMS C4.2, coding three or four blocks
+would save time only below 0.3 to 1.1 ns a block-rise, under the decode-alone figure, because every entrant pays for the
+extra blocks and only the fraction then decided is saved. Two blocks at free rates is the one alternative near the
+margin, paying below 1.5 to 3.3 ns at 1% answers and 0.7 to 1.5 ns at 50%. In bytes two or three blocks at free rates
+save 0.2 to 2.9 B per item of N.
+
+The model over-predicts what a narrower first level gains: it gives a fall of 6% to 26% in the items entering 96 B
+where the native trial of three coded blocks at 56 B measured 2% [model against measured; DESIGN-CLAIMS C5.2 item 4,
+kept by the referee §4.1]. The likely cause is the model's block norms after the prefix, since the index's block 0 is
+about 1.5 times heavier [model; DESIGN-CLAIMS C5.2 item 4 and C3 (c) item 4].
+
+**The layout programme with a charge per coded block** [model; DESIGN-CLAIMS C5.3, `c5b.py`, `c5b.log`; the rows at 1 and
+2 B are the referee's rerun of the same code, `referee/rd_c5b_s.py`, `rd_c5b_s.log`]. The programme of §4.9.1 at the
+built level's budget (56 B of code), group 12, built curves, with b_blk charged per coded block and the exact
+one-block constant for one block (6.931 at d_T = 95) and 7.963 for two or more (certified for the built layout only, an estimate for the
+others). In time, b_blk = τ_rise/τ_byte turns the time objective into bytes of decode. Half-width h/F:
+
+| b_blk | None | One block | Two | Three | Four | Best |
+|---|---|---|---|---|---|---|
+| 1.0 B | 0.2106 | 0.1755 | 0.1720 | 0.1651 | 0.1661 | three, −5.9% |
+| 1.5 B | 0.2089 | 0.1755 | 0.1740 | 0.1691 | 0.1720 | three, −3.6% |
+| 2.0 B | 0.2073 | 0.1755 | 0.1760 | 0.1728 | 0.1787 | three, −1.5% |
+| 2.5 B | 0.2056 | 0.1755 | 0.1780 | 0.1769 | 0.1853 | one, by 0.8% |
+| 11 (1.4 ns) | 0.180 | 0.1755 | 0.218 | 0.283 | 0.411 | one |
+| 14 (1.9 ns) | 0.172 | 0.1755 | 0.235 | 0.343 | 0.645 | none |
+| 23 (3 ns) | 0.151 | 0.1755 | 0.299 | 0.716 | | none |
+
+Three readings, as the referee corrected them [referee §4.2, replacing DESIGN-CLAIMS C5.3 item 1]:
+
+1. **In time, at most one coded block at the first randomised level.** From b_blk ≈ 10.5 (1.4 ns) on, two blocks are
+   at least 24% wider than one (0.218 against 0.1755 at 11), and the native trial lost on time. This holds over the
+   whole range 1.4 to 10 ns, and the model's over-predicted gain only widens the margin.
+2. **In bytes, a near-tie.** One block wins above about 2.3 B per coded block and three blocks below it. The index
+   stores ‖y_j‖ for every block whether coded or not, so the marginal stored cost of one more coded block is κ and tan φ
+   only, 1 to 1.5 B, at which three blocks win by 3.6% to 5.9% (the referee's "4 to 6%") in the model. Every margin
+   here is a few percent, below the model's known errors.
+3. One block against none in time is undecided (§4.9.2).
+
+The later levels are not affected in the same way. Charged 2.5 B per coded block in stored bytes, at the budgets of
+104.9, 174.8 and 274.3 B, the programme codes three, four and two blocks (0.0726, 0.0282 and 0.0100 of F), so charging
+the scalars in bytes does not reduce the number of blocks there [model; DESIGN-CLAIMS C5.3 item 4].
+
+**Several blocks under Theorem 3.12** [model; the referee §4.4, `referee/rd_c5c_r8.py`, `rd_c5c_r8.log`]. Chapter 3's
+Theorem 3.12 is a proved several-block interval (R8 for several blocks, [proved, refereed] there): at Ê = 0 its
+half-width is c·sd/√(1 + ξ²) with one pooled ξ² = c²/Θ and Θ = Σ_j d_j/tan²φ_j. Θ is dominated by the finest-coded
+block, so the shrink is small. The referee recomputed the first-level alternatives with it, in DESIGN-CLAIMS C5.4's
+model, against the built level under Theorem 3.11 at Ê = 0 (0.2394·F):
+
+| First level | ξ² | h/F | Against built | Saves time below (four cells) | Bytes per item of N (item 1%, item 50%, text 1%, text 50%) |
+|---|---|---|---|---|---|
+| Three blocks at 1, ½, ⅛ bit | 0.27 | 0.1825 | −23.8% | 0.5 to 1.5 ns | −0.3, −2.0, −3.3, −1.1 |
+| Four blocks at ½, ½, ⅛, ⅛ | 0.43 | 0.1981 | −17.3% | 0.2 to 0.6 ns | −0.1, −0.2, −1.3, +1.5 |
+| Two blocks at 0.93, 0.80 (free) | 0.23 | 0.1856 | −22.5% | 1.1 to 5.8 ns | −0.4, −2.6, −3.7, −2.2 |
+| Two blocks at 1, ½ (menu) | 0.29 | 0.2138 | −10.7% | 0.4 to 1.4 ns | −0.1, −0.8, −1.5, −0.1 |
+
+These figures replace DESIGN-CLAIMS C5.4's two brackets, an unproved per-block approximation and a sketch, neither of
+which enters. Three blocks are about 24% narrower in the model, but they save time only below 0.5 to 1.5 ns a
+block-rise, which is under the decode-alone 1.4 to 2.8 ns in every cell but text 1%. Two blocks at about 1 and ¾ bit at
+free rates remain the one multi-block first level that could pay in time, more at 1% answers than at 50%. All of these
+figures carry two cautions: the model's first-level block is about 15% too good in tan φ, because it uses the one-rate
+code figure where the built block is nested (§4.9.1), and the model's gain at this level was several times the trial's.
+
+### 4.9.6 What survives as a candidate, and what is withdrawn
+
+**The candidate: one wider block at the same 24 B** [model; DESIGN-CLAIMS C5.3 item 2, `c5e.py`, `c5e.log`; C5.7 V1].
+Keep the 256-bit prefix and the 24 B of code, and widen block 0: 192 positions at 1 bit give 0.194·F (−19% against
+the built level's 0.2405·F under the plain rule), 224 positions at 0.86 bit 0.192 (−20%), and 256 at ¾ bit 0.192. With
+the norms rescaled so that block 0 holds 48% of the sum after the prefix, as the dump's level-0 means suggest (the model
+has 38%), the three give −14%, −14% and −13%. Under Theorem 3.11 at Ê = 0 the first and last give −22% and −26%, and
+−17% and −19% with the dump-like norms [model; the referee §4.4]. The candidate has one block-rise, the same code bytes
+and the same scalars as the built level, so it survives the scalars. Its source expects a few percent rather than 14,
+because the model over-predicted the trial's gain several times. Two later facts pull in opposite directions [the
+referee §6 item 6]. Nesting favours it: in a 1-2-3-4 schedule the 1-bit first rise has no nesting loss, while the
+built 2-bit rise carries 1.157 (`codes/REPORT.md`). The dump caps it, as follows.
+
+**The cap on any change to the first randomised level** [measured; RESULTS §3.3 and §4, `step3.py`, `step3_levels.py`,
+50k dump, c = 8]. At 56 B the uncoded blocks' Cauchy–Schwarz term is 76% of the mean half-width over entrants for item
+queries and 81% for text (79% and 84% at 6.724/7.639), where the model has 84%. Setting that term to zero cuts the
+randomised bytes at item 50% from 238.0 to 206.5 B per item of N, so **any change to that level can save at most
+31.5 B per item of N, 13% of the randomised bytes, at item 50%**. The test that would decide the candidate must
+rest on exact entrant counts multiplied by per-unit costs from the phases, because its predicted time gain at item 50%
+is about 1 ns per item (1.3% of the query) against ±5% timing noise [model; DESIGN-CLAIMS C5.7].
+
+**Withdrawn: coding every block at the 56-byte level.** DESIGN-CLAIMS C3 (c) item 1 recommended coding all four blocks
+there, since the uncoded blocks dominate its width, and a sub-bit code where it would pay most. On time it loses at
+every block-rise cost the sources allow (§4.9.5), and the native trial of three coded blocks at 56 B (`--design-exact`)
+cut the items entering 96 B by 2% and was 8% to 24% slower at 1M [measured; `rust/REPORT_BOUNDS.md` Part 2, one
+sentence, as read in DESIGN-CLAIMS C5.1]. In bytes it is the near-tie of §4.9.5. The codes track closed the code change
+as well: nested, table-decodable codes keep 6% to 8%, the one-rate gains do not survive nesting, and a one-rate sub-bit
+code applies only to a block whose last rise is its only rise, which no block at 56 B is [measured; `codes/REPORT.md`;
+the referee §6 item 1].
+
+Other conclusions of DESIGN-CLAIMS C3 and C4 that the scalars change [model; DESIGN-CLAIMS C5.6, with the referee §4.1
+and §7]:
+
+- The ideal optimum codes every coordinate from the first rotated bit only if scalars are free; at 2.5 B per coded
+  block it codes one block at the first level, and in time one or none.
+- The scalars are 5% to 25% of the model's bytes, but 8% to 52% of the per-item time, depending on the cell and on
+  τ_rise.
+- More levels lower the spacing loss in bytes; in time each level entered costs about 3.2 ns per entrant and its rises,
+  and it is the largest component in every cell only for τ_rise ≤ 3 ns [the referee §4.1, E4]. `rust/REPORT_RAND.md`
+  measured this direction: going from 14 levels to 4 was faster at every cell for 3% to 11% more bytes [measured, as
+  read in DESIGN-CLAIMS C5.5].
+- For an interval narrower than the plain rule, implement R8 (chapter 3's Theorems 3.11 and 3.12); the one-block
+  shrunk-centre interval (A4) alone is not a better one-sided bound [the referee §4.4 and §6 item 5].
+
 ## Open
 
 - **Item-by-item floors.** Claim 4.9, that shared summaries cannot lift a fixed-k query off linear growth in the family
@@ -718,6 +1089,31 @@ in that shape at 1M as 4 to 9 times fewer rows than reading parents whole].
 - **Cluster size for the exact path at scale.** The linear-in-N time model of rust/REPORT_CLUSTERSIZE.md is fitted to
   profiled phases at 1M and was not measured at larger N; no sizes between 1,000 and 4,000 or 4,000 and 16,000 were
   timed.
+- **The cost of a block-rise, measured.** τ_rise is inferred, 1.4 to 2.8 ns for the decode and 3 to 10 ns all-in. The
+  decode figure is uncertain by a factor of 2, because the entrant shares and the phases come from different builds,
+  and the all-in figure by a factor of 3.3, because it rests on one unattributed sentence about a trial that also
+  changed every level's rates. One build that
+  prints the block-rises decoded per query and the entrants per level, beside its phases, fixes it (DESIGN-CLAIMS C5.7
+  item 4; the referee §4.1). Whether the first level should code one block or none in time waits on it (§4.9.2).
+- **A native test of the 56-byte level.** One index, one set of queries and one binary differing only in the first
+  level: V0 as built, V1 one wider block at the same 24 B, V2 two blocks, V3 the `--design-exact` layout, with exact
+  entrant counts at every level, the level's half-width and its parts from a verify dump, bytes split into code,
+  scalars and full vectors, and time by phase. The model is believed only if the count entering 96 B alone moves, its
+  change is within a factor 1.5 of the prediction recomputed from the measured block norms, and the time difference
+  matches the cost formula of §4.9.5; on the earlier trial it fails the second test (DESIGN-CLAIMS C5.7).
+- **The hand-over and the deterministic staircase on data.** The dump has no record below 56 B, so the hand-over of
+  §4.9.2, the law's deterministic steps and a query's absolute bytes are untested; a dump extended to the six
+  deterministic levels would test them (RESULTS §5; DESIGN-CLAIMS C4.4).
+- **The rate–margin law under a visible set**, and with the zero-bit normalisation of its frontier table: both untested
+  (the referee §5).
+- **The two wrong inputs at 1M.** Whether the margins term (×1.68) and the scale term (×1.28) carry from the 50k dump
+  to the 1M index, what the scale term is made of (offset, residual or the 50k index's three-group basis), and why the
+  1M index reads 133.2 B at item 10% where the 50k index reads 69.6 B and the model 67.5 (RESULTS §3.2, §5).
+- **A lower bound on h*(B) over all layouts.** The frontier is a local search and an upper bound; no lower bound over
+  all layouts was found, and a continuous relaxation does not give one (DESIGN-CLAIMS, "What failed"; the referee §3).
+- **The built rates at 96 and 160 B.** With the 50k build's rates, blocks 0 and 1 carry about twice block 2's share of
+  the variance per unit of n_j cos²φ_j at 96 B, and block 0 about twice at 160 B, which is indicative of a misallocation and is not a finding (the referee
+  §4.3).
 
 ## Editor's queries
 
@@ -793,3 +1189,35 @@ in that shape at 1M as 4 to 9 times fewer rows than reading parents whole].
 20. **Pestov's status.** sublinear/REPORT.md §3.4 marks ref. 12 **cited** ("abstract only"), and its reference list says
     "abstract, partly paraphrased". An earlier draft downgraded it to [cited, unchecked]; the chapter now keeps the
     source's [cited], and the PI may wish to have stage 0's library check it.
+21. **Tags in §4.9.** DESIGN-CLAIMS labels the time per block-rise, the all-in cost, the per-level and per-byte times,
+    the 11 block-rises by 256 B, the codes track's 3%, the "one or none" comparison in time (C5.3 item 3) and the
+    deterministic factor's ramp (C3b.2) [estimate], which is not a tag of these notes. They enter as
+    [model], each with what it rests on (a measured phase over inferred counts), which is not an upgrade. The design
+    rule of §4.9.4 is a rule of method and carries no status tag; the PI may wish to state where such rules belong.
+    The referee's report verifies derivations and reruns but referees nothing as proved, so no §4.9 statement is
+    [proved, refereed] apart from chapter 3's Theorems 3.11 and 3.12, which it quotes.
+22. **Two normalisations of η_i.** The law's frontier table (§4.9.3) is in units of the zero-bit Cauchy–Schwarz bound;
+    the dump test measures η_i as Σ_j ‖y_j‖‖Δ_j‖ after the 32-byte prefix. The dump therefore confirms the law in the
+    second normalisation, and the frontier table is untested (the referee §5). The two are not converted anywhere in
+    the sources.
+23. **Builds, constants and sizes in §4.9.** The model uses c = 8; the dump was recorded at 9.33 (build p1c) and
+    replayed at 8 and at the 50k index's 6.724/7.639; the 1M index's constants are 6.931/7.963 and the profiled
+    breakdown's build p2c used 7.413/9.086. The 50k build codes all four blocks from 96 B, the 1M build blocks 0–2 at
+    96 and 160 B, so its stored bytes differ (107.5 and 175.2 against 106.9 and 176.8 B). DESIGN-CLAIMS C5.1 also
+    corrected its own stored-bytes list for C3 (c) and C4 at four levels; the C4.2 figures quoted in §4.9.3 used the
+    older list, and the totals move by under 2%.
+24. **§4.4's timed cost and the mixed builds.** §4.4 quotes SYSTEM.md §4.1's entering shares (91% and 20% at item 50%)
+    beside the fixed costs from `bd_p2c.out`. The referee (§4.1) finds that §4.1 is the final build and `bd_p2c.out`
+    the p2c build, which sends more items deeper, so any per-item cost derived from the two together is biased; §4.4
+    does not divide one by the other, but a reader may. The text 1% sentence of §4.4 ("95% enter the first level and 46%
+    reach 56 bytes") uses "first level" for the candidate share, where §4.9 uses "first randomised level" for 56 B.
+25. **"4 to 6%".** The referee states that three coded blocks win by 4 to 6% at 1 to 1.5 B per coded block; its own
+    table gives 5.9% at 1 B and 3.6% at 1.5 B. §4.9.5 gives both.
+26. **Where the source and the referee disagree on the first level.** DESIGN-CLAIMS C3a.2 puts the first randomised
+    level 11% on the winning side of the high-rate margin at its own constant; the referee (E1) puts it 3% on the
+    losing side with the nested code. §4.9.2 follows the referee, and gives the 11% only for a one-rate code.
+27. **The second factor in "131.7 × 1.68 × 1.24".** RESULTS §5 carries "both terms", margins and η, to 1M as
+    131.7 × 1.68 × 1.24 = 274 B, and the referee does not comment. The η term of RESULTS §3.2 is 1.28, not 1.24; the
+    1.24 matches the product of the η, normalised-width and deterministic terms (1.28 × 0.935 × 1.035 = 1.239), which
+    would make the sentence carry every non-margin term rather than η alone. The source does not say which it meant,
+    so §4.9.3 quotes the arithmetic as written; the Open item on the two wrong inputs quotes ×1.28.

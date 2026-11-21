@@ -67,3 +67,22 @@ chapters, and lists the letters whose meaning depends on the chapter.
 | λ | a price or Lagrange multiplier, declared where used |
 | w | a slack (4); a cost in rows (5) |
 | g | a standard Gaussian vector (2); g_c above (5) |
+
+The first pass of the theory program renamed these letters of its tracks and referees, because each source letter already
+has another meaning in these notes. Each chapter declares them in its Local symbols.
+
+| Chapter | Written here | The source writes | Meaning |
+|---|---|---|---|
+| 1 (§1.2) | δ_â | δ (range referee) | the widening of the sorted range |
+| 1 (§1.8) | ψ_ℓ, ψ_max | D_ℓ, D_max (kernel referee) | the dial of level ℓ and its largest value over the deterministic levels |
+| 1 (§1.8) | ū | u (kernel referee) | the f64 rounding unit 2⁻⁵³ |
+| 1 (§1.8) | ρ_e | ρ (kernel referee) | an item's true weighted error norm at a level |
+| 3 (§3.6a, §3.7a) | ζ, ζ₀ | q, q₀ (confidence track) | the upper δ-quantile of one sphere coordinate, and a smaller trial value |
+| 3 (§3.7a) | ξ² | k | ζ²·tan²φ |
+| 3 (§3.6a, §3.7a) | v | s | the latitude Δ·y of the query relative to the item |
+| 3 (§3.6a, §3.7a) | ν | R | the rate in bits per degree of freedom |
+| 3 (§3.6a, §3.7a) | **c** | c | the stored message of one block of an item |
+| 3 (§3.7a) | κ, h₁, e_∥, e_⊥ | η, a and b | ‖ŷ‖ for the decoded estimate ŷ, the half-width per unit of ‖Δ‖, and the error's parts along and across y |
+| 3 (§3.6a) | λ | Λ | the expected number of codewords within θ of an item |
+| 3 (§3.6a) | I₀, I | J | the pair terms of Lemma 3.31 |
+| 4 (§4.9.2) | B₁ | B* (confidence design) | the bits at which a rotated block beats the same bits spent deterministically |

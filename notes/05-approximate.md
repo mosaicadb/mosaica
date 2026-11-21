@@ -3,18 +3,27 @@
 An approximate query decides every row it returns exactly: a returned row is visible and carries its exact score.
 Only recall and cost are therefore at stake, and this chapter is about how to spend reads on the rows most likely to be
 in the answer. It gives the theory of the cluster visit order (§5.2 to §5.6), what the replays measured (§5.7), the
-order and stop the library runs (§5.8), the statistical width at the levels (§5.9), the hierarchy results (§5.10),
+order and stop the library runs (§5.8), the stop on expected misses that was dropped and the stop against a fixed
+cluster count (§5.8a), the statistical width at the levels (§5.9) and the measured width that replaces it (§5.9a), the
+hierarchy results (§5.10), among them the tree read as a random energy model and its leaf floors (§5.10.1a),
 approximate threshold queries (§5.11), behaviour under visible sets (§5.12) and what was tried and rejected (§5.13).
 Chapter 4 §4.7 gives the measured scaling law of this read in N and cluster size.
 
-No result in this chapter has been refereed. The proofs come from four notes written by single authors, and no
-referee report under `proofcheck/` or `program/` covers them, so a proved result here is at most [proved, unrefereed].
-The references of these notes were collected by an agent or written from memory and were not each checked against
-the paper (`visit-order/README.md`; `hierarchy/theory.md`, References), so every cited result is [cited, unchecked].
+Most results in this chapter have not been refereed. The proofs of §5.1 to §5.12, outside §5.8a, §5.9a and §5.10.1a,
+come from four notes written by single authors, and no referee report covers them, so a proved result there is at
+most [proved, unrefereed]. Sections 5.8a, 5.9a and 5.10.1a come from the approximate track of the theory program
+(`program/approximate/CLAIMS.md`), which has two referee reports: `program/approximate/referee/referee-1.md` on A1 to
+A3 and `referee-2.md` on A4. The track revised A1 to A3 after the first report and nobody re-read the revision;
+nothing was revised after the second, and its verdicts are applied here. Each tag in those sections therefore says
+which text a referee read. The references of the four notes were collected by an agent or written from memory and
+were not each checked against the paper (`visit-order/README.md`; `hierarchy/theory.md`, References), so every result
+cited from them is [cited, unchecked]; §5.10.1a cites one paper whose statement was read.
 
 Source paths below are relative to `/home/joe/code/vexact-visitorder/bench/suite/notes/visit-order/` unless they
-start with `reports/`, which is relative to `/home/joe/code/vexact-theory/`, or with `region25-order/`, which is
-`/home/joe/code/vexact-sc/bench/suite/notes/visit-order/results/region25-order/`.
+start with `reports/` or `bench/`, which are relative to `/home/joe/code/vexact-theory/`, with `program/`, which is
+relative to `/home/joe/code/vexact-theory/notes/`, or with `region25-order/`, which is
+`/home/joe/code/vexact-sc/bench/suite/notes/visit-order/results/region25-order/`. The visit-order session's dumps and
+logs are named by absolute path.
 
 ## 5.0 Local symbols
 
@@ -51,11 +60,29 @@ rows). The chapter adds these.
 | δ (Theorem 5.13, Proposition 5.25, §5.12) | a bound on the log-ratio of an estimated value to the true one; chapter 0's failure probability δ does not appear here |
 | D | the total weight of the two difference sets (proof of Theorem 5.13); D_i the weights of a deterministic level, as in chapter 1 (Proposition 5.16); D the depth of a tree (Proposition 5.18); D_c the net value of a direct read (Lemma 5.22) |
 | Q_i | the query profile of coordinate i, as in chapters 1 and 2 (Proposition 5.16; the source writes π_i) |
-| L, T, U, A_j, K_j, v_j, ε, ε_j, θ_j (Proposition 5.18 only) | in model T: the number of target leaves, the target threshold, a leaf's key, a level-j node's key, the nodes at level j, the cumulative variances, the miss probability per level, the level-j noise and the level-j cut; chapter 0's L, T, U_j and ε do not apply there |
+| L, T, U, A_j, K_j, v_j, ε, ε_j, θ_j (Proposition 5.18 and §5.10.1a only) | in model T: the number of target leaves, the target threshold, a leaf's key, a level-j node's key, the nodes at level j, the cumulative variances, the miss probability per level, the level-j noise and the level-j cut; chapter 0's L, T, U_j and ε do not apply there. The track writes Y_j for A_j, f_j for ϑ_j, v for v_D and M for K_D. Chapter 0's A_j, the stored error scale, is used in §5.9a |
 | L(z) (Theorem 5.5) | E(Z − z)₊ for a standard normal Z |
 | G_c (Theorem 5.12) | E[N_c given the scores outside c]; chapter 0's group count G is written G without a subscript |
 | s_u(t) (Proposition 5.27) | unit u's share of the answer; an unsubscripted s is a score level, as above |
 | ρ_c′ (Proposition 5.15) | a cluster's scale in assumption (A1), proportional to rad_c |
+| ent_j (§5.10.1a) | ln K_j / ln K_D, the entropy position of tree level j (g_j) |
+| Π_step, Π, Π̂ (§5.10.1a) | the step profile that jumps by ϑ_j − ϑ_{j−1} at ent_j (A_step); the piecewise-linear profile through the points (ent_j, ϑ_j) of the branching levels (A); the concave hull of those points (Â). Π′ is the derivative of Π |
+| x_*, x_s (§5.10.1a) | √(2 log 2)·∫₀¹ √Π′ and √(2 log 2)·∫₀¹ √Π̂′: the algorithmic level and the ground state of a continuous random energy model, per unit of binary depth |
+| N′ (§5.10.1a) | the depth of a binary tree in the cited theorem (N there) |
+| 𝒢, 𝒬 (§5.10.1a) | the σ-field of the internal node values, and the set of leaves an algorithm queries (Q) |
+| p_i, p′_i, τ_{−i} (§5.10.1a) | leaf i's chance of being a target given 𝒢; its chance of being among the k best given 𝒢 and the other leaves; the k-th largest value among the leaves other than i, siblings included |
+| r, θ_r, B_leaf(r) (§5.10.1a) | a target recall; the parent's cut and the leaf floor at recall r (a_r and R(r)) |
+| e, σ̂, ϑ (§5.9a) | a row's error at a deterministic level, e = s − â, with â the level's midpoint (a); the spread of e over a cluster's rows (τ); ϑ = 1 − σ̂²/σ_c², the share of the score variance the level explains (f) |
+| e_vec, Δ̃, w, Δ̂, ẽ, ê, u, C_c, S_c, κ (Proposition 5.29) | the coding error as a vector; DΔ; w = ‖Δ̃‖, the query's factor of h (not a cost in rows there); Δ̃/w; D⁻¹e_vec; ẽ/u; u = ‖ẽ‖, the row's stored norm; the means of ê·êᵀ and of ẽ·ẽᵀ over the rows of c; in the proof, a row's error scale common to its coordinates |
+| z, ρ_es, ρ_ae, σ_a (§5.9a) | z = (s − μ_c)/σ_c as above (x); the correlation of e with s over a cluster's rows; that of â with e; the spread of â |
+| m (§5.9a) | the neighbours' slope of e/σ̂ on z. Chapter 0's bare m, a fixed cluster's centre, is always written m_c in this chapter |
+| ψ0, Y, n_s (§5.9a) | the multiplier of the scatter (not ψ_o, the order's multiplier); a width: a row is kept when â + Y ≥ t (y); the rows of a per-cluster sample (m) |
+| X_q, χ_X, a_G, e_G, κ_Δ, s_res, c0 (§5.9a) | in the track's model of a shared component: the part of a row's score it shares with the query (R), with an exponential upper tail of rate χ_X (λ_R); the coded and left-out parts of a typical residual's score; the share of the query offset's weight a level leaves out (κ_q, not §5.10.6's κ_q); the spread of the scatter about the model's line; the model's intercept far up |
+| â_R, v_R (Proposition 5.32) | a row's estimate at a randomised level R at which every block is coded (a_R), and its error variance over the seed given the stored scalars |
+| Vis, Σ_{c,left} (Lemma 5.31) | the event that a row is visible; the cross-covariance of a row with its coding error over cluster c (Λ_left) |
+| ν² (§5.9a) | the variance, in units of the scatter, of a width's error from a sample |
+| β_A, c_A, r_A, g, s_g, β_e, c₁, c₂ (§5.9a) | the share of the weighted error in r_A directions of a cluster's own, and c_A² that of the query's weighted offset (β, c², r); a neighbour's scatter about the line m·z·σ̂, in units of √ϑ·σ̂, of unit spread; the scatter's spread in units of σ̂, as it enters sd(e/σ̂ \| z) (s); Cov(e, s)/Var(s) (β); the coefficients of ν² |
+| var_i, dist_i, left_i, PR (§5.9a.7) | a coordinate's variance in the group's basis, its distortion at the level, the variance the level leaves of it (Λ, D, Λ_left); the participation ratio (Σx)²/Σx² |
 
 The named orders are: **O0** μ_c + ξ₀·rad_c (the library's original radius order, ξ₀ fitted on corpus rows); **O1**
 the order by μ_c alone; **O2** or `spread`, μ_c + ξ′·σ_μ(q)·rad_c/σ_rad; **O3** μ_c + σ_c(q)·z(k, n_c); **H**,
@@ -416,6 +443,52 @@ each cluster's shift exact, so δ_q = 0 and only ρ_q is estimated. Over pooling
 region-25 at recall 0.9 to 0.95 and 0.63 to 1.00 under random-1, for one pass over the visible rows a session, repaid
 after 70 to 400 queries under region-25 [measured] (`region25-order/README.md`). It is not built.
 
+## 5.8a The stop on expected misses, and the stop against a fixed cluster count
+
+**The stop on expected misses was dropped.** The approximate track studied a stop that predicts the true neighbours
+left in the unread clusters, Σ_{c unread} n_c^vis·Ĝ(ζ_c(t̂)) for an estimated tail Ĝ of the standardised
+within-cluster scores, and stops when that prediction falls under (1 − r)·k (`program/approximate/CLAIMS.md` A2). Its
+guarantee is weak where it holds: with the tail known exactly the stop bounds the mean recall of the queries that
+share a set of statistics, and in the model at r = 0.9 still 7% (normal scores) and 23% (Student-t, 5 degrees) of the
+queries fall below r [A2.1 proved, unrefereed: revised after referee 1, which found no error in items 1 to 3; the
+figures model, `program/approximate/referee/ref1_a2.py`]. Without the tail there is no guarantee to have, because a
+stop fed by the pooled sample that is valid for every shape needs about a tenth as many pooled rows as rows left unread
+for one expected miss [A2.2 proved, unrefereed, for a one-shot decision: revised after referee 1's two repairs; the
+sequential form a sketch]. Measured, the within-cluster tail is close to exponential (−d ln P/dz of 1.97 to 2.77
+between 3 and 6 spreads, against 4.7 for the normal), a tail estimated per query is off by a factor of 2 to 4 at the
+decision, and the stop selects the reads at which its estimate is low; in the idealised replay no stop on expected
+misses read fewer rows than the built stop on yahoo or LAION beyond noise, and no tail made the setting a recall
+[measured] (A2.3 to A2.6; `program/approximate/scripts/replay_np.py`). The proofs and tables belong to a later chapter
+of dropped work (Editor's query 22).
+
+**The idealised replay against a fixed count** [measured] (`program/approximate/CLAIMS.md` A2.6, items 1 and 4;
+`program/approximate/scripts/replay_np.py`, tables T7 and T8 of `program/approximate/out/tables.md`). Whole clusters were
+read in the order μ_c + 3σ_c with exact σ_c, on yahoo, LAION with text queries and glove, under no filter, random-25,
+region-25, region-1 and random-1, with k = 10 and 100 queries, so differences under about 10% are noise. The stop was
+the built one in an idealised form: every unread cluster priced, and δ_q and ρ_q pooled over every row read. Reading
+the same number of clusters for every query took 0.95 to 1.65 (yahoo), 0.77 to 1.44 (LAION) and 0.68 to 1.29 (glove)
+of the stop's rows at equal mean recall, over recall 0.9 to 0.99 and the five sets. Unfiltered it took 0.77 and 0.81 of
+the stop's rows on LAION at recall 0.98 and 0.99, and 0.68 to 0.81 on glove. The track read this as evidence that the
+pooled (δ_q, ρ_q) is not a calibrated p_c in the sense of Theorem 5.4.
+
+**On the library's reader** [measured, by the visit-order session; logs in
+/home/joe/code/vexact-data/sc-study/out-fixed2/] (`program/LOG-2026-11-21.md`, "The fixed-cluster-count replay on the real
+reader"). The session reran the comparison on the library's own stream, 100 queries, k = 10. The figures are the
+fixed count's rows over the stop's at recall 0.9 / 0.95 / 0.98 / 0.99, so a figure below 1 means the fixed count reads
+fewer.
+
+- The pooled stop (`b87f1513e`), unfiltered, wins on LAION (1.07 / 1.05 / 1.11 / 1.06) and on yahoo, landmark and
+  BioCLIP (1.42 to 1.87). The fixed count wins on arxiv (0.82 / 0.83 / 0.75 / 0.73), iNaturalist, glove (0.82 to
+  0.89) and SIFT.
+- The older stop (`f528836`) loses to the fixed count on LAION (0.60 to 0.82), which is what the idealised replay saw.
+- Under filters the pooled stop wins nearly everywhere (1% sets 1.03 to 1.4; BioCLIP 1.2 to 2.4). The exceptions are
+  iNaturalist under region-25, SIFT at 25% and arxiv under random-25 at high recall.
+
+The session's reading is that the per-query stop costs 5 to 25% against a fixed count on four datasets unfiltered and
+wins by more elsewhere and under filters, so there is room to improve the stop at high recall on those four and no
+case for a fixed count. It follows that A2.6's statement for LAION does not hold for the pooled stop as built, while
+its statement for glove does (Editor's queries 14, 15 and 23).
+
 ## 5.9 Rule 1: the statistical width of a level
 
 **The rule** (`hierarchy/layered.md` §4.1). The index holds, for every row of a cluster, ever finer descriptions: the
@@ -497,7 +570,384 @@ the rule to it needs more clusters and more bytes (glove at 0.95: 5.10 MB agains
 **As built** (`370580d8e`): each group stores ρ_{g,ℓ} per deterministic level from (5.6); the approximate k-NN sets each
 level's factor on its half-width to min(1, ψρ_ℓ), ρ_ℓ the median over groups, and the randomised levels take the last
 deterministic level's. Exact queries and the approximate threshold query keep certified widths. Nothing is calibrated.
-The build is not yet timed.
+The build is not yet timed. The derived ρ turned out too narrow with few groups for the dimension, and a width of ψ
+spreads loses neighbours even when the spread is right; the visit-order session's build has since taken the measured
+rule of §5.9a (`program/LOG-2026-11-21.md`; no commit is recorded).
+
+## 5.9a The level width, measured
+
+Rule 1 sets a level's width from the build alone. The visit-order session measured it on per-row dumps and found two
+faults: the derived spread is too narrow when there are few groups for the dimension, and even with the right spread
+a width of ψ spreads loses about a fifth of the true neighbours, because a neighbour's error is not a typical row's.
+The rule that replaced it is measured and fitted, and it holds under a condition stated below; it is not derived. This
+section gives the measurements, the rule, and the results of the approximate track that bear on it
+(`program/approximate/CLAIMS.md` A4, refereed in `program/approximate/referee/referee-2.md`).
+
+Unless a bullet says otherwise the measurements are [measured, by the visit-order session], on the per-row dumps in
+/home/joe/code/vexact-data/suite/rho-dump/ with the scripts `hierarchy/layered/rho_check.py`, `psi_eff.py`,
+`kappa_check.py`, `pair_check.py` and `rand_sample.py` (`program/LOG-2026-11-21.md`, the three sections on the level width;
+`program/approximate/CLAIMS.md` A4.0, as relayed by the PI). The five indexes are iNaturalist (n = 2,048) at 12 groups
+and at 1 group, yahoo (n = 384) at 64 groups, and LAION with text queries (n = 512) at 64 and at 8 groups; the first
+30 clusters a query; k = 10; the true 10th best as the threshold t; the 16-byte level unless said.
+
+### 5.9a.1 Why the derived width is narrow with few groups
+
+The rms of the actual error over the derived ρ·h, as a median over the clusters holding a neighbour, is 1.29 on
+iNaturalist at 12 groups and 2.04 at 1 group, and 1.03, 0.94 and 1.04 on yahoo and LAION at 64 and 8 groups
+[measured, by the visit-order session; `rho_check.py`]. So the derived width is 1.29 to 2.04 times too narrow on
+iNaturalist and right within 6% on yahoo and LAION. The record does not say whether this is the mean of the ratio or
+the ratio of the means, but in A3's model the two agree within 3% [model] (`program/approximate/referee/ref2_a41.txt`),
+so the factors stand (Editor's query 19).
+
+**Proposition 5.29 (A4.1; the error over the half-width is a cosine).** In a group's dual coordinates let Δ̃ = DΔ,
+w = ‖Δ̃‖, Δ̂ = Δ̃/w, ẽ = D⁻¹e_vec, u = ‖ẽ‖, ê = ẽ/u and h = w·u. Then for every row and query (Δ·e_vec)/h = Δ̂·ê. For a
+fixed query the mean over cluster c's rows of the squared ratio is Δ̂ᵀC_cΔ̂, and the ratio of the second moments,
+Σ(Δ·e_vec)²/Σh², is Δ̂ᵀS_cΔ̂/tr S_c. The derived ρ_{g,ℓ}² of (5.6) is the second with S_c replaced by the diagonal
+matrix of the a_i and Δ̂ by its profile value. [proved, refereed] (`program/approximate/CLAIMS.md` A4.1;
+`referee-2.md` §1)
+
+*Proof.* Δ·e_vec = (DΔ)·(D⁻¹e_vec) = w·u·(Δ̂·ê). Square and average over the rows with Δ̂ fixed; Σh² = w²·n_c·tr S_c.
+Under the diagonal error model e_i = κ√v_i·ξ_i with uncorrelated ξ of unit variance, v_i as in Proposition 5.16,
+S_c = κ²·diag(a_i) because v_i/D_i² = a_i, which gives (5.6) on the profile. ∎
+
+Referee 2 adds two hypotheses the source leaves implicit: D is diagonal in coordinates in which the score is the plain
+pairing Σ Δ_i e_i, and h is the code term w·u alone with u exact (if u is stored rounded up, the ratio is below the
+cosine). The proposition says what the derived width leaves out: it captures the query's weights but not its alignment
+with the cluster's own errors. The track names what is left out as the off-diagonal part of the cluster's error
+covariance in the group's basis, the departure of its diagonal from the group's, and its mean (A4.1); referee 2 notes
+that this compares numerators only, and is what A3 leaves out only if the scale is defined by tr S_c = κ²·Σ_i a_i
+(`referee-2.md` §1 item 2).
+In a model where a share β_A of the weighted error lies in r_A directions of the cluster's own, and a share c_A² of
+the query's weighted offset lies in them, (actual over derived)² ≈ (1 − β_A) + β_A·c_A²/(ρ_{g,ℓ}²·r_A), and in a
+constructed group the ratio for a cluster's own queries rises from 1.00 at one cluster a group to 2.1 to 2.7 at 32
+[model] (`program/approximate/CLAIMS.md` A4.2; `out/a4_model.txt` there). The model gives the measured direction,
+larger with fewer groups and larger n, but not iNaturalist's numbers, whose N, K and bits it was never given.
+
+### 5.9a.2 A neighbour's error is not a typical row's
+
+A row with s ≥ t is kept by a width Y if and only if e ≤ Y + (s − t), since â = s − e [proved, refereed]
+(`program/approximate/CLAIMS.md` A4.3 item 1). So the share of neighbours a rule keeps is a statement about the law of
+e among neighbours.
+
+Measured with the spread σ̂ taken per cluster from a sample of rows scored exactly (the actual rms error over it has a
+median of 1.01 to 1.03 on every index, and a 10% to 90% range of 0.83 to 1.29 at 32 rows and 0.88 to 1.18 at 64), the
+plain rule Y = ψσ̂ keeps 0.790 to 0.824 of the true ten at ψ = 4 and 0.88 to 0.93 at ψ = 5 on all five indexes. A
+neighbour's e/σ̂ follows its height z: the slope through the origin is 1.21, 1.24, 0.99, 0.92 and 0.98 (iNaturalist at
+12 and 1 groups, yahoo, LAION at 64 and 8) with correlation 0.68 to 0.71, the median e/σ̂ is about 3, and 0.24 to 0.35
+of the neighbours lie beyond 4σ̂ [measured, by the visit-order session; `pair_check.py`].
+
+**Proposition 5.30 (A4.3 items 2 and 4; the linear regression).** Let the regression of e on s over a cluster's visible
+rows be linear with a normal residual of constant spread (joint normality suffices), let μ_c, σ_c and σ̂ be those rows'
+exact statistics, and let t be fixed. Then
+
+    E[e | s] = ρ_es·z·σ̂,      sd[e | s] = √(1 − ρ_es²)·σ̂,      ρ_es = √(1 − ϑ) + ρ_ae·σ_a/σ_c,
+
+a row at the threshold is kept by the plain rule with probability Φ((ψ − ρ_es·ζ_c(t))/√(1 − ρ_es²)), and the slope of
+e/σ̂ on z is ρ_es, which is at most 1. It is √(1 − ϑ) exactly when the midpoint is uncorrelated with its error, and 1
+exactly when e is a linear function of s. [proved, refereed] (Editor's query 26) (`program/approximate/CLAIMS.md` A4.3; `referee-2.md` §2)
+
+*Proof.* Since s = â + e, Cov(e, s) = σ̂² + Cov(â, e), so ρ_es = Cov(e, s)/(σ̂σ_c) = σ̂/σ_c + ρ_ae·σ_a/σ_c, and
+σ̂/σ_c = √(1 − ϑ). The regression of e on s has slope Cov(e, s)/σ_c² and residual spread √(1 − ρ_es²)·σ̂, which gives
+the first two formulas. A row at s = t is kept when e ≤ ψσ̂, and e given s = t is normal with mean ρ_es·ζ_c(t)·σ̂ and
+that spread. A correlation is at most 1 in modulus, with equality exactly when e is a linear function of s. ∎
+
+Referee 2 adds that E[e] = 0 over the cluster's visible rows is assumed; otherwise the mean is added. With â and e
+uncorrelated, the measured ϑ of 0.67 to 0.92 and neighbours at ζ = 3 to 4, the proposition predicts at least 0.98
+kept at ψ = 4 and a slope of 0.28 to 0.57, against the measured 0.79 to 0.82 and 0.92 to 1.24. So the uncorrelated
+normal account of the loss, which is Proposition 5.17's model, is [refuted] on these data (`referee-2.md` §2 item 3).
+
+A slope above 1 would show only that E[e | s] is not linear, and only if e/σ̂ was centred and z and σ̂ were the
+cluster's own. Neither holds for the record: e/σ̂ was not centred, and z used the mean and spread of the same 64-row
+sample as σ̂ (`program/LOG-2026-11-21.md`, "answers to referee 2"). The slope through the origin of an uncentred e/σ̂ is
+ρ_es + ē/(σ̂·z), so a mean error of 0.3σ̂ adds 0.1 at z = 3 [proved, unrefereed: referee 2's remark]. The source's further
+claim that a slope above the bulk's needs a component with a heavier upper tail is one sufficient mechanism, not a
+necessary one: any E[e | s] convex in the upper tail does it (`referee-2.md` §2 item 5).
+
+### 5.9a.3 The rule
+
+**The rule** [measured; a fitted rule, with the condition below]. Keep a row at a deterministic level when
+
+    â ≥ t̂ − (m·max(ζ_c(t̂), 0) + ψ0·√ϑ)·σ̂,                                                (5.8)
+
+with ζ_c(t̂) and ϑ from the whole cluster's μ_c and the library's σ_c(q), σ̂ the spread of e over a sample of n_s = 64
+visible rows of the cluster scored exactly, and the sample's mean of e − m·σ̂·(s − μ_c)/σ_c(q) added to every midpoint.
+The build uses m = 1 (`program/LOG-2026-11-21.md`, last section; Editor's queries 16 and 18). When t̂ is below the cluster's
+mean the width is ψ0·√ϑ·σ̂, the plain rule at ψ = ψ0·√ϑ.
+
+*Where it comes from.* Suppose a neighbour at height z has e = m·z·σ̂ + √ϑ·σ̂·g, with m its slope and g a scatter of
+unit spread. A neighbour at the threshold is kept by the width (ζ + ψ0·√ϑ)·σ̂, which is (5.8) with the coefficient 1
+on the height, if and only if g ≤ ψ0 − (m − 1)·ζ/√ϑ, and one above it gains (z − ζ)·(σ_c − m·σ̂) of slack [proved,
+refereed, as algebra on this law] (`program/approximate/CLAIMS.md` A4.5 item 1; `referee-2.md` §4). So when the
+slope m is 1, the value the build assumes, the dial ψ0 sets the chance at the threshold whatever ϑ and ζ are, provided
+g is centred, of unit spread, and of a law that does not depend on the height. The last fails on the data (§5.9a.5).
+The
+law was measured on a cluster's top rows only, since a cluster's neighbours are its rows above t, at most ten, and it
+does not extend to the bulk: over a whole cluster it would give Var(e) ≈ (m² + ϑ)·σ̂² [model] (`referee-2.md` §4
+item 1).
+
+*The condition: m near 1, fitted and not derived.* The track's model of a component shared with the query
+(`program/approximate/CLAIMS.md` A4.4) writes s − μ_c = X_q + a_G + e_G, â − μ_c = (1 − κ_Δ)·X_q + a_G and
+e = κ_Δ·X_q + e_G, with X_q ≥ 0 of exponential upper tail at rate χ_X and a_G, e_G independent normal [model]. Its
+algebra checks, but as run it gives a median e/σ̂ over z of 0.74, 0.80, 0.67, 0.74 and 0.78 for neighbours at z
+between 3 and 4, where 0.89 to 1.21 was measured. It matched the headline figure, a median e/σ̂ of about 3, by two
+errors that cancel: its neighbours sit a spread higher than the data's (ζ = 4.1 against about 3) and its ratio is 12
+to 27% lower. Far up its regression is a line with a negative intercept, E[e | s] → κ_Δ·(s − μ_c) + c0 with
+c0 = ((1 − κ_Δ)·Var(e_G) − κ_Δ·Var(a_G))·χ_X, which is −0.65σ̂ to −1.81σ̂ in the five settings, and at the stated tail
+rate it cannot reach iNaturalist's 1.2 [model] (`referee-2.md` §3, `program/approximate/referee/ref2_a44.txt`).
+Referee 2's verdict on the model is a gap: its algebra is right, and as run it does not reproduce the figure the width
+rests on. The track's summary that the model fits the measurement "in kind, not to the point" (A4.9) is, in the
+referee's words, too kind, since a ray through the origin with slope near 1 and a centred scatter, which the width
+needs, is what the model lacks (`referee-2.md` §3, item 1 and the closing paragraph). The slope
+was also measured with the sample's spread and an uncentred error (§5.9a.2), so part of iNaturalist's 1.2 belongs to
+which spread was used: when only the source of the height changed from the sample to the library's whole cluster,
+iNaturalist's miss at ψ0 = 2 fell from 0.082 to 0.049 [measured, by the visit-order session; `width_checks.py
+--whole`] (`program/LOG-2026-11-21.md`, "The level width under filters"). A slope fitted in one
+frame and applied in the other would correct twice (`referee-2.md` §7).
+
+**Measurements of the rule** [measured, by the visit-order session].
+
+- *With every quantity from the sample* (the first form, Y = (ζ + ψ0·√ϑ)·σ̂ with ζ, ϑ and σ̂ all sampled): unfiltered,
+  at ψ0 = 2 / 3 it keeps 0.918 / 0.975, 0.918 / 0.972, 0.976 / 0.992, 0.969 / 0.985 and 0.964 / 0.981 of the true ten
+  (iNaturalist at 12 and 1 groups, yahoo, LAION at 64 and 8); at a kept share of 0.9 it sends between 4% fewer and 7%
+  more rows to stored vectors than the most efficient rule tried, Y = (1 − ϑ)·max(t − μ_c, 0) + ψ0·√ϑ·σ̂ (κ = 1 − ϑ in the source) (`psi_eff.py`,
+  `kappa_check.py`). Under filters it holds under random-25 and region-25, but it reads 1.4 to 2.5 times the plain
+  rule's rows under an in-cluster bottom quarter and about twice under a top quarter on LAION.
+- *With ζ and ϑ from the whole cluster* ((5.8) at m = 1 with the shift taken as mean(e), measured before the build
+  took the corrected shift of §5.9a.4, so none of these figures is of the rule as now built; `width_checks.py
+  --whole`): under a
+  bottom quarter the rule becomes the plain rule (2,160 / 2,321 / 2,844 rows against the plain rule's 2,159 / 2,302 /
+  2,773), under a top quarter it loses its over-coverage, and random and region sets are within noise. Unfiltered,
+  iNaturalist gains (0.951 kept at ψ0 = 2, was 0.918) and LAION loses 2 to 3 points and 3 to 17% in rows, presumably
+  from the error of the 16-direction σ_c. Across 18 cases it keeps 0.93 to 0.99 at ψ0 = 2, at rows within 0 to 5% of
+  the best rule for each case, except LAION at 8 groups unfiltered (+17%) (Editor's queries 17 and 25).
+- *The plain rule at the same dial*, Y = 2σ̂, over the same cases: unfiltered 0.36, 0.23, 0.32, 0.30, 0.22 (iNaturalist
+  at 12 and 1 groups, yahoo, LAION at 64 and 8); random-25 0.62, 0.57, 0.52; region-25 0.53, 0.51, 0.43; top-25 0.66,
+  0.58, 0.51; bottom-25 0.93, 0.95, 0.95 (iNaturalist, yahoo, LAION) (`program/LOG-2026-11-21.md`, "answers to referee 2").
+  That is 0.22 to 0.95 against 0.93 to 0.99. The
+  two rules read different numbers of rows at one dial value, so the fair comparison is at equal rows, and it is not on
+  record. Compounding the recorded ratios for the unfiltered indexes, referee 2 puts the sample form of the width at
+  about 0 to 4% fewer rows than a re-dialled plain rule on three indexes and 0 to 15% on LAION [computed, by referee 2
+  from the record] (`referee-2.md` §4). That the plain rule is not
+  efficient is measured on LAION only (7 to 18% more rows than κ = 1 − ϑ); on iNaturalist and yahoo it was level.
+
+The record does not show that ψ0 has one meaning across indexes: the plain rule keeps 0.790 to 0.824 at ψ = 4 and the
+sample form of (5.8) 0.918 to 0.976 at ψ0 = 2, and both move by about half a unit of their dial (`referee-2.md` §7).
+
+### 5.9a.4 The whole-cluster height under a filter
+
+**Lemma 5.31 (the whole-cluster height).** Fix a query and a cluster, draw a row uniformly from the cluster, and let s
+be its score, e the level's error and Vis the event that it is visible. The law of e given (s, Vis) equals the law of
+e given s, for every s that a visible row can have, if and only if P(Vis | s, e) does not depend on e. [proved,
+unrefereed: the statement and proof are referee 2's, written as a precise form of the PI's argument] (`referee-2.md`
+§6)
+
+*Proof.* By Bayes, p(e | s, Vis) = p(e | s)·P(Vis | s, e)/P(Vis | s). If P(Vis | s, e) does not depend on e, it equals
+P(Vis | s) and the ratio is 1. Conversely, if the two laws agree, P(Vis | s, e) = P(Vis | s) wherever p(e | s) > 0. ∎
+
+(The "only if" holds for almost every e under the law of e given s, and "every s a visible row can have" means
+P(Vis | s) > 0; the source leaves both implicit. Editor's query 21.)
+
+So a width built from whole-cluster quantities keeps a visible row of score s with the same probability as unfiltered,
+at the same s and t. The kept share over the visible neighbours is not invariant, because the filter moves t and with
+it the heights at which the rule is used (`referee-2.md` §6 item 1).
+
+*Where it holds.* For a filter that selects on this query's score, with or without independent randomness; for a
+random set; and for a set that takes or leaves whole clusters [proved, unrefereed, by the lemma]. On two synthetic row
+laws a bottom quarter, a top quarter and a soft filter on score left the mean and spread of e at each score unchanged
+to two decimals [model] (`program/approximate/referee/ref2_filter.txt`).
+
+*Where it fails.* For every filter whose visibility at a given score still depends on the error, which is the same as
+depending on the midpoint. For visibility decided by a row's position v·(x − m_c) along a direction v, with normal
+rows, the lemma's condition is Cov(v·(x − m_c), e | s) = 0, that is vᵀ·(Σ_{c,left} − β_e·Σ_c)·Δ = 0 with β_e = Cov(e, s)/Var(s) =
+ρ_es·√(1 − ϑ) [model: referee 2's derivation, no proof written] (`referee-2.md` §6). It holds for v along the query's
+offset, which is a filter on score. For a direction unrelated to the query the partial correlation is of order 1/√n in
+an isotropic cluster, larger when the variance sits in few directions. It fails for:
+
+- a filter on the midpoint, on the code, or on an attribute carried by the well-coded high-variance directions that the
+  query also weighs: at a given score the visible rows on the selected side have smaller errors and the width
+  over-covers, and on the complement it under-covers;
+- a filter along left-out directions the query weighs: the visible rows' errors are larger at a given score, the
+  unsafe side;
+- a filter on the score for a different query, unless that query's offset in the cluster is parallel to this one's.
+
+In the simulation a quarter cut along a direction correlated 0.7 with the part of the midpoint, or of the error, that
+the score does not explain moved E[e | s] by −0.73σ̂ or +0.73σ̂ at every score, with the scatter falling from 0.83σ̂ to
+0.66σ̂ [model] (`ref2_filter.txt`).
+
+*The first-order correction.* Under a filter on score and a linear regression, the mean of e over the visible rows is
+ρ_es·σ̂·E[z | Vis], not zero (−0.71σ̂ and +0.72σ̂ for the two quarters in the simulation). Adding mean(e) to the
+midpoint, as the track recommended (A4.9 item 1), therefore counts the height twice once ζ is taken from the whole
+cluster; that recommendation is [refuted] (`referee-2.md` §6 item 3). The quantity to add is the sample's mean of
+e − m·σ̂·(s − μ_c)/σ_c, the mean distance from the ray, which is zero for a filter on score and removes a shift
+constant in s, such as the one above, to first order [model: linear regression; referee 2's derivation]. The
+implementing session has applied it with m = 1 and the whole-cluster μ_c and σ_c (`program/LOG-2026-11-21.md`, last section);
+the measurements above were made with mean(e) (Editor's query 18).
+
+*What the lemma does not cover.* No statistic of the visible rows is invariant, and in particular not σ̂, which (5.8)
+takes from the visible sample. σ̂_vis² = E[Var(e | s) | Vis] + Var(E[e | s] | Vis), and under a linear regression
+σ̂_vis/σ̂ = √(1 − ρ_es²·(1 − Var(z | Vis))): 0.87 for a quarter cut on score at ρ_es = 0.56 (0.87 simulated) and 0.79 at
+ρ_es = 0.7. So under a quarter cut on score (5.8) is 13 to 21% narrower than the lemma licenses, the unsafe side; where
+the regression steepens into the tail, a top quarter's σ̂_vis is larger than this formula gives [model, linear
+regression] (`referee-2.md` §6 item 2). The agreement under the bottom quarter is nearly an identity and confirms
+nothing about the law of e: the visible neighbours of a bottom quarter lie below their cluster's mean, so
+max(ζ_c, 0) = 0, the width is ψ0·√ϑ·σ̂ and the rule is the plain rule, which 2,160 rows against 2,159 says and no more.
+The lemma predicts more, unmeasured: at s = t below the mean E[e | s] is negative, so the plain rule over-covers there,
+and a width with a negative height at the bulk's slope, (ρ_es·ζ + ψ0·√(1 − ρ_es²))·σ̂ with ζ < 0, should read fewer
+rows at the same kept share [model] (`referee-2.md` §6 item 4).
+
+The two variants of the height fail in different places, and the lemma says why: the whole-cluster height is the right
+frame for a cut on score and is only as good as the library's σ_c, while the sample's height is exact for σ_c and wrong
+under a cut on score (`referee-2.md` §7). Accordingly the track's statement that "a visible set needs no separate
+treatment, as long as the sample is of visible rows" (A4.7) and its recommendation to take every quantity from the
+visible sample (A4.9 item 1) are [refuted] for filters that cut a cluster on score, by the measurement above
+(`referee-2.md` §5, §7).
+
+### 5.9a.5 The scatter's tail
+
+The recorded misses of the sample form of (5.8) at ψ0 = 2 / 3 are 0.024 / 0.008 (yahoo), 0.031 / 0.015 and
+0.036 / 0.019 (LAION at 64 and 8), and 0.082 / 0.025 and 0.082 / 0.028 (iNaturalist at 12 and 1) [measured, by the
+visit-order session]. The track compared them with a Laplace scatter's chance of a miss at the threshold,
+½·exp(−√2·ψ0) = 0.030 and 0.0072, and concluded that ψ0 means about 1 − ½·exp(−√2·ψ0). That inference is [refuted]
+(`referee-2.md` §4 item 2): it sets the chance at the threshold against a share over all ten neighbours, nine of which
+lie above the threshold and have slack. With the slack counted and the measured slopes, a Laplace scatter misses 0.012
+to 0.049 at ψ0 = 2 and 0.003 to 0.012 at ψ0 = 3 [model, an exponential excess of rate 2.2]
+(`program/approximate/referee/ref2_a45.txt`), and sampled statistics add a factor of about 1.2 and 1.3 [computed]
+(`program/approximate/out/a4_width_noise.txt`, as `referee-2.md` §4 item 2 reads it). So the recorded misses are 1.3 to 2.1
+times a Laplace scatter's at ψ0 = 2 and 1.6 to 3.8 times at ψ0 = 3: the tail is heavier than Laplace [computed, by
+referee 2 from the record]. Independently of any model, one unit of ψ0 from 2 to 3 divides the recorded misses by 1.9
+to 3.3, where a Laplace tail divides them by 4.1.
+
+Measured directly, the 99.9th percentile of the scatter is 4.6 to 7.5, and the scatter widens with height [measured,
+by the visit-order session] (`program/LOG-2026-11-21.md`, "The level width under filters"). The widening breaks "whatever ζ" in
+§5.9a.3: the kept share at one ψ0 falls with ζ even at m = 1. A scatter that widens with height is what a slope that
+varies between (query, cluster) pairs looks like when pooled, sd(e/σ̂ | z)² = s_g² + z²·Var(m) with s_g the scatter's
+spread, and then the coefficient of ζ that gives ψ0 one meaning is an upper quantile of the pairs' slopes, not their
+centre [model; not measured] (`referee-2.md` §4 item 2).
+
+Hence the track's "a recall of 0.999 a level needs ψ0 near 4.4" (A4.8) is [refuted] (`referee-2.md` §4 item 2, §7):
+the recorded 99.9th percentile is 4.6 to 7.5, and the recorded decay from ψ0 = 2 gives 4.9 to 7.6 for 0.999 of the
+ten. What survives is that ψ0 is not a normal quantile; that 1 − ½·exp(−√2·ψ0) is an upper bound on what ψ0 means; and
+that near ψ0 = 2 the normal law, the Laplace law and the data agree (0.96 to 0.98 kept where m is near 1), because the
+two laws cross there.
+
+### 5.9a.6 The sample: its error, and a cheaper source
+
+**The sample's error** [model: normal rows, to first order; the formula is referee 2's repair and has not been
+re-read] (`referee-2.md` §5). With μ_c, σ_c, σ̂ and ϑ from n_s sampled rows, the width (ζ + ψ0·√ϑ)·σ̂ of the sample
+form has an error whose variance, in units of the scatter, is
+
+    ν² = ( c₁²·(1 − ρ_es²) + c₂²/2 + c₁·c₂·(1 − ρ_es²) + 1 ) / (n_s·ϑ),
+    c₁ = ζ − ψ0·(1 − ϑ)/√ϑ,      c₂ = ψ0·√ϑ,
+
+and a normal scatter is then kept with probability Φ(ψ0/√(1 + ν²)). The track's formula,
+(ζ²·(1 − ρ_es²) + 1 + ψ0²·ϑ/2)/(n_s·ϑ), leaves out the dependence of √ϑ̂ on σ̂/σ_c and the covariance of σ̂/σ_c with σ̂,
+and is about 20% low. Referee 2's verdict on the sample's error is "correct after a small repair": the three parts
+of the error stand, and the track's formula for ν² as written is [refuted] (`referee-2.md` §5). At ψ0 = 2 the track's formula, the repaired one and a
+simulation give 0.958, 0.954 and 0.953 kept at ζ = 3 and 32 rows, and 0.947, 0.940 and 0.941 at ζ = 5 and ϑ = 0.92
+[model] (`ref2_a45.txt`). The hypotheses are normal rows and a neighbour that is not in the sample. For (5.8), with the
+height from the whole cluster and σ̂ sampled, ν² = (ζ + ψ0·√ϑ)²/(2·n_s·ϑ). It is the same size at ρ_es = 0.56 and
+larger at 0.7 (0.931 against 0.940 kept at ζ = 5 and 32 rows), because the errors of σ̂ and σ_c no longer partly
+cancel. On real rows ν² is understated, since the recorded 10% to 90% range of actual over sampled spread at 32 rows
+(0.83 to 1.29) is wider on the upper side than the normal 0.84 to 1.16. The track's conclusion, from its simulation,
+is that 64 rows are enough and 32 marginal for far clusters [computed] (`program/approximate/CLAIMS.md` A4.7).
+
+**Proposition 5.32 (A4.7; the sample at a randomised level).** Let R be a randomised level at which every block is
+coded, â_R a row's estimate there, and v_R = Σ_j A_j²·‖P_{y_j⊥}Δ_j‖²/d_j. Then, per row and for any fixed â, e and s,
+
+    E_ω[â_R] = s,      E_ω[(â_R − â)²] = e² + v_R,      E_ω[(â_R − â)·â_R] = e·s + v_R.
+
+[proved, refereed, as an identity in the setting of chapter 3's Lemma 3.1; referee 2 found no error and verified it
+on simulated rotations] (`program/approximate/CLAIMS.md` A4.7; `referee-2.md` §5; `ref2_a47.txt`)
+
+*Proof.* At a level where every block is coded the estimate's error is N = â_R − s = Σ_j Δ_j·E_j, E_j the block's
+coding error (chapter 3 §3.1). By Lemma 3.1, Δ_j·E_j = A_j·‖P_{y_j⊥}Δ_j‖·U_j with U_j one coordinate of a uniform unit
+vector in ℝ^(d_j), and blocks with separate rotations have independent U_j given the stored scalars. So E_ω[N] = 0
+and E_ω[N²] = Σ_j A_j²·‖P_{y_j⊥}Δ_j‖²·E U_j² = v_R. Since â_R − â = e + N and â_R = s + N, expanding gives
+E[(e + N)²] = e² + v_R and E[(e + N)(s + N)] = e·s + v_R. ∎
+
+So over n_s sampled rows the mean of â_R estimates μ_c, the variance of â_R less the mean of v_R estimates σ_c², the
+mean of (â_R − â)² − v_R less the squared mean of â_R − â estimates σ̂², and the covariance of â_R − â with â_R less the
+mean of v_R estimates Cov(e, s), hence ρ_es. No stored vector is read. A row's squared-error estimate has variance
+Var(e²) + 4e²v_R + 2v_R², so for normal errors the sample must be larger by 1 + 2v_R/σ̂² + v_R²/σ̂⁴: 1.2 times if the
+randomised level's spread is a third of the deterministic level's, 1.6 times if it is half [proved, refereed].
+
+Referee 2 lists four hypotheses the source does not state (`referee-2.md` §5).
+
+1. The estimate uses Lemma 3.1's exact scale ‖y‖²/⟨ō, Ry⟩. The index stores the scale rounded up; a scale high by η
+   adds η·Δ_j·y_j to â_R, which is not mean zero and is correlated with e. In the simulation 3% gave σ̂² high by 7%, the
+   wide side.
+2. The code is a function of the row's own rotated block only, and the query does not depend on the seed: the
+   conditions chapter 3 attaches to the lemma.
+3. v_R needs ‖P_{y_j⊥}Δ_j‖, which the reader cannot compute without the row. It has ‖Δ_j‖, which gives sd_R², or it can
+   use the level's own estimate ‖Δ_j‖² − (Δ_j·ŷ_j)²/‖y_j‖², biased by a term of relative size tan²φ_j/d_j; in the
+   simulation that estimate gave σ̂² at 1.003 of the truth.
+4. The rotations are shared by every row, so two rows' errors are not independent over the seed. Each identity is per
+   row and survives, but the count of rows needed assumes independence. In the simulation two rows' errors correlate
+   at ±0.02 for ordinary pairs and 0.97 for a near-duplicate pair, so the count is right unless the sample holds
+   near-duplicates. The uncentred second moment is exactly unbiased, and the centred one is low by the mean pairwise
+   covariance.
+
+*The direction of the bias* [checked by referee 2 in simulation]. If a block is still uncoded at R, â_R − s holds
+Δ_j·y_j for that block, which is not random over the seed, and σ̂² and σ_c² come out low, the unsafe side. The track's
+"low by the share of the level's error variance in that block" assumes that block's part is uncorrelated with the
+rest; in the simulation the block held 39% of σ̂² and the estimate came out at 30% of the truth, because the blocks'
+parts are correlated, and μ_c is shifted by the mean of the block's part as well. If an upper bound is used for v_R
+(sd_R², or stored scalars rounded up), too much is subtracted from σ̂² and σ_c² alike, and σ̂/σ_c and σ̂ both fall, again
+the unsafe side. Subtracting nothing errs wide by v_R.
+
+Measured on the real codes, a sample read at the first randomised level where every block is coded estimates σ̂, μ_c
+and σ_c with a bias of 2 to 6%, low on LAION, and modest extra noise, at about 10 kB against 256 kB of stored vectors
+on iNaturalist; it needs the group's rotations set up, so it pays only where they are cheap or already done
+[measured, by the visit-order session; `rand_sample.py`] (`program/LOG-2026-11-21.md`; Editor's query 20). The low bias has
+the sign of an upper bound used for v_R (`referee-2.md` §7).
+
+### 5.9a.7 The referee's other repairs
+
+- **A4.4 item 2, the slope far up.** The track wrote the slope far up as √(PR(left)/PR(var)), with PR(x) = (Σx)²/Σx²,
+  var_i the variance of coordinate i of the group's basis and left_i what the level leaves of it, so that the slope is
+  1 when what is left out is as concentrated as the whole. That holds only when every coordinate is wholly coded or
+  wholly left out, and is otherwise [refuted] (`referee-2.md` §3). With quantisation error uncorrelated with the
+  reconstruction, a distortion dist_i on coordinate i,
+  
+      κ_Δ ≈ Σ dist_i / Σ var_i,      1 − ϑ ≈ Σ dist_i·var_i / Σ var_i²,
+      slope far up ≈ (Σ dist_i / Σ var_i)·√(Σ var_i² / Σ dist_i·var_i)
+
+  [model; referee 2's repair, unrefereed]. For a level that leaves the same share p of every coordinate the track's
+  form gives 1 and this one gives √p = √(1 − ϑ), the uncorrelated normal value. The direction the track drew for
+  iNaturalist survives: left-out variance spread over many low-variance coordinates gives a slope above 1. The gain
+  dist_i/var_i is a small-shift statement and fails for a near-duplicate of the query.
+- **A4.5 item 2, the inferred tail**: §5.9a.5.
+- **A4.5 item 3, the third case.** The track stated that under the model of §5.9a.3 the efficient rule (a threshold
+  on the chance of beating t, at one price across rows, clusters and queries) and the rule with a stable dial are the
+  same rule; that is [refuted] as stated (`referee-2.md` §4 item 3). In the model's tail the law of s given â is normal
+  about μ_c + (â − μ_c)/(1 − κ_Δ) − κ_Δ·Var(a_G)·χ_X/(1 − κ_Δ)², with spread s_res/(1 − κ_Δ). So
+
+      efficient rule:            Y = κ_Δ·(t − μ_c) − κ_Δ·Var(a_G)·χ_X/(1 − κ_Δ) + ψ·s_res,
+      stable dial (row at s = t): Y = κ_Δ·(t − μ_c) + ((1 − κ_Δ)·Var(e_G) − κ_Δ·Var(a_G))·χ_X + ψ0·s_res.
+
+  Both have the coefficient κ_Δ on the height, as the track said, and both carry a constant it omitted; the two dials
+  differ by s_res·χ_X/(1 − κ_Δ), which depends on the cluster. So the two rules agree within a cluster and not at one
+  price across clusters [model; referee 2's repair, unrefereed]. In population, Y = κ_Δ·(t − μ_c) + ψ0·s_res without
+  the constant keeps a row at the threshold with probability 0.93, 0.80 and 0.76 at ψ0 = 0 (iNaturalist at 12 groups,
+  yahoo, LAION at 64) and 0.99, 0.97 and 0.96 at ψ0 = 1; with the constant it keeps 0.46 to 0.49, 0.82 to 0.84 and
+  0.97 to 0.98 at ψ0 = 0, 1 and 2 in every setting and at both heights tried [model] (`ref2_a44.txt`). The limit is
+  reached slowly: among the top 0.1% of rows by midpoint the constant is −1.31 where the limit is −1.43, and the spread
+  0.46 where the limit is 0.54 (`ref2_a45b.txt`).
+- **A4.5 item 5, one meaning for ψ0.** The track stated that under its model, with κ = κ_Δ and ψ0 on the scatter, the
+  kept share is P(g ≤ ψ0) on every index. That is [refuted] by the track's own output (`referee-2.md` §4 item 5): the
+  ψ0 needed for 0.9 kept is −0.91, −0.70, 0.03, 0.18 and 0.06 on the five settings with κ = κ_Δ, and 0.18, 0.71,
+  −0.31, −0.14 and 0.10 with κ = √(1 − ϑ) [model] (`program/approximate/out/a4_resemble.txt`). The cause is the
+  omitted constant. The corrected statement is the last sentence of the previous item: in the model a dial with one
+  meaning needs the width κ_Δ·(t − μ_c) + c0 + ψ0·s_res, with c0 the stable dial's constant above (the intercept of
+  §5.9a.3), and that width keeps a row at the threshold with probability 0.46 to 0.49, 0.82 to 0.84 and 0.97 to 0.98 at ψ0 = 0, 1
+  and 2 in every setting [model; referee 2's repair, unrefereed].
+- **Two further statements withdrawn.** That a model of independent heavy tails for the midpoint and the error
+  "cannot reach ϑ above about 0.8" is [refuted]: it is an artefact of giving the two exponential parts one scale
+  (`referee-2.md` §3). The conclusion stands on model-free facts: Cov(â, e) > 0, the slope of score on midpoint is 1.04
+  to 1.09 and not 1, and the plain rule is 7 to 18% worse than κ = 1 − ϑ on LAION [measured]. That "a width one scatter
+  too wide is 1.6 to 2 times the rows" (A4.9) is [refuted] as understated: with the recorded ϑ the scatter √(ϑ(1 − ϑ))
+  is 0.27 to 0.47 of the score's spread, and the factor is 1.8 to 2.8 at a decay rate of 2.2 [computed, by referee 2]
+  (`referee-2.md` §7).
 
 ## 5.10 Hierarchies
 
@@ -528,6 +978,193 @@ flat rank at up to 5% more rows [measured]. No polylogarithmic ranking exists wi
 centres is maximum inner-product search over K points, and a sublinear index for it would refute the Orthogonal
 Vectors conjecture when n grows faster than log K [cited, unchecked, worst case]. Chapter 4's Proposition 4.2 proves
 the corresponding reduction from Orthogonal Vectors for threshold queries over the rows.
+
+### 5.10.1a The tree as a random energy model, and the leaf floors
+
+This section reads model T of Proposition 5.18 as a random energy model and gives two floors on the leaves any
+algorithm must read (`program/approximate/CLAIMS.md` A1, refereed in `program/approximate/referee/referee-1.md`). The
+tree is **regular**: every level-(j − 1) node has the same number K_j/K_{j−1} of children. A level is branching when
+K_j > K_{j−1}. The leaves are level D, there are K_D of them, a leaf's value U has variance v_D, and ϑ_j = v_j/v_D.
+
+**Proposition 5.33 (A1.1; two models).**
+
+1. Model T on a regular tree is Derrida's generalised random energy model with D levels, entropy shares
+   ent_j − ent_{j−1} and variance shares ϑ_j − ϑ_{j−1}. Placed on a binary tree, it is the continuous random energy
+   model whose profile is the step function Π_step.
+2. When every log₂(K_j/K_{j−1}) is an integer and ent_j increases strictly over the branching levels, model T's
+   **binary refinement**, in which level j is replaced by log₂(K_j/K_{j−1}) binary levels of equal variance, is the
+   continuous random energy model on the binary tree of depth log₂ K_D with the piecewise-linear profile Π.
+
+The two are different processes. They agree in (a) the law of the values along one root-to-leaf path at the depths
+ent_j; (b) the expected number of nodes of one level above a cut, and so the B_j of (5.7); and (c) the concave hull of
+the profile, which is the hull of the points (ent_j, ϑ_j) for both, and so the ground state x_s. They differ in (d)
+x_*: the theorem cited below needs a profile that is the integral of a Riemann-integrable function, which Π is and
+Π_step is not, so it is a theorem about the refinement and says nothing about model T; and (e) the floor of
+Theorem 5.34, whose proof needs the leaves under one parent to be independent given the internal values with that
+parent explaining ϑ_{D−1}, while in the refinement the internal values include the binary levels inside the last
+level. The hypotheses are a regular tree, integer log₂ fan-outs for the refinement, Gaussian increments, an increment
+independent of its parent's value, siblings' increments independent of each other, and equal within-node variance at
+a level. [proved, unrefereed: revised after referee 1, which found the first version correct after this repair; the
+revision was not re-read; Derrida's definition cited, unchecked] (`program/approximate/CLAIMS.md` A1.1;
+`referee-1.md` A1.1)
+
+*Proof.* (1) is Derrida's definition [cited, unchecked: from memory, and as Addario-Berry and Maillard describe it].
+In model T two leaves whose last common ancestor is at level j − 1 have covariance v_D·ϑ_{j−1}, which is v_D·Π_step at
+every binary depth between ent_{j−1} and ent_j. (2) is the definition of the continuous model (Addario-Berry and
+Maillard, section 1): a centred Gaussian process on the binary tree of depth N′ with E[X_v·X_w] = N′·Π(|v ∧ w|/N′),
+equivalently independent increments of variance N′·(Π((i + 1)/N′) − Π(i/N′)) at generation i. There the same two
+leaves have covariance v_D·Π at the depth of their last common binary ancestor, anywhere in [v_D·ϑ_{j−1}, v_D·ϑ_j), so
+the processes differ. (a) and (b): a node at binary depth ent_j·log₂ K_D of the refinement has value N(0, v_D·ϑ_j),
+and a path's values at those depths have independent increments of variance v_D·(ϑ_j − ϑ_{j−1}), as in model T; the
+expected count of single nodes above a cut uses only these marginal laws. (c): the hull of a step function with jumps
+at the ent_j and of the interpolation through the same points is the hull of the points. (d) and (e) are argued in the
+statement. ∎
+
+*The index as the model* (a mapping, not a claim about data). A query is one realisation of the values on a fixed
+tree. A row's score is a leaf's value; a group, a cluster or a sub-cluster is a node at a branching level, with the
+mean score of its rows as its value; a row's codes and stored vector are levels of fan-out 1 below the last branching
+level; the k nearest neighbours are the k best leaves. One departure is visible before any data is looked at: a node's
+value taken as the mean of its rows makes the children's increments sum to zero, weighted by size, so siblings are
+correlated −1/(F − 1) for F equal children, nothing at 2,000 children and a third at 4-way splits. The track's tests
+of the mapping (A1.7) do not test this hypothesis [proved, unrefereed: referee 1's remark] (`referee-1.md` A1.1
+item 5).
+
+**Theorem 5.34 (A1.2; the leaf floor at a fixed level).** In model T with 0 < ϑ < 1, ϑ = ϑ_{D−1}, give an algorithm
+the value of every internal node for nothing. It queries leaves one at a time, adaptively, with randomness of its own
+independent of the leaf values, and stops when it chooses; a target, a leaf with U ≥ T for a fixed T, is found when
+its leaf is queried. Let r < 1. If the expected number of targets found is at least r times the expected number of
+targets, then
+
+    E|𝒬| ≥ B_leaf(r) = K_D·P(A_{D−1} > θ_r),      θ_r defined by P(A_{D−1} > θ_r, U ≥ T) = r·P(U ≥ T),
+
+where (A_{D−1}, U) are jointly normal with Var A_{D−1} = v_D·ϑ, Var U = v_D and covariance v_D·ϑ. The rule "query the
+leaves whose parent's value exceeds θ_r" attains it. [proved, unrefereed: referee 1 found no error in the theorem as
+first written; the revision adds the hypotheses 0 < ϑ < 1, r < 1 and independent randomness, the reading of recall
+below, and the step for 𝒬 that the referee supplied, and was not re-read] (`program/approximate/CLAIMS.md` A1.2;
+`referee-1.md` A1.2)
+
+"Recall r" here is a ratio of expectations, E[found] ≥ r·E[targets]. With T fixed the number of targets in a tree is
+random and over-dispersed, since targets come in clumps under a few high parents, so the ratio weights the trees by
+their target counts; it is not the mean over trees of a tree's recall.
+
+*Proof.* Given 𝒢 the leaf values are independent, and leaf i has U_i ~ N(A_{par(i)}, v_D·(1 − ϑ)), because U_i is its
+parent's value plus a level-D increment independent of the others and of 𝒢. Write p_i = Φ̄((T − A_{par(i)})/√(v_D(1 −
+ϑ))), which is 𝒢-measurable. Fix a leaf i and run the same rule on the input with U_i replaced by a constant: the two
+runs agree until i is first queried, so the event {i ∈ 𝒬} is a function of 𝒢, the other leaves' values and the
+randomness, of all of which U_i is independent given 𝒢. Hence P(U_i ≥ T, i ∈ 𝒬) = E[1{i ∈ 𝒬}·p_i], and
+E[targets found] = E[Σ_{i∈𝒬} p_i]. For every λ ≥ 0 and every set 𝒬, Σ_{i∈𝒬} p_i ≤ λ|𝒬| + Σ_i (p_i − λ)₊. Taking
+expectations, E[targets found] ≤ λ·E|𝒬| + K_D·E(p − λ)₊, with p = Φ̄((T − A)/√(v_D(1 − ϑ))) and A ~ N(0, v_D·ϑ). Choose
+λ_r > 0 with K_D·E[p; p > λ_r] = r·K_D·P(U ≥ T); it exists because p has a continuous law (0 < ϑ < 1) and r < 1. Then
+
+    E|𝒬| ≥ ( r·K_D·P(U ≥ T) − K_D·E(p − λ_r)₊ ) / λ_r = K_D·P(p > λ_r) = K_D·P(A > θ_r),
+
+since E[p; p > λ] − E[(p − λ); p > λ] = λ·P(p > λ), and {p > λ_r} = {A > θ_r} because p increases with A, with
+E[p; A > θ] = P(A > θ, U ≥ T). The rule 𝒬 = {i : p_i > λ_r} has E|𝒬| = K_D·P(p > λ_r) and finds exactly the required
+expected number. ∎
+
+The proof uses nothing of the tree above the leaves' parents and nothing of 𝒢 beyond each leaf's own parent, so the
+floor holds for any tree shape and for an algorithm told any further information independent of the level-D increments
+[proved, unrefereed: referee 1's observation, checked by the track] (`referee-1.md` A1.2). Because it counts leaf
+queries only, in the model it is a floor on the rows read by any hierarchy whose finest centres explain a share ϑ,
+under any order, stop or beam; and with one leaf per parent the proof is unchanged, so one level lower it is a floor on
+the stored vectors read given the 16-byte or 32-byte level, with ϑ the share those levels explain [proved,
+unrefereed] (`program/approximate/CLAIMS.md` A1.2, remarks). Referee 1 attacked it with 12,000 trees of 200 × 500
+leaves and six leaf-query rules, four of them adaptive: none is above the floor, and the two built to sit on it are
+within 0.05 targets of it, with a standard error of 0.10 [model] (`program/approximate/referee/ref1_a12.txt`).
+
+**Theorem 5.35 (A1.2b; the leaf floor for the k best).** In model T with 0 < ϑ < 1, under the conditions of
+Theorem 5.34 on the algorithm, let the targets be the k leaves of largest value, and let
+p′_i = Φ̄((τ_{−i} − A_{par(i)})/√(v_D(1 − ϑ))). If the expected number of the k best that are found is at least r·k,
+then
+
+    E|𝒬| ≥ sup over λ > 0 of ( r·k − E Σ_i (p′_i − λ)₊ ) / λ.                                    (5.9)
+
+[proved, unrefereed: the theorem and its proof are referee 1's, checked line by line by the track; nobody else has
+read it] (`program/approximate/CLAIMS.md` A1.2b; `referee-1.md` A1.2, remark (i))
+
+*Proof.* Leaf i is among the k best if and only if U_i > τ_{−i}, ties having probability zero. τ_{−i} is a function of
+the other leaves' values, and {i ∈ 𝒬} is a function of 𝒢, the other leaves' values and the randomness, as in
+Theorem 5.34. Given that triple U_i ~ N(A_{par(i)}, v_D(1 − ϑ)), so P(i among the k best, i ∈ 𝒬) = E[1{i ∈ 𝒬}·p′_i]
+and E[found] = E Σ_{i∈𝒬} p′_i. For every λ > 0 and every 𝒬, Σ_{i∈𝒬} p′_i ≤ λ|𝒬| + Σ_i (p′_i − λ)₊. Take expectations
+and use E[found] ≥ r·k. ∎
+
+A leaf outside the k best has τ_{−i} = τ_k, and a leaf among them has the (k + 1)-th best, so the right side of (5.9) is
+the knapsack, at one price over trees, of a rule that is told τ_k, and Σ_i E p′_i = k. The floor is therefore not
+attained, since no algorithm knows τ_k. A static rule that knows every internal value and not τ_k, with
+p_c = E[F̄_c(τ_k)] as in (5.1), is attainable, and in the cells below it lies 1 to 4% above the floor, so the true cost
+of the k best lies between the two. B_leaf(r) at the level with K_D·Φ̄(z_T) = k is not proved to be a floor for the k
+best; in every cell computed it lies below (5.9).
+
+| K × fan-out | ϑ | B_leaf(0.9), fixed level | floor (5.9) | static optimum | floor / B_leaf |
+|---|---|---|---|---|---|
+| 500 × 2,000 | 0.30 | 85,084 | 89,482 | 92,742 | 1.05 |
+| 500 × 2,000 | 0.45 | 20,735 | 28,318 | 29,229 | 1.37 |
+| 500 × 2,000 | 0.60 | 4,198 | 11,898 | 11,984 | 2.83 |
+| 339 × 2,000 | 0.30 | 62,721 | 68,786 | 71,227 | 1.10 |
+| 339 × 2,000 | 0.45 | 16,092 | 24,884 | 25,854 | 1.55 |
+| 339 × 2,000 | 0.60 | 3,447 | 10,682 | 11,059 | 3.10 |
+| 28 × 784 | 0.45 | 1,681 | 2,907 | 3,030 | 1.73 |
+| 5,400 × 125 | 0.45 | 16,046 | 16,986 | 17,553 | 1.06 |
+| 5,400 × 125 | 0.60 | 3,439 | 3,998 | 4,172 | 1.16 |
+
+[computed] (`program/approximate/referee/ref1_a12c.py`: k = 10, r = 0.9, independent parents of variance ϑ, the
+Poisson form of (5.1), no leaf sampled.) So with a few hundred parents the floor for the k best is 1.05 to 3.1 times
+B_leaf(r). The cause is that τ_k does not concentrate: over trees it has a standard deviation of 0.15 to 0.24·√v_D at
+K = 339 to 500 and ϑ = 0.45 to 0.6, against 0.03 to 0.12 at K = 5,400 [computed] (`ref1_a12.txt`). With the leaves
+sampled and no Poisson form the track finds floor over B_leaf of 1.75 at 28 × 784 and ϑ = 0.45, against the
+referee's 1.73 [computed] (`program/approximate/scripts/topk_model.py check`). On trees with the three suite fits'
+measured shares, the static optimum is 1.42, 1.50 and 1.19 times B_leaf(0.9) at the cluster level (yahoo, LAION
+text, glove), 1.69, 1.88 and 1.30 with leaves of about 125 rows under the clusters, and 1.38, 1.76 and 1.41 with
+leaves of about 31 rows [computed, unrefereed] (`program/approximate/out/topk_model_fits.txt`). The floor's own column
+in those runs came out above the static optimum in 11 of 18 cells, which cannot be, and a run at 19,200 draws a seed
+shows it is noise, so only the static optimum is quoted from them.
+
+**What does not transfer, and statements withdrawn.**
+
+- *The hardness theorem.* Addario-Berry and Maillard (arXiv:1810.05129, Theorem 1.1) prove, for a continuous random
+  energy model on a binary tree of depth N′ with profile Π = ∫Π′, Π′ Riemann-integrable: (1) for x < x_* there is C(x)
+  such that for every ε > 0 and all large N′ an algorithm stops within C(x)·N′ queries at a leaf of value at least
+  x·N′ with probability above 1 − ε; (2) for x > x_* there is γ > 0 such that for N′ large, for every algorithm that
+  queries node values, the number of queries before such a leaf is found dominates a Geometric(e^(−γN′)) variable
+  [cited: the track read the statement and the proof; referee 1 checked the statement through a summary of the paper's
+  HTML]. The ground state is x_s, after Bovier and Kurkova as that paper quotes them [cited, unchecked], and x_* = x_s
+  if and only if Π is concave. The track's first version applied the theorem to model T, so that a non-concave
+  measured profile would make every hierarchy of centres pay an exponential number of reads; that is [refuted]
+  (`referee-1.md` A1.1 item 2). The theorem is about the binary refinement. Model T's own profile is Π_step, for which
+  the formula gives x_* = 0, which is right in substance: under a flat fan-out of K_D^(ent_j − ent_{j−1}) children with
+  no levels inside, every gain costs a power of K_D. For the index's tree, with two to four branching levels, the
+  bounds that apply are Theorems 5.34 and 5.35 from below and the beam's count from (5.7) from above
+  (`program/approximate/CLAIMS.md` A1.6 [model]). The read is also an enumeration to a recall, not the finding of one
+  leaf above a level, and its floors are present at a given D whatever the shape of the profile.
+- *The measured profiles.* On yahoo, LAION text and glove the profile is not concave, the last segment, from cells of
+  about 31 rows to the rows, being the steepest [measured] (`program/approximate/CLAIMS.md` A1.7 item 1;
+  `program/approximate/scripts/replay_np.py`). So in the limit of a binary refinement x_* < x_s. The margin of 2.5 to
+  5% that the first version read from the hull sum Σ_j √((ϑ_j − ϑ_{j−1})(ent_j − ent_{j−1})) is [refuted]
+  (`referee-1.md` A1.5 item 4): at 21,952 leaves and shares (0.6, 0.25, 0.15), the realised level of the best L
+  leaves over the level at which L leaves are expected moves from 0.90 at L = 1 to 1.00 at L = 512, so the hull sum
+  does not predict a realised level to better than about 0.05, which is the size of the margin [model]
+  (`program/approximate/referee/ref1_a14_a15.txt`, part C).
+- *Which dichotomy.* The first version identified model T's split (a subpolynomial beam when Π(t) ≥ t for every t)
+  with Bovier and Kurkova's weak and strong correlation regimes; that is [refuted] (`referee-1.md` A1.5 item 3). Their
+  weak regime is Π(t) ≤ t for every t, the other side of the diagonal: a profile that crosses the diagonal is on the
+  bad side of both splits, and only Π(t) = t is on the good side of both.
+- *Leaves of 125 rows.* The first version ranked designs by the exponents ent_j − ϑ_{j−1} of the beam's terms and
+  concluded that leaves of about 125 rows bring the row term down to the centres' term on yahoo and LAION; that is
+  [refuted] (`referee-1.md` A1.4 item 5). At N = 10⁶ term j ≥ 2 carries a factor exp(z_ε·z_T·√(ϑ_{j−1}(1 − ϑ_{j−1}))),
+  two orders of magnitude at ϑ near ½, and by count the row term is the largest in all twelve designs on the three fits,
+  by 20 to 100 times [computed] (`program/approximate/referee/ref1_a14_a15.txt`, part B). The exponent is a statement
+  about the limit only. In the model finer leaves still lower the rows when the read is one knapsack over the leaves:
+  the static optimum falls 2.1 to 2.4 times from the clusters to 125-row leaves and a further 1.4 to 2.1 times to
+  31-row leaves, against measured falls of 2.7 to 4.1 and 2.3 to 2.5 times [computed and measured, unrefereed]
+  (`program/approximate/CLAIMS.md` A1.9), which agrees in direction with §5.10.4.
+
+*Prior art.* The generalised random energy model is Derrida's [cited, unchecked]. Theorem 1.1 of Addario-Berry and
+Maillard is cited above, with the ground state of Bovier and Kurkova through it. Their open question 2, formula (5.1),
+conjectures the cost exponent above x_*; it is their [conjecture], read by the track and through a summary by
+referee 1. Pemantle (Ann. Appl. Probab. 19, 2009) shows that
+reaching a fraction 1 − ε of the best level on a homogeneous tree costs N·exp(Θ(ε^(−1/2))) for Bernoulli increments of
+mean below ½ [cited, unchecked: the abstract through a search summary and the description in Ho and Maillard,
+arXiv:2107.11465, section 1]; with ε of order 1/log N that is exp(Θ(√log N)), the form of `hierarchy/theory.md` (2.2).
 
 ### 5.10.2 The key of a node, and when to expand it
 
@@ -755,9 +1392,15 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
   (doubled glove random-25's reads; reverted).
 - **The key at a statistical width** (Proposition 5.17), **certified bounds against a few shared directions** (the
   remainder term prunes nothing), **sign codes of centres**, **a graph over centres**, **a second assignment of rows**
-  (SOAR [53] and SPANN's copies [54] in `lit/REPORT.md`; breaks the exact layout; the spilled copies of
-  `reports/surge2/approx-design.txt`, a design never run), and **a 4 or 8
-  byte first level** (no gain on yahoo at 1M) (`hierarchy/layered.md` §3).
+  (SOAR [53] and SPANN's copies [54] in `lit/REPORT.md`; breaks the exact layout), and **a 4 or 8 byte first level**
+  (no gain on yahoo at 1M) (`hierarchy/layered.md` §3). The spilled copies of `reports/surge2/approx-design.txt` were
+  not run as designed there, but a SOAR second assignment (λ = 1) was run in the stage 1b benchmark, under the older
+  approximate mode that probes clusters by centre score plus a radius term. It read 12 to 15% fewer items for the same
+  recall and was no faster (glove 863 against 922 queries a second, nytimes 316 against 319), because the second
+  members are scattered rows read out of order [measured] (`bench/REPORT.md`, "What the numbers say", item (c)); the
+  option is now retired (`bench/REPORT.md`, "Deviations from the protocol").
+- **A stop on expected misses** (§5.8a), and **rule 1's derived ρ as a general width**, **a width of ψ spreads with
+  the right spread**, and **every quantity of the width from the visible sample** (§5.9a).
 - **A level of centres over the clusters at 1M, and the groups as that level** (§5.10.5); **sub-clusters** in all three
   layouts at 1M (§5.10.4); **flat finer clusters**, which cost the exact path's per-cluster work 16 times over.
 
@@ -765,6 +1408,10 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
 
 1. **A stop with a guarantee.** The window stop is a heuristic (11 of 878 stops on synth4k missed a better cluster),
    and the exact lazy stop is too costly; nothing in between is known.
+   21 November 2026, in part settled: a stop fed by the pooled sample cannot be valid for every shape of the
+   within-cluster tail, a Cantelli stop valid for every standardised shape is useless in size, and the stop on
+   expected misses was dropped (§5.8a). A guarantee for a restricted class of tails (a hazard rate bounded below, a
+   log-concave tail, a known end of the support) is still open.
 2. **The size of the adaptivity gap** on real data (Theorem 5.12 bounds it; only synthetic evidence measures it).
 3. **Calibrated shares on out-of-distribution queries**, and whether a learned level (`hierarchy/policy.md` (11.2)) or features
    F1 to F4 of `hierarchy/policy.md` §11.5 close part of the gap to the clairvoyant order, which every (μ, σ) order leaves.
@@ -781,6 +1428,25 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
 10. [conjecture] A sub-centre stored as one more 20-byte coded row would not rank sub-centres, since the code's error
     (sd 0.011 on BioCLIP-2) is as large as the spread of q·(s − m_c) on LAION text (rms 0.013) (`hierarchy/theory.md`
     §5.2).
+11. **The slope m of (5.8).** It is fitted (m = 1), not derived: the track's model gives 0.67 to 0.80 where 0.89 to
+    1.21 was measured, and part of iNaturalist's 1.2 belongs to the frame it was measured in (§5.9a.3). A derivation is
+    open, and so is a fit at build from corpus rows and their own neighbours in the reader's units
+    (`program/approximate/CLAIMS.md` A4.6 item 4); a stable dial may need an upper quantile of the (query, cluster)
+    slopes, not their centre (§5.9a.5).
+12. **Filters that select on the coded or the left-out part of a row** at a given score, such as an attribute carried
+    by well-coded directions the query weighs. Lemma 5.31 fails for them, and the size of the effect on real attribute
+    and region filters is not bounded (§5.9a.4).
+13. **The plain rule's rows at equal recall** against (5.8). The record compares kept shares at one dial value, at
+    which the two rules read different numbers of rows; the comparison at equal rows or equal recall is not on record
+    (§5.9a.3).
+14. **A discriminator from the reader's pooled statistics.** A sketch's error in σ_c moves ρ_q and leaves δ_q near zero
+    (llama: ρ_q 0.60 to 0.63), while a cut on score moves δ_q by one to three spreads; whether (δ_q, ρ_q) can choose per
+    query between the whole-cluster and the sample height is referee 2's observation, not a result (`referee-2.md` §7).
+15. **The stop at high recall unfiltered** on arxiv, iNaturalist, glove and SIFT, where a fixed cluster count reads
+    fewer rows than the pooled stop (§5.8a).
+16. **The width's corrected shift and the narrower σ̂ under a cut on score**: the build's shift (the sample's mean of
+    e − σ̂·(s − μ_c)/σ_c) is not yet measured, and σ̂ from a visible sample is 13 to 21% too narrow under a quarter cut on
+    score in the linear model (§5.9a.4).
 
 ## Editor's queries
 
@@ -802,11 +1468,19 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
 5. **Proposition 5.16's product step** E h² ≈ (Σ_i a_i)² treats ‖DΔ‖ and ‖D⁻¹e‖ as uncorrelated; the source labels the
    result derived and checks it against measurement. Also, `layered.md` §0 writes ρ ≈ 1/√n, but its own yahoo value
    (0.0638 against 1/√384 = 0.051) is 25% above that.
+   21 November 2026, in part: `program/approximate/CLAIMS.md` A3.1 states the ratio for a fixed offset exactly, with no
+   product step, and recovers (5.6) as E[ρ_ℓ(q, c)²·w²] = ρ_{g,ℓ}²·E w² [proved, unrefereed: revised after referee 1,
+   which found no error in the earlier text]. For a fixed offset w is a constant, so E[h² | κ] = w²·E[u² | κ] needs no
+   product of means; averaged over offsets the identity is about E[ρ_ℓ(q, c)²·w²], not about E h², so the product step
+   of (5.6) as stated is unchanged. A3 is not transcribed in this chapter.
 6. **The numbers of Proposition 5.17.** Evaluating Φ((ψ − g√(1 − ϑ))/√ϑ) at g = ψ = 4 gives losses of 0.67%, 1.3% and
    17.3% for ϑ = 0.8, 0.72 and 0.2; the source gives 0.7%, 1.4% and 19%.
 7. **What the built rule 1 reads.** `hierarchy/layered.md` §4.2 says the approximate path can skip the randomised
    levels; the commit `370580d8e` reads them at the last deterministic level's ρ and uses one median ρ per level over
    the groups where the derivation gives one per group.
+   21 November 2026, closed for the second point: the approximate track read the code at `370580d8e` and confirms that
+   `Adaptive::new` takes the median over the groups of each deterministic level's ρ, so the built rule is per level, not
+   per group (`program/approximate/CLAIMS.md` A3.4, read in the code). The first point is unchanged.
 8. **Two readings of τ_k that look opposed.** `README.md` finding 4 says model, running and true τ_k give orders
    within 0.005; `hierarchy/policy.md` §11.1 says true τ_k was worst and τ* once best. The first is about the order at a fixed
    probe count, the second about the stop at a price on counts, so they need not conflict; the sources do not say so.
@@ -825,3 +1499,46 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
     `README.md` finding 3 gives a worst case of +0.007 at 6.3% scanned. The chapter keeps `theory.md`'s figure.
 13. **The group setup times** (4, 15 and 28 µs at n = 128, 384 and 512) are quoted by `groups-setup.md` from a source
     it does not name ("the ones I was given"); they are reported as measured but were not traced.
+14. **The idealised replay and the real reader on LAION.** The idealised stop of A2.6 pooled δ_q and ρ_q over every
+    row read, as the pooled stop `b87f1513e` does, yet on LAION it lost to a fixed count as the older stop `f528836`
+    does, while `b87f1513e` wins there (§5.8a). The idealised reader also differs in reading whole clusters with exact
+    spreads and pricing every unread cluster; the sources do not say which difference reverses the result.
+15. **"5 to 25%".** The visit-order session reads the four datasets where the fixed count wins as costing the stop 5
+    to 25%, but arxiv's ratio of 0.73 at recall 0.99 is 27% fewer rows for the fixed count, or 37% more for the stop.
+    The figures are reported as given.
+16. **ϑ in the whole-cluster rule.** `program/LOG-2026-11-21.md` says ζ and f come from the library's μ_c and 16-direction
+    σ_c(q) while σ̂ comes from the visible sample; it does not write f's formula. §5.9a.3 reads it as
+    ϑ = 1 − σ̂²/σ_c(q)². Referee 2 lists it as unchecked, with whether the session centred e/σ̂ and which spreads the
+    slope used; three of its verdicts turn on these three points together. `program/LOG-2026-11-21.md`, "answers to referee 2",
+    has since settled the other two (not centred; the sample's own mean and spread), not this one.
+17. **"18 cases".** The record says the rule keeps 0.93 to 0.99 "across 18 cases", but its list of the plain rule's
+    kept shares over "the same 18 cases" has 17 entries (5 unfiltered, and 3 each under random-25, region-25, top-25
+    and bottom-25).
+18. **Which shift the measurements used.** Settled by `program/LOG-2026-11-21.md`, last section: the 18-case figures for (5.8)
+    were measured with the shift taken as mean(e), before the correction, and the build now adds the sample's mean of
+    e − σ̂·(s − μ_c)/σ_c, which is not measured on record. §5.9a.3 says the figures predate the correction. What is
+    still open: no commit is recorded for that build, and `width_checks.py`, the script of the whole-cluster variant,
+    is named in the record without a path.
+19. **LAION's derived ρ, two figures.** §5.9's table has the derived ρ about 15% above the measured one on LAION text
+    at 64 groups (0.0561 against 0.0485), while the dumps of §5.9a.1 give actual over derived 0.94 there. The first is
+    an rms over all rows of 100 queries; the second a median over the clusters holding a neighbour, in the first 30
+    clusters a query. Both are reported.
+20. **"A4.4's identity".** `program/LOG-2026-11-21.md` calls the sampling identity at a randomised level "A4.4's identity"; it
+    is A4.7's in `program/approximate/CLAIMS.md`. The chapter cites A4.7.
+21. **Lemma 5.31's converse** holds for almost every e under the law of e given s, and the lemma needs P(Vis | s) > 0
+    at the scores it speaks of; referee 2 leaves both implicit. They are stated beside the proof, not added to the
+    statement.
+22. **The proofs of the dropped stop** (A2.1, A2.2, with the Cantelli stop and the sequential sketch) are summarised
+    in §5.8a with their tags and not transcribed, as the brief for this pass asked; the chapter of dropped work is to
+    carry them.
+23. **Which stop is `f528836`.** The record calls it "the older stop" and does not say whether it is the build of §5.8
+    that froze δ_q and ρ_q after the first clusters.
+24. **Tags of Theorems 5.34 and 5.35 and Proposition 5.33.** Referee 1 found no error in the leaf floor at a fixed
+    level as first written, and wrote the floor for the k best itself; the track then revised both, adding the
+    hypotheses the referee named. By the rule that a tag is never upgraded, all three stay [proved, unrefereed] until a
+    referee reads the revised text.
+25. **"The best rule for each case"** in the 18-case measurement is not named in the record; across the five
+    unfiltered indexes the best rule tried earlier was the width with κ = 1 − ϑ.
+26. **Proposition 5.30's last clause.** The source (A4.3 item 4), as referee 2 read it, says the slope is 1 exactly
+    when e is a linear function of s, and the proof argues from |correlation| ≤ 1. Equality ρ_es = 1 needs e to be an
+    increasing linear function of s; a decreasing one gives −1. The statement is kept as refereed.

@@ -844,9 +844,10 @@ feasible and drops non-negative terms. ∎
 **Lemma 2.23 (Lemma 5 of the floors track).** κ_k ≥ k for every k ≥ 1.
 
 Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.5;
-`program/floors/referee/referee-core.md`, stage 2 ("no error found; confirmed by a second proof"), and
-stage 3 (κ_k − k ≥ 0.6487 over every k ≤ 5,000 and a logarithmic grid to 10⁷,
-`program/floors/referee/core_f2_misc.log`).
+`program/floors/referee/referee-core.md`, stage 2 ("no error found; confirmed by a second proof"). The
+same report's stage 3 adds a computation that is not part of the lemma: κ_k − k ≥ 0.6487 over every
+k ≤ 5,000 and a logarithmic grid to 10⁷ (**[computed]**, `program/floors/referee/core_f2_misc.log`; see
+Editor's query 18).
 
 *Proof.* Let ν be uniform on the ball of radius ρ in ℝᵏ. T^ν(g) lies in the ball almost surely, so
 ρ‖g‖ ≥ g·T^ν(g) and ρ·E‖g_k‖ ≥ Σᵢ Cᵢ(ν). By Lemma 2.20, Σᵢ ln(√(2πe)·Cᵢ(ν)) ≥ H(ν) = ln(ω_k ρᵏ),
@@ -1184,7 +1185,10 @@ functions, Fano's inequality and the entropy bound on the expected length of a p
 - **Randomised certificates.** Theorems 2.2–2.6 cover deterministic, sound certificates only. They
   do not cover randomised certificates, offsets correlated with the residual, or non-Gaussian
   structure (`agent1/REPORT.md` section 2). Chapter 3 gives the randomised certificates' upper
-  bounds, and its R9 is the nearest statement of a lower bound.
+  bounds. Since 21 November 2026 it also gives a lower bound for the confidence constant in a
+  restricted class (one block, a linear estimate, a half-width proportional to the offset's norm;
+  chapter 3, section 3.7a). R9, which this entry used to name as the nearest lower bound, is refuted
+  as worded, and its quantile form is Corollary 3.30 (chapter 3, section 3.6a).
 - **Index-size cap.** Proposition 2.13 has no useful content unless index size is capped, and no
   bound with a cap has been stated.
 - **Proposition 2.9 for choices that depend on bits already read.**
@@ -1271,5 +1275,8 @@ functions, Fano's inequality and the entropy bound on the expected length of a p
     at k = 1 is exact, because κ₁ = √e. That no larger k gives less is stated by neither proof of
     Lemma 2.23. The evidence is the core referee's computation over every k ≤ 5,000 and a logarithmic
     grid to 10⁷ (`program/floors/referee/referee-core.md`, verdicts table, "κ_k − k ≥ 0.6487 (k = 1)", and
-    stage 3), so the chapter tags the sentence [computed] and names that range. Beyond it the statement
-    is unproved.
+    stage 3), so the chapter tags the sentence [computed] and names that range. The statement that κ_k − k
+    is least at k = 1 is therefore computed to k = 10⁷ and not proved for any range of k. No sentence of
+    this chapter gives it a tag of proof: the [proved, refereed] of Lemma 2.23 covers κ_k ≥ k only, and
+    the excess (κ_k − k)√θ in section 2.5 and after Corollary 2.26 rests on that lemma, not on the least
+    value.

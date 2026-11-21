@@ -11,8 +11,11 @@ mean of tan²φ over items. Nothing was timed.
 the nesting and the decode kept, the best package narrows the last level by 8.2% (6.6% with a 16-state encoder), below
 the 10% bar. [estimate from measured tan ratios] Three things are kept:
 
-1. **A free change to measure natively: 24 encoder scales in place of six.** It narrows the 6- and 7-bit rises by 6 to
-   8% and changes nothing stored or decoded. [measured]
+1. **A low-priority change to measure natively: 24 encoder scales in place of six.** It narrows the 6- and 7-bit rises
+   by 6 to 8%. [measured] The scales are the encoder's trial values (`LAMS`), so nothing more is stored or read at
+   query time, but the change is not free: the encode loop is four times longer, and the stored κ grid under a wider
+   range of scales has not been checked. It is worth about one point of the last level's width. (Corrected 21 November
+   2026; an earlier version of this line called the change free.)
 2. **The nesting loss, which is the track's result.** At one rate, codes with today's decode (one 16-entry lookup per
    nibble) gain 13 to 16% of width at 2 bits, 12% at 4 bits and 15 to 17% below one bit. Nested across the schedule,
    a table-additive trellis keeps 6 to 8% and E8 keeps nothing. The frontier between rises is steep: each further 1%

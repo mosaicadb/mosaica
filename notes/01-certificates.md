@@ -19,11 +19,20 @@ The symbols of chapter 0 apply. This chapter adds the following.
 | Symbol | Meaning |
 |---|---|
 | m̂ | m/‖m‖, the direction of the cluster's stored centre |
-| â | the sort key x·m̂ of a row, stored in 16 bits; δ_â is its quantum |
-| p̂, β | the anchor nearest the query, and β = q·p̂ |
-| q_⊥, ρ_⊥ | q_⊥ = q − βp̂, and ρ_⊥ = ‖q_⊥‖ (the cut's remainder norm of chapter 0) |
+| â, ã | the key x·m̂ of a row, and the value stored for it in 16 bits; rows are sorted by ã |
+| DA | the bound the index assumes on \|ã − â\|: DA = 0.5/32767 + 10⁻⁷, half the key's quantum plus 10⁻⁷ (`rust/src/index.rs` line 4) |
+| δ_â | the widening of the sorted range, which Lemma 1.5 needs to be at least \|ã − â\|; the index takes δ_â = DA + 10⁻⁹ (the referee of §1.2 writes δ, which chapter 0 keeps for a failure probability) |
+| p̂, β | the anchor nearest the query, and β = q·p̂ as computed (Proposition 1.4 allows any number) |
+| q_⊥, ρ_⊥ | q_⊥ = q − βp̂, and ρ_⊥ a number at least ‖q_⊥‖ (the cut's remainder norm of chapter 0) |
+| v_m | v − (v·m̂)m̂ for any vector v, the part orthogonal to m̂ (so q_m and x_m below) |
 | lo_c, hi_c | the stored extremes of p̂·x over cluster c, rounded outward |
-| x₂ | a bound on ‖x‖² for every stored row (1 up to f16 rounding) |
+| x₂, R | x₂ is a bound on ‖x‖² for every stored row (1 up to f16 rounding); R = √x₂ (§1.2 only) |
+| a, U, L (§1.2 only) | a is a key value in [−R, R]; U(a) and L(a) are an upper and a lower bound on q·x for a row with key a, and U₁, U₂, L₁, L₂ the two pairs of Lemma 1.5a |
+| ϱ, φ (Lemma 1.5b only) | the polar form of a bound's coefficients |
+| ϑ, ϑ_t (§1.2 only) | the angle of q to m̂, and arccos(t/(‖q‖√x₂)); the referee writes φ and ψ |
+| E_α (Proposition 1.6) | the basis-rounding term of the norm sort for a given α |
+| ε_r (§1.8a only) | the absolute rounding error of a computed difference of squares before its square root |
+| I_U, I_L, J_U, J_L, J⁺ (§1.2 only) | the key intervals of Lemma 1.5, the intervals the index computes in their place, and J⁺ the set of points within δ_â of an interval J |
 | D, D_ℓ | the positive diagonal weights of a deterministic level ℓ |
 | e, e_ℓ | the coding error a level leaves, in the coded coordinates |
 | ν_ℓ | the stored, rounded-up value of ‖D_ℓ⁻¹e_ℓ‖ |
@@ -40,7 +49,17 @@ The symbols of chapter 0 apply. This chapter adds the following.
 | g(b), g_tree(b) | the distortion of a b-bit uniform or tree quantiser on a unit Gaussian (§1.3, §1.6); g in §1.8 is a word of the compare |
 | B (§1.4 only) | the matrix Σ_Q^½ Σ_R Σ_Q^½, as in `groups/REPORT.md` §2.4; elsewhere B is a number of bits, as in chapter 0 |
 | k | in Proposition 1.12 the free parameter of the two-norm bound, as in the sources; in Corollary 1.14 and Proposition 1.15 the dimension of a subspace, as in chapter 2; elsewhere the number of neighbours, as in chapter 0 |
-| K_in, K_out, T_in, T_out, R_ℓ, B_ℓ, Θ, U, h, d, g (§1.8 only) | the integer kernel's thresholds, margins, centring remainder, accumulator, unit count, high-part width and the two words of its compare, as in `reports/surge/integer-kernel.txt`; they do not carry chapter 0's meanings there |
+| K_in, K_out, T_in, T_out, R_ℓ, B_ℓ, Θ, U, h, d, g (§1.8 only) | the integer kernel's thresholds, margins, sum of table offsets, accumulator, unit count, high-part width and the two words of its compare, as in `reports/surge/integer-kernel.txt`; they do not carry chapter 0's meanings there |
+| Rin_ℓ(n), Rout_ℓ(n), X_ℓ(n), up(·) (§1.8 only) | the built kernel's IN and OUT margins for norm code n, the half-width in table units they carry, and the outward rounding of a margin, as in `program/kernel/referee-kernel.md` §1 |
+| Hs, Ls, TH, TL, RH, RL (§1.8 only) | the high and low words of the accumulator, of a threshold and of a margin |
+| ψ_ℓ, ψ_max (§1.8 only) | the dial of level ℓ (`Prep2::dial[ℓ]`) and its largest value over the deterministic levels; the referee writes D_ℓ and D_max, which this chapter keeps for weights |
+| tol (§1.8 only) | the tolerance d of chapter 0 as the kernel receives it; d in §1.8 is a word of the compare |
+| est, hh, e°_ℓ (§1.8 only) | the estimate q·m + α·m·r + η·ŝ_ℓ, the half-width η·X_ℓ(n) + h_fix, and e_ℓ less its multiplicative slack |
+| n (as the argument of X_ℓ, Rin_ℓ, Rout_ℓ, ν_ℓ, w_ℓ) | a 4-bit norm code; elsewhere n is the dimension, as in chapter 0 |
+| δ_u, mag_u (§1.8 only) | a bound on the error of unit u's table entries (Lemma 1.18), and the per-unit magnitude of Proposition 1.22 |
+| ū, ρ_e (§1.8 only) | the f64 rounding unit 2⁻⁵³ (the report writes u, which §1.8 keeps as a unit's index), and an item's true weighted error norm at a level (the report writes ρ) |
+| THETA_MAX, TMIN, TMAX, RIN_MIN, ROUT_MIN, RSENT, IHMAX (§1.8 only) | the kernel's range constants in `rust/src/v2/kern.rs` lines 406–412 |
+| w_q, w_m, σ_m, n_p (§1.8 only) | a group's query weights, a cluster's centre weights, the step of the stored centre tables, and the number of units in a part |
 
 ## 1.1 The decomposition of the score
 
@@ -74,8 +93,14 @@ The two identities together give m·r = (1 − ‖m‖² − ‖r‖²)/2, the f
 separately stored m·r scalar or residual norm carries no information the key does not. Taking the item scale and the
 residual norm from the key in this way cut per-item bytes by 1–8% [measured] in `quant/REPORT.md` (BioCLIP-2 1M with
 200 item and 369 text queries, and four other datasets; `run2.py`). The key is stored in 16 bits, so the m·r it gives
-is off by at most ‖m‖·δ_â, and the built certificate adds |α|·‖m‖·δ_â to its fixed term (§1.3). The identity needs
+is off by at most ‖m‖·DA, and the built certificate adds |α|·‖m‖·DA to its fixed term (§1.3). The identity needs
 ‖x‖ = 1; the index covers f16 rounding of the norm through x₂.
+
+The referee of the cluster cut (`program/kernel/referee-range.md`, "Verdicts") read Lemmas 1.1 and 1.2 as stated here
+and found no error. It adds that the first identity of Lemma 1.2 needs no unit norm, and that in general
+‖r‖² = ‖x‖² − 2‖m‖â + ‖m‖². The error bound ‖m‖·DA on the m·r that the stored key gives holds only when
+|x·m̂| ≤ 1 + DA, because the build clamps the key to [−1, 1] (§1.8a, defect 1). The kernel referee adds that the f32
+evaluation of m·r from the key is covered by the fixed term only while |α|·‖m‖ ≤ 23 (§1.8a, defect 5).
 
 **Proposition 1.3** (the centre correction).
 
@@ -87,12 +112,21 @@ fixed independently of ω.
 
 The referee (`reports/surge/referee.txt` §3) found (a) correct, and added that the stored scalar of the source's
 estimator is a cached function of the code, the centre and the rotation, so it adds no information. Part (a) is
-Theorem 3.11 (i) of chapter 3, where it is used with the randomised level's estimator.
+Theorem 3.11 (i) of chapter 3, where it is used with the randomised level's estimator. The referee of the cluster cut
+(`program/kernel/referee-range.md`, "Verdicts" and "The statements and proofs as they should stand") read (a) again,
+found no error, and restates it with the same content and the same proof ("for unit q and α = q·m/‖m‖², Δ = q − αm is
+orthogonal to m and ‖Δ‖² = 1 − (q·m̂)²"). Because the restatement adds nothing, the refereed wording above is kept. That
+referee also notes that α plays no part in the cluster cut or in the sorted range on the key; it enters only `NuCut`
+(Proposition 1.6) and the levels.
 
-(b) (`agent2/REPORT.md` "Fixes", `combined/REPORT.md` item 3.) [proved, unrefereed] For positive diagonal D, the α
-that minimises ‖D(q − αm)‖ is α* = ⟨Dq, Dm⟩/‖Dm‖².
+(b) (`agent2/REPORT.md` "Fixes", `combined/REPORT.md` item 3; statement and proof as restated in
+`program/kernel/referee-range.md`, "The statements and proofs as they should stand".) [proved, unrefereed] For
+positive diagonal D with Dm ≠ 0, ‖D(q − αm)‖ is least at α* = ⟨Dq, Dm⟩/‖Dm‖².
 
-*Proof.* ‖D(q − αm)‖² = ‖Dq‖² − 2α⟨Dq, Dm⟩ + α²‖Dm‖² is a convex quadratic in α with its minimum at α*. ∎
+*Proof.* The square is ‖Dq‖² − 2α⟨Dq, Dm⟩ + α²‖Dm‖², a convex quadratic in α with vertex α*, because ‖Dm‖² > 0. ∎
+
+The referee found no error in the chapter's earlier statement of (b), and its restatement adds the hypothesis Dm ≠ 0,
+without which α* is undefined. The restatement is the referee's own, so it is tagged unrefereed.
 
 A deterministic level's margin is proportional to ‖D_ℓΔ‖ (Proposition 1.8), so α* minimises that level's margin. The
 index computes one α per (query, cluster) in floating point from the weighted query and centre coordinates, uses it at
@@ -115,70 +149,215 @@ Measured effects [measured]:
 Before any code byte is read, the query rules out or takes in whole clusters and the two ends of each remaining
 cluster. Every centre direction is an anchor in the index as built (`SYSTEM.md` §2.1; the design of `DESIGN.md` §2 also
 had 256 text-prompt anchors). For each anchor p̂ and cluster c the build stores lo_c ≤ p̂·x ≤ hi_c over the cluster's
-rows, rounded outward, in 2 bytes each.
+rows, rounded outward; how they are stored is listed with the code's other departures at the end of this section. A
+query uses one anchor for every cluster, the one nearest to it, chosen once per query (`anc_among`, `rust/src/v2/q.rs`
+line 117).
 
-**Proposition 1.4** (the cluster cut; `SYSTEM.md` §2.2, `DESIGN.md` §3 steps 1–2, `agent3b/REPORT.md` §2 C2).
-[proved, unrefereed] Let β̄_c = max(β·lo_c, β·hi_c) and β̲_c = min(β·lo_c, β·hi_c). Every row x of cluster c with
-‖x‖ ≤ √x₂ satisfies
+The statements of this section are those of the referee of the cluster cut and the sorted range
+(`program/kernel/referee-range.md`, "The statements and proofs as they should stand"), who read the code at commit
+8c0b316f9 and restated the chapter's earlier statements so that they cover the index as built. Each restatement is the
+referee's own and is therefore tagged [proved, unrefereed]. The referee read the earlier statements as well, and its
+verdict on each is given beside the restatement.
 
-    β̲_c − ρ_⊥√x₂ ≤ q·x ≤ β̄_c + ρ_⊥√x₂.
+*Setting.* A cluster has a unit direction m̂. Every row has ‖x‖² ≤ x₂; write R = √x₂ and â = x·m̂, so |â| ≤ R. The
+stored key ã satisfies |ã − â| ≤ δ_â, and the rows are sorted by ã. For an anchor vector p̂ the cluster stores
+lo_c ≤ p̂·x ≤ hi_c over its rows.
 
-*Proof.* q·x = β·p̂·x + q_⊥·x. The first term lies between β̲_c and β̄_c, and |q_⊥·x| ≤ ρ_⊥‖x‖ by Cauchy–Schwarz. ∎
+**Proposition 1.4** (the cluster cut; `SYSTEM.md` §2.2, `DESIGN.md` §3 steps 1–2, `agent3b/REPORT.md` §2 C2;
+statement and proof as restated in `program/kernel/referee-range.md`). [proved, unrefereed] Let q and p̂ be any
+vectors and β any number, q_⊥ = q − βp̂, ρ_⊥ ≥ ‖q_⊥‖, β̄_c = max(β·lo_c, β·hi_c) and β̲_c = min(β·lo_c, β·hi_c).
+Then every row x of cluster c satisfies
+
+    β̲_c − ρ_⊥R ≤ q·x ≤ β̄_c + ρ_⊥R.
+
+If ‖p̂‖ = 1 and β = q·p̂, then ‖q_⊥‖² = ‖q‖² − β².
+
+*Proof.* q·x = β(p̂·x) + q_⊥·x. Since lo_c ≤ p̂·x ≤ hi_c, the number β(p̂·x) lies between β·lo_c and β·hi_c, in either
+order according to the sign of β, and hence in [β̲_c, β̄_c]. By Cauchy–Schwarz, |q_⊥·x| ≤ ‖q_⊥‖‖x‖ ≤ ρ_⊥R. For the
+last claim, ‖q − βp̂‖² = ‖q‖² − 2β(q·p̂) + β²‖p̂‖² = ‖q‖² − β². ∎
+
+The referee found no error in the chapter's earlier statement, which took ρ_⊥ = ‖q_⊥‖, and restated it for any p̂ and
+any β once ρ_⊥ ≥ ‖q − βp̂‖ ("Verdicts"). The generality matters, because neither ‖p̂‖ = 1 nor β = q·p̂ holds exactly
+in floating point: a loaded anchor is admitted at norm 1 ± 10⁻¹² (`check_anchors` in `rust/src/index.rs`), and β is a
+computed dot product. The index computes ρ_⊥ = √max(‖q‖² − β², 0)·(1 + 10⁻¹²) + 10⁻¹² (`anc_of`, `rust/src/v2/q.rs`
+line 182), and that number is not always at least ‖q_⊥‖ (§1.8a, defect 2).
 
 A cluster whose lower bound reaches t is taken in unread, and one whose upper bound is below t is skipped unread. For a
-unit query ρ_⊥ = √(1 − β²). The extremes stay valid when rows are deleted and need only widen when rows are inserted,
-which is why the design keeps them for the write path (`agent3b/REPORT.md` §2; the write path is not built).
+unit query and a unit anchor, with β = q·p̂ exact, ρ_⊥ = √(1 − β²) suffices. The extremes stay valid when rows are
+deleted and need only widen when rows are inserted, which is why the design keeps them for the write path
+(`agent3b/REPORT.md` §2; the write path is not built).
 
-In each cluster that survives the cut, the query bounds each row from its key â alone, in two ways. Write
-x = â·m̂ + x_m with x_m ⊥ m̂, so that ‖x_m‖ ≤ √(x₂ − â²).
+In each cluster that survives the cut, the query bounds each row from its key alone, in two ways.
 
-1. *Annulus.* With q = (q·m̂)m̂ + q_m and q_m ⊥ m̂, q·x = (q·m̂)â + q_m·x_m, so
-   q·x ∈ (q·m̂)â ± ‖q_m‖·√(x₂ − â²).
-2. *Table plus remainder.* q·x = β·p̂·x + q_⊥·x and q_⊥·x = (q_⊥·m̂)â + (q_⊥ − (q_⊥·m̂)m̂)·x_m, so
-   β̲_c + (q_⊥·m̂)â − ‖q_⊥ − (q_⊥·m̂)m̂‖·√(x₂ − â²) ≤ q·x ≤ β̄_c + (q_⊥·m̂)â + ‖q_⊥ − (q_⊥·m̂)m̂‖·√(x₂ − â²).
-   The number q_⊥·m̂ = q·m̂ − β·p̂·m̂ is one per (query, cluster).
+**Lemma 1.5a** (two bounds from the key; `agent3b/REPORT.md` §2 C1 for the annulus, the chapter's earlier text for
+the table plus remainder; statement and proof as restated in `program/kernel/referee-range.md`). [proved, unrefereed] For every
+row x of the cluster,
 
-Each upper bound has the form U(â) = a₀ + a₁â + a₂√(x₂ − â²) with a₂ ≥ 0, and each lower bound the form
-L(â) = b₀ + b₁â − b₂√(x₂ − â²) with b₂ ≥ 0.
+(i) (annulus) |q·x − (q·m̂)â| ≤ ‖q_m‖·√(R² − â²);
 
-**Lemma 1.5** (one contiguous undecided range; `agent3b/REPORT.md` §2 C1, `combined/REPORT.md` item 2,
-`DESIGN.md` §3 step 3). [proved, unrefereed] Within a cluster whose rows are sorted by â, the rows that neither pair of
-bounds decides form one contiguous range of the sort order.
+(ii) (table plus remainder) β̲_c + (q_⊥·m̂)â − ‖(q_⊥)_m‖·√(R² − â²) ≤ q·x ≤ β̄_c + (q_⊥·m̂)â + ‖(q_⊥)_m‖·√(R² − â²).
 
-*Proof.* On [−√x₂, √x₂] the function â ↦ √(x₂ − â²) is concave, so each U is concave and each L is convex. A row is not
-excluded when min(U₁, U₂) ≥ t, that is when â lies in {U₁ ≥ t} ∩ {U₂ ≥ t}. A superlevel set of a concave function on an
-interval is an interval, and so is an intersection of two intervals. A row is not included when max(L₁, L₂) < t, that
-is when â lies in {L₁ < t} ∩ {L₂ < t}, and a strict sublevel set of a convex function is likewise an interval. The
-undecided rows are those whose key lies in the intersection of these two intervals, which is an interval I, and the
-rows whose key lies in an interval are contiguous when the rows are sorted by key. ∎
+Here ‖v_m‖² = ‖v‖² − (v·m̂)², and q_⊥·m̂ = q·m̂ − β·p̂·m̂ is one number per (query, cluster).
 
-Lemma 4.10 of chapter 4 states the annulus case of this lemma, from the same source (`agent3b/REPORT.md` §2 C1), and
-uses it for the "range" cut of its scaling measurements. The sources state this argument in one line ("the upper bound is concave in a and the lower convex", and "intersection
-of two intervals"). It is not among the consolidated proofs, and no referee has checked it. The query finds the ends of
-I by binary search, and because the stored key is rounded, the index widens each end by δ_â + 10⁻⁹ before searching
-(`rust/src/v2/q.rs`, `sorted_range2`). Rows outside the not-excluded interval are decided out and rows inside it but
-outside I are decided in; the visible rows in I are the cluster's candidates.
+*Proof.* Write x = âm̂ + x_m with x_m ⟂ m̂, so ‖x_m‖² = ‖x‖² − â² ≤ R² − â². For any vector v,
+v·x = (v·m̂)â + v·x_m = (v·m̂)â + v_m·x_m, because x_m ⟂ m̂, and |v_m·x_m| ≤ ‖v_m‖·√(R² − â²). Taking v = q gives (i).
+For (ii), q·x = β(p̂·x) + q_⊥·x. The first term lies in [β̲_c, β̄_c] as in Proposition 1.4, and v = q_⊥ bounds the
+second. ∎
 
-**Proposition 1.6** (sorting by the residual's norm; `groups/REPORT.md` §3.3, `DESIGN.md` §9 item 2).
-[proved, unrefereed] Let V_q be the stored basis and z̃_x the coordinates the encoder stores for r, as in Lemma 1.9.
-Suppose each row stores ν_x ≥ ‖z̃_x‖, and the cluster stores b_min ≤ m·r ≤ b_max and r_max ≥ ‖r‖ over its rows.
-(For the exact dual basis, ‖z̃_x‖ = ‖r‖_{M⁻¹} and ‖V_qᵀΔ‖ = ‖Δ‖_M, by §1.4.) Then for any α fixed per (query,
-cluster), with Δ = q − αm, D_α ≥ ‖V_qᵀΔ‖ and E ≥ e_inv·(‖q‖ + |α|·‖m‖)·r_max,
+Each bound has the form U(a) = a₀ + a₁a + a₂√(R² − a²) or L(a) = b₀ + a₁a − a₂√(R² − a²) on [−R, R] with a₂ ≥ 0. A
+bound stays valid when a₂ and a₀ are replaced by larger numbers and b₀ by a smaller one, which is what lets the index
+round these constants outward. (The referee writes c, p, r and c′ for a₀, a₁, a₂ and b₀; this chapter keeps c for a
+cluster and r for a residual.)
 
-    q·m + min(αb_min, αb_max) − D_α·ν_x − E ≤ q·x ≤ q·m + max(αb_min, αb_max) + D_α·ν_x + E,
+**Lemma 1.5b** (the shape of the bounds; statement and proof as written in `program/kernel/referee-range.md`).
+[proved, unrefereed] U is concave and L convex on [−R, R], and both are continuous. For every t, {a : U(a) ≥ t} is a
+closed interval and {a : L(a) < t} an interval open in [−R, R]; either may be empty. With a = R cos θ, θ ∈ [0, π],
+ϱ = √(a₁² + a₂²) and φ = atan2(a₂, a₁) ∈ [0, π],
 
-and both ends are monotone in ν_x, so in a cluster sorted by ν_x the rows decided in or out form a prefix.
+    U = a₀ + ϱR cos(θ − φ),    L = b₀ + ϱR cos(θ + φ).
 
-*Proof.* By Lemma 1.1, q·x = q·m + α·m·r + Δ·r, and α·m·r lies between αb_min and αb_max. By Lemma 1.9 with
-u = Δ, Δ·r = (V_qᵀΔ)·z̃_x + Δ·ε with |Δ·ε| ≤ e_inv·‖Δ‖·‖r‖ ≤ E, because ‖Δ‖ ≤ ‖q‖ + |α|·‖m‖. Cauchy–Schwarz gives
-|(V_qᵀΔ)·z̃_x| ≤ D_α·ν_x. ∎
+*Proof.* The map a ↦ √(R² − a²) is continuous on [−R, R], with second derivative −R²(R² − a²)^(−3/2) < 0 inside, so
+it is concave. Since a₂ ≥ 0 and a₁a is linear, U is concave and L convex. If U(a₁′) ≥ t and U(a₂′) ≥ t, then for
+λ ∈ [0, 1], U(λa₁′ + (1 − λ)a₂′) ≥ λU(a₁′) + (1 − λ)U(a₂′) ≥ t, so the set is convex, hence an interval, and it is
+closed by continuity. The same argument with L(λa₁′ + (1 − λ)a₂′) ≤ λL(a₁′) + (1 − λ)L(a₂′) < t gives the second
+claim. The trigonometric forms follow from a₁ = ϱ cos φ, a₂ = ϱ sin φ and √(R² − a²) = R sin θ. ∎
 
-`groups/REPORT.md` §3.3 states the bound in one sentence, in exact coordinates and without E; the statement above, with
-the basis-rounding term, is the one in the comment on `NuCut` in `rust/src/v2/q.rs` (Editor's query 13).
+Nothing here depends on the sign of a₁ (that is, of q·m̂ or q_⊥·m̂), on the sign or size of t, or on α, which does not
+occur. At a = ±R the square root is 0, and both bounds equal their constant plus or minus a₁R. (In the proof, a₁′ and
+a₂′ are two key values; the referee writes a₁ and a₂.)
 
-The index as measured sorts by â. The ν-sort is implemented in the code (`NuCut` in `rust/src/v2/q.rs`, which takes the
-best of three values of α), but `dualproto/REPORT.md` §7 lists it as not run natively, and `SYSTEM.md` does not use it.
-With it, the support table and its anchors could be dropped.
+**Lemma 1.5** (one contiguous undecided range, for the stored key; `agent3b/REPORT.md` §2 C1, `combined/REPORT.md`
+item 2, `DESIGN.md` §3 step 3; statement and proof as restated in `program/kernel/referee-range.md`).
+[proved, unrefereed] Let U₁, U₂ and L₁, L₂ be the bounds of Lemma 1.5a, t a threshold, I_U = {U₁ ≥ t} ∩ {U₂ ≥ t} and
+I_L = {L₁ < t} ∩ {L₂ < t}. Let J_U ⊇ I_U and J_L ⊇ I_L be intervals, and J⁺ the set of points within δ_â of an
+interval J. Call a row *out* if ã ∉ J_U⁺, *in* if ã ∈ J_U⁺ and ã ∉ J_L⁺, and *undecided* if ã ∈ J_U⁺ ∩ J_L⁺. Then
+
+(a) every out row has q·x < t;
+
+(b) every in row has q·x ≥ t;
+
+(c) in the order of ã, the rows that are not out form one contiguous range, the undecided rows form one contiguous
+range inside it, and the in rows are the at most two ranges between them;
+
+(d) with exact keys (δ_â = 0, ã = â, J_U = I_U, J_L = I_L), the undecided rows are exactly those with
+min(U₁, U₂)(â) ≥ t and max(L₁, L₂)(â) < t.
+
+The lemma does not say at which end the out rows or the in rows lie; each kind can lie at either end, or at both.
+
+*Proof.* I_U and I_L are intervals by Lemma 1.5b, as intersections of two intervals. (a) If ã ∉ J_U⁺ then, as
+|ã − â| ≤ δ_â, â ∉ J_U ⊇ I_U, so U_i(â) < t for some i, and q·x ≤ U_i(â) < t by Lemma 1.5a. (b) If ã ∉ J_L⁺ then
+â ∉ I_L; since â ∈ [−R, R], L_i(â) ≥ t for some i, and q·x ≥ L_i(â) ≥ t. (c) J_U⁺ and J_L⁺ are intervals, and so is
+their intersection. Membership of a row in each depends on ã alone, so rows with equal keys fall together, and the rows
+whose sort key lies in an interval are contiguous in the sort order. The in rows are those of the first range outside
+the second, which is nested in it. (d) is the definition. ∎
+
+*What the index takes.* `sorted_range2` (`rust/src/v2/q.rs` line 715) does not evaluate a bound row by row. It solves
+U ≥ t and L < t in the closed forms of Lemma 1.5b (`sup_set`, `inf_set`, `isect`) and takes
+
+    J_U = cl{U₁ ≥ t − 10⁻⁹} ∩ cl{U₂ ≥ t − 10⁻⁹},    J_L = cl{L₁ < t + 10⁻⁹} ∩ cl{L₂ < t + 10⁻⁹},    δ_â = DA + 10⁻⁹,
+
+with DA = 0.5/32767 + 10⁻⁷. It then finds the rows whose stored key lies in J_U⁺ and in J_L⁺ with two `partition_point`
+calls each. No bound is evaluated at a rounded key, so the set returned is a range of rows by construction. The lemma
+then applies under two hypotheses that the code does not secure in every case: |ã − â| ≤ DA, which the clamp of the
+key breaks (§1.8a, defect 1), and the outward rounding of the bounds' constants, which the square roots of cancelling
+differences break (§1.8a, defect 2). The visible rows in the undecided range are the cluster's candidates.
+
+The referee's verdict on the chapter's earlier statement, which was about rows sorted by the true key â, is that it
+and its proof are correct for exact keys; that statement is part (d) here. For the index the lemma had to be restated
+for the stored key with a widening, and it must not say at which end the decided rows lie.
+
+Numerical checks [model] (`referee-range.md` F2, F7; float64 transcriptions of `anc_of`, `cut_params2`, `sup_set`,
+`inf_set`, `isect`, `sorted_range2`, `support_pre`, `bound_up` and `bound_down`, the key and x₂ of the build, on small
+synthetic indexes with n = 3 to 32, f16 rows, 8-bit centres and adversarial queries and thresholds, with exact
+rational comparisons near t):
+
+- `closed_form_check.py` compared `sup_set` and `inf_set` with the bound on a grid of 4,003 keys for 20,000 random
+  coefficient sets, including a₂ down to 10⁻⁹ and a₁ = 0. No grid point satisfying the inequality fell outside the
+  returned interval, and none failed it by more than 10⁻⁹ inside, so the code's interval is the lemma's.
+- Over seeds 2, 3 and 5 (872,256 checks, 26.8M rows decided), the real-valued undecided set at the true keys was never
+  non-contiguous in true-key order. Read in the stored order it was non-contiguous in 3,887 checks, through rows at
+  equal stored keys with different true keys; this is why the lemma is stated for ã. All 1,729 wrong decisions were
+  rows with |x·m̂| > 1 + DA (defect 1), and none occurred with the key in range.
+- Along increasing key, with O for out, I for in and u for undecided, seed 2 gave the arrangements u 107,135; uO 36,872;
+  uI 36,267; Ou 25,858; OuI 25,332; Iu 24,459; OuO 24,056; IuI 20,695; O 20,476; IuO 18,683; I 12,798; OI 2,215;
+  IO 1,438. So out rows and in rows each occur at either end, and no arrangement had an out run and an in run at the
+  same end.
+
+*Which end.* For the annulus bound alone, with ϑ the angle of q to m̂ and ϑ_t = arccos(t/(‖q‖√x₂)), the referee states
+that the high-key end is out when ϑ > ϑ_t and in when ϑ < ϑ_t, and that the low-key end is out when ϑ + ϑ_t < π and in
+when ϑ + ϑ_t > π [sketch: gap named] (`referee-range.md`, "Verdicts"; the referee writes φ and ψ for ϑ and ϑ_t, and the
+gap is that the report gives the rule without a proof). The description in `SYSTEM.md` §2.2 ("certain matches above it
+and certain non-matches below") is therefore wrong in general (Editor's query 6).
+
+Lemma 4.10 of chapter 4 states the annulus case of the earlier lemma, from the same source (`agent3b/REPORT.md` §2 C1),
+and uses it for the "range" cut of its scaling measurements.
+
+**Proposition 1.6** (sorting by the residual's norm; `groups/REPORT.md` §3.3, `DESIGN.md` §9 item 2, the comment on
+`NuCut` in `rust/src/v2/q.rs` lines 634–635; statement and proof as restated in `program/kernel/referee-range.md`).
+[proved, unrefereed] Let V_q be the stored basis, and for each row let z̃_x be the stored coordinates of r = x − m and
+ε = r − V_q z̃_x, with ‖ε‖ ≤ e_inv‖r‖. Let ν_x ≥ ‖z̃_x‖, and let b_min ≤ m·r ≤ b_max and r_max ≥ ‖r‖ over the
+cluster. For any α chosen from q and the cluster alone, with Δ = q − αm, D_α ≥ ‖V_qᵀΔ‖ and
+E_α ≥ e_inv(‖q‖ + |α|‖m‖)r_max,
+
+    q·m + min(αb_min, αb_max) − D_α·ν_x − E_α ≤ q·x ≤ q·m + max(αb_min, αb_max) + D_α·ν_x + E_α.
+
+The upper end is non-decreasing and the lower end non-increasing in ν_x, and so are the least upper end and the
+greatest lower end over any finite set of values of α. Hence, in a cluster sorted by ν_x, the rows whose upper end is
+below t form a prefix, the rows whose lower end is at least t form a prefix, and at most one of the two prefixes is
+non-empty.
+
+*Proof.* q·x = q·m + q·r = q·m + α(m·r) + Δ·r (Lemma 1.1). The term α(m·r) lies between αb_min and αb_max. Next,
+Δ·r = Δ·V_q z̃_x + Δ·ε = (V_qᵀΔ)·z̃_x + Δ·ε. By Cauchy–Schwarz, |(V_qᵀΔ)·z̃_x| ≤ ‖V_qᵀΔ‖‖z̃_x‖ ≤ D_αν_x, and
+|Δ·ε| ≤ ‖Δ‖e_inv‖r‖ ≤ (‖q‖ + |α|‖m‖)e_inv r_max ≤ E_α. This gives the two inequalities. Since D_α ≥ 0, the ends are
+monotone in ν_x; a minimum of non-decreasing functions is non-decreasing, and a maximum of non-increasing functions is
+non-increasing. A monotone condition on the sort key holds on a prefix. If both prefixes were non-empty, the first row
+would have its upper end below t and its lower end at least t, which contradicts lower end ≤ q·x ≤ upper end. ∎
+
+For the exact dual basis, ‖z̃_x‖ = ‖r‖_{M⁻¹} and ‖V_qᵀΔ‖ = ‖Δ‖_M by §1.4; the referee notes that it did not referee
+§1.4. `groups/REPORT.md` §3.3 states the bound in one sentence, in exact coordinates and without E_α. The referee found
+no error in the chapter's earlier statement of this proposition or in its proof, basis term included (Editor's query
+13). Its restatement adds the last claim, that at most one prefix is non-empty, and the extension to the best of
+several values of α, which the code uses: `NuCut` takes the tighter of the bounds for the three values of α that its comment names,
+α ∈ {qv·mv/‖mv‖², q·m/‖m‖², 0} (q.rs line 634, with qv and mv the query and centre in the group's coordinates).
+
+The referee's model of `NuCut` (`nucut_attack.py`: int8 basis with one scale per vector, Newton-polished inverse, e_inv,
+ν rounded up to 16 bits on the cluster's grid, b_min, b_max and r_max from the stored keys, three values of α, the
+cut-offs and their margins; n = 4 to 32; seeds 1 to 3) made 244,800 checks with 15.0M row decisions offered and 1.87M
+taken [model]. It found 748 wrong decisions and 979 exact scores outside the bounds of their norm code, all of them rows
+with |x·m̂| > 1 + DA, whose m·r leaves [b_min, b_max] because b_min and b_max come from the clamped key (§1.8a,
+defect 1); it found none otherwise. The hypothesis ‖ε‖ ≤ e_inv‖r‖ is not established by the code as a bound (§1.8a,
+defect 7).
+
+The index as measured sorts by the stored key ã. The ν-sort is implemented in the code (`NuCut`), but
+`dualproto/REPORT.md` §7 lists it as not run natively, and `SYSTEM.md` does not use it. With it, the support table and
+its anchors could be dropped.
+
+*Departures of the code from the earlier text of this section* (`referee-range.md` F0 and F8, from the code at commit
+8c0b316f9):
+
+- *The support table.* lo_c and hi_c are stored as f32 on a grid of 2⁻¹⁵, 4 bytes a value in memory (`Index2::hi`,
+  `Index2::lo`), and not in 2 bytes each as this section said before. Each is the exact f64 extreme moved outward by
+  10⁻⁹ and then rounded outward to the grid (`bound_up`, `bound_down` in `rust/src/v2/mod.rs`). The f32 screen in
+  `support_bounds`, which recomputes in f64 every row within twice the f32 error of the f32 extreme, is argued
+  correctly for unit anchors and any summation order. The referee found no error in it. Editor's query 15 asks about
+  the size on disk.
+- *The key and DA.* `rows_of` (`rust/src/v2/mod.rs` line 1583) computes â = x·m̂ in f64 from the f16 row and the f64
+  direction m̂ = m/‖m‖ of the stored centre, stores round(clamp(â, −1, 1)·32767) as an i16 (line 1589), and sorts the
+  cluster by (stored key, row). DA = 0.5/32767 + 10⁻⁷ is half the key's quantum plus 10⁻⁷, whereas this chapter called
+  δ_â the quantum. The clamp is defect 1 of §1.8a.
+- *x₂.* x₂ = 1 + max over rows of (‖x‖² − 1)·(1 + 10⁻⁹) + 10⁻¹², and never below 1 + 10⁻¹², from the f16 rows in f64.
+- *The threshold.* `sorted_range2` puts 10⁻⁹ on the threshold as well as widening the key interval, whereas this
+  section mentioned only the widening.
+- *The single anchor.* The query uses one anchor, the nearest, for every cluster, and the remark ρ_⊥ = √(1 − β²) needs
+  ‖p̂‖ = 1 and β = q·p̂ exactly, which floating point does not give. This is why Proposition 1.4 is stated for any p̂ and
+  β, and why the rounding of ρ_⊥ matters (defect 2).
+- *e_inv.* e_inv = (the computed Frobenius defect of V·X)·(1 + 10⁻⁶) + 10⁻¹² (`rust/src/v2/mod.rs` line 747), where X
+  is the computed inverse. It does not bound the rounding of z̃ = fl(X·r) or of the defect itself. The referee
+  estimates that rounding, with standard bounds, at up to about 5·10⁻¹⁰ relative at n = 768 and condition 227, and
+  typically far less [model]. The +10⁻⁹ in `NuCut`'s E_α (q.rs line 654) and the 4·10⁻⁶ in the levels' fixed term
+  (q.rs line 574) absorb it, but no source says so. It belongs with the gap named in 1.10 (§1.8a, defect 7).
+- *The centre's 8 bits.* They have no effect on soundness, because the key, q·m and p̂·m̂ all use the same stored centre
+  and the same m̂ = m/‖m‖ in f64.
 
 **Proposition 1.7** (one representative; `groups/REPORT.md` §2.1). [proved, unrefereed] For unit q, x and p with
 φ_q = ∠(q, p) and φ_x = ∠(x, p), and n ≥ 3, the tightest interval for q·x that depends on φ_q and φ_x alone is
@@ -259,8 +438,8 @@ deterministic level ℓ by
 where ŝ_ℓ(x) is the sum of the table entries for the 4-bit units read through level ℓ, built from the weights V_qᵀΔ;
 w_ℓ(n) = ‖D_ℓΔ‖·ν_ℓ(n)·(1 + 10⁻⁶) with ν_ℓ(n) the decoded value of norm code n; e_fl bounds the effect of rounding the
 weights to f32 (`ewdet` in the source and the code, "weight-rounding bound"); and
-h_fix = |α|·‖m‖·δ_â + e_inv·(‖q‖ + |α|·‖m‖)·r_max + 4·10⁻⁶ covers the key's rounding and the basis defect, with r_max
-the largest residual norm in the cluster. This is (A0) of the source. When the index evaluates it in f32, it also adds
+h_fix = |α|·‖m‖·DA + e_inv·(‖q‖ + |α|·‖m‖)·r_max + 4·10⁻⁶ (`rust/src/v2/q.rs` line 574) covers the key's
+rounding and the basis defect, with r_max the largest residual norm in the cluster. This is (A0) of the source. When the index evaluates it in f32, it also adds
 a bound on the tables' quantisation (`edet`) and one on the f32 evaluation (`fl`); the integer kernel of §1.8 replaces
 both by the term e_ℓ of (1). The gap: the algebra follows from the three results above, but the floating-point
 allowances (e_fl, `edet`, `fl` and the constant 4·10⁻⁶) are justified in code comments and checked in verify mode, and
@@ -268,6 +447,23 @@ no written source proves them. Verify mode recomputes every decision in float64;
 0 deterministic violations in 731M, 605M and 512M interval checks on the three basis variants (`dualproto/REPORT.md`
 §2), and 0 of 10.6M integer decisions that the float64 bound did not imply (`rust/REPORT_BOUNDS.md`, correctness table)
 [measured].
+
+The kernel referee (`program/kernel/referee-kernel.md` §3e) examined three of the inputs (A0) takes from the key and
+the weights, which the f32 path and the integer kernel share, and the gap stays named because each holds only under a
+condition that the code does not assert.
+
+- *The item scale η.* The encoder (`item_scale`, `rust/src/index.rs` line 11) and the query (q.rs lines 1286–1289)
+  apply the same f32 operations in the same order to the same key, the stored norm code is relative to that η, and
+  verify mode asserts the equality. η ≥ √(10⁻¹²/Σλ) > 0, with Σλ the denominator of η in §1.6. No rounding question arises, and the referee found no error.
+- *The query weights.* w_q = fl32(qv·sig), with qv exact to one f64 rounding, so the weights are rounded to nearest. The
+  term η·e_fl = η·12·2⁻²⁴·(Σ|w_q| + |α|Σ|w_m|) covers them while the largest decoded coordinate value is below about 6
+  on the path with own tables and 24 on the path with combined tables. The referee's count needs (1 to 2)·2⁻²⁴ per
+  weight times that value. A code comment puts the value below 3.5, and the referee found no assertion of it. No error
+  found within that condition.
+- *m·r.* m·r is computed in f32 from the key, and its allowance in h_fix is |α|·‖m‖·DA + 4·10⁻⁶. The f32 evaluation
+  differs from ‖m‖ã − ‖m‖² by up to 2.7·10⁻⁷·‖m‖ over every key and 404 centre norms [model], which is more than the
+  10⁻⁷ in DA; the rest must come out of the absolute 4·10⁻⁶, which suffices while |α|·‖m‖ ≤ 23 (§1.8a, defect 5). The
+  clamp of the key is a separate loss (§1.8a, defect 1).
 
 The certificate is loose for the typical item and tight only for the worst pairs. At 96 B the actual |Δ·e| was 29
 times below the certified bound for text and 21 times below it for items (`agent2/REPORT.md`, 1M) [measured]. With
@@ -571,44 +767,172 @@ The randomised levels' integer form (Lemma R and Theorem R of `reports/surge/int
 chapter 3; the referee found both correct with repairs. Chapter 3 does not yet state them, and
 `06-open-problems.md` lists the omission.
 
-*Tables.* A cluster's deterministic levels share one step σ > 0. For a 4-bit unit u with ideal table L_u(v) (real
-arithmetic on the f32 weights), the stored entry is θ_u(v) = round((L_u(v) − b_u)/σ), an integer in [0, 2^(h+8) − 1]
-split into a high part of h bits and a low byte, with b_u ≤ min_v L_u(v). Then |σθ_u(v) + b_u − L_u(v)| ≤ δ_u = σ/2 + f_u,
-where f_u bounds the float error of building the table. Let B_ℓ = Σ b_u and e_ℓ = Σ δ_u over the units through level ℓ.
-The integer part of B_ℓ/σ is added to the accumulators as a per-level constant, and B_ℓ denotes the remainder from here
-on, so |B_ℓ| < σ.
+This section states the kernel as built at commit 8c0b316f9, as the referee of the built kernel read it from the code
+(`program/kernel/referee-kernel.md` §1: `rust/src/v2/kern.rs` lines 386–412, `rtab`, `int_thresholds` at lines 518
+and 549, `cmp2w`, `int_level`; `rust/src/v2/q.rs` lines 1310–1320 for the thresholds, 1394–1413 for the margins,
+1578–1600 for the masks, and `check_det`). The design of `reports/surge/integer-kernel.txt`, which an earlier referee
+checked (`reports/surge/referee.txt` §6), differs from the build in the ways listed after Proposition 1.22. Lemmas 1.18
+and 1.20 are the design's, and they hold for the build with the same proofs. Lemmas 1.18a and 1.18b, Theorem 1.19,
+Proposition 1.21′ and Proposition 1.22 are stated as built. Their proofs are the kernel referee's, so they are tagged
+[proved, unrefereed]. The referee records a path it could not break as "no error found", not as "correct". Its
+numerical attacks run float64 and exact-rational transcriptions of the kernel's arithmetic on synthetic inputs, not the
+binary, so their counts are tagged [model].
+
+In this section q·m, α, h_fix and m·r denote the f32 values the code uses (`qm`, `alr`, `fixed`, `mr`), widened to
+f64. σ is one f32 step shared by a cluster's deterministic levels, and η > 0 is the item scale, computed in f32 from
+the 16-bit key.
+
+*Tables as built* (`referee-kernel.md` §1 and §3d). For a 4-bit unit u with ideal table L_u(v) (real arithmetic on the
+f32 weights), the stored entry θ_u(v) is an integer in [0, 65,535], held as a high part and a low byte, and b_u is the
+unit's offset. On the path with own tables (`build_lut`), the computed table t_u(v) is an f32 FMA chain over at most
+four fields, b_u is the f32 sum of the fields' minima, and θ_u(v) = rne((t_u(v) − b_u)·fl(1/σ)), clamped to
+[0, 65,535]. On the default path the tables are combined from the group's and the centre's (Proposition 1.22). B_ℓ is
+the signed sum of the offsets over the units through level ℓ, rounded to f32 per part. No remainder is taken, and no
+per-level constant is added to the accumulators, which are unsigned sums. e_ℓ is the sum of the error bounds of the
+parts through level ℓ, times (1 + 10⁻⁶). For a part of n_p units with own tables the bound is
+
+    n_p·σ/2·(1 + 10⁻⁶) + (48 + 2n_p)·2⁻²⁴·Σ|w|·max|E| + 10⁻³⁰,
+
+where Σ|w|·max|E| is the code's bound on the magnitude of the part's table values (the weights' magnitudes times the
+largest decoded field values). The step is chosen so that the clamp never acts: σ ≥ (largest unit range)·(1 + 1/512)/
+65,535 (`int_sigma`) keeps every entry below 65,408, and a slightly negative t_u(v) − b_u rounds to 0 within the float
+term. The code asserts that the sum of the units' largest entries is at most 256·IHMAX, so Θ below lies in
+[0, THETA_MAX].
 
 **Lemma 1.18** (the accumulators; `reports/surge/integer-kernel.txt` §1.2, equation (1)). [proved, refereed] Let Hs be
 the sum of the high parts and Ls the sum of the low bytes looked up for an item through level ℓ, and Θ = 256·Hs + Ls.
-Then Θ is exactly the sum of the θ_u looked up, and
+Then Θ is exactly the sum of the θ_u looked up. If, moreover, every entry looked up satisfies
+|σθ_u(v) + b_u − L_u(v)| ≤ δ_u, and B_ℓ = Σ b_u and e_ℓ ≥ Σ δ_u over the units through level ℓ, then
 
     |σΘ + B_ℓ − ŝ_ℓ| ≤ e_ℓ.                                                    (1)
 
 *Proof.* 256·hi + lo reconstructs each θ_u exactly, so Θ = Σθ_u. Summing the per-unit bounds over the units read gives
 (1). ∎
 
-*Thresholds.* Dividing the certificate of §1.3 by η > 0, an item is in when ŝ_ℓ − ψ(w_ℓ(n) + e_fl) ≥ K_in and out when
-ŝ_ℓ + ψ(w_ℓ(n) + e_fl) < K_out, with
+The design took B_ℓ as a remainder with |B_ℓ| < σ and added ⌊B_ℓ/σ⌋ to the accumulators. As built, B_ℓ is the whole
+signed sum. The kernel referee read the lemma in that form and found the proof unchanged, because it never uses
+|B_ℓ| < σ (`referee-kernel.md` §2), so (1) holds with the built B_ℓ whenever each unit's entry is within its
+share of e_ℓ of the ideal table. That the code's e_ℓ is such a bound is the referee's §3d
+[proved, unrefereed]. On the path with own tables, the referee's count of the float part is 9 units of
+2⁻²⁴·Σ|w|·max|E| (the FMA chain 2, the offset 3.5, the subtraction 1, the product with 1/σ 2, the offset's cast 0.5)
+against the 48 allowed. The combined path is Proposition 1.22. Every `as f32` on an error bound rounds to nearest and
+can lose 3·10⁻⁸ relative, which is covered because each bound's leading term carries 1 + 10⁻⁶, e_ℓ carries a further
+1 + 10⁻⁶, and the float terms have a factor of 2 or more in hand. The float constants are the referee's count by hand,
+not a machine-checked analysis. In the referee's model (`k4_tables.py`: two seeds of 600 trials over five weight
+regimes, five level schedules up to 64 units and three table shapes, own and combined tables), the worst case of (1)
+over all codes reached 0.976·e_ℓ and never exceeded it in 3,600 level checks per seed, and no entry was clamped
+[model]. With own tables e_ℓ came to 0.51–0.63 steps σ per unit, against the design's 0.5.
 
-    K_in = (t + ψ·h_fix − q·m − α·m·r)/η,    K_out = (t − ψ·h_fix − q·m − α·m·r)/η.
+*Margins as built* (`referee-kernel.md` §1; `rtab` in `rust/src/v2/kern.rs` line 462). For a norm code n < 15, in f64,
 
-Per item, once, from its key: T_in = ⌈K_in/σ⌉ and T_out = ⌊K_out/σ⌋. Per level and norm code n:
-R_ℓ(n) = ⌈(ψ(w_ℓ(n) + e_fl) + e_ℓ + |B_ℓ|)/σ⌉. The rule is IN iff Θ − R_ℓ(n) ≥ T_in, and OUT iff Θ + R_ℓ(n) < T_out. The
-escape code 15, and any item or code whose values fall outside the ranges the kernel can represent, set a mask that
-forces "undecided".
+    X_ℓ(n) = dwa_ℓ·pconst_ℓ·(1 + 10⁻⁶)·ntab_ℓ[n] + ewdet,
 
-**Theorem 1.19** (integer decisions are implied by the real bound; Theorem D of `reports/surge/integer-kernel.txt`
-§1.3, renamed here to avoid the Theorem D of the consolidated proofs, which is Theorem 2.11 of chapter 2).
-[proved, refereed] IN implies that the lower
-bound of the certificate is at least t, and OUT implies that its upper bound is below t.
+which is w_ℓ(n) + e_fl of 1.10: dwa_ℓ is the f32 upper bound on ‖D_ℓΔ‖, pconst_ℓ·ntab_ℓ[n] is the decoded norm
+ν_ℓ(n), and ewdet is the weight-rounding term e_fl. Then
 
-*Proof.* IN: σΘ ≥ σT_in + σR_ℓ(n) ≥ K_in + ψ(w_ℓ(n) + e_fl) + e_ℓ + |B_ℓ|. By (1), ŝ_ℓ ≥ σΘ + B_ℓ − e_ℓ ≥
-K_in + ψ(w_ℓ(n) + e_fl). Multiplying by η > 0 and rearranging gives
-q·m + α·m·r + η·ŝ_ℓ − ψ(η(w_ℓ(n) + e_fl) + h_fix) ≥ t. OUT: σΘ + σR_ℓ(n) < σT_out ≤ K_out, and by (1)
-ŝ_ℓ ≤ σΘ + B_ℓ + e_ℓ, so ŝ_ℓ + ψ(w_ℓ(n) + e_fl) < K_out; rearranging in the same way gives the upper bound below t. ∎
+    Rin_ℓ(n) = up((X_ℓ(n) + e_ℓ − B_ℓ)/σ),    Rout_ℓ(n) = up((B_ℓ + e_ℓ + ψ_ℓ·X_ℓ(n))/σ),    up(x) = ⌈x + (|x| + 1)·10⁻¹²⌉.
 
-Every rounding widens: R_ℓ is rounded up, T_in up and T_out down, and e_ℓ and |B_ℓ| are added on both sides. The
-referee confirmed the implication (`reports/surge/referee.txt` §6).
+A margin is kept only if RIN_MIN ≤ Rin_ℓ(n) < RSENT (ROUT_MIN ≤ Rout_ℓ(n) < RSENT). Otherwise, and for the escape code
+n = 15, it is RSENT. The constants are RIN_MIN = THETA_MAX − TMAX + 1 = −4,047,166, ROUT_MIN = TMIN = −6,144,000,
+RSENT = 8,388,352, THETA_MAX = 2,097,088 and TMAX = 6,144,255.
+
+*Thresholds as built* (`referee-kernel.md` §1; `int_thresholds`, called from q.rs lines 1310–1320). Per item, once, in
+f64,
+
+    K_in = (t − tol + h_fix − q·m − α·m·r)/η,          K_out = (t − ψ_max·h_fix − q·m − α·m·r)/η,
+    T_in = clamp(⌈y_in + slack + |y_in|·2⁻⁴⁶⌉),        T_out = clamp(⌊y_out − slack − |y_out|·2⁻⁴⁶⌋),
+
+with y = fl(K/σ), slack = (|t| + |h_fix| + |q·m| + |α·m·r|)·2⁻⁴⁶/(ησ), and the clamp to [TMIN, TMAX]. When `out.iv` is
+set, K_in = +∞ and T_in = TMAX, so the integer levels take nothing in.
+
+*The rule.* With Θ the exact sum of the θ_u of every unit through level ℓ, as in Lemma 1.18,
+
+    IN at level ℓ  iff  Θ − Rin_ℓ(n) ≥ T_in  (non-strict),       OUT at level ℓ  iff  Θ + Rout_ℓ(n) < T_out  (strict),
+
+both evaluated by the two-word compare of Lemma 1.20 and Proposition 1.21′ and then masked by the live lanes. The real
+statement each is meant to imply, which `check_det` tests in verify mode, is, with est = q·m + α·m·r + η·ŝ_ℓ and
+hh = η·X_ℓ(n) + h_fix,
+
+    IN ⟹ est − hh ≥ t − tol,        OUT ⟹ est + ψ_ℓ·hh < t.
+
+**Lemma 1.18a** (the thresholds in f64; `referee-kernel.md` §3b). [proved, unrefereed] Let ū = 2⁻⁵³, and let η, m·r, α,
+q·m, h_fix and σ be f32 values, exact in f64. Then, to first order in ū, the argument of the ceiling in T_in is at
+least K_in/σ, and the argument of the floor in T_out is at most K_out/σ, for any tol and any dial.
+
+*Proof.* Write mag = |t| + h_fix + |q·m| and a = fl(α·m·r). The caller's c_in = fl(fl(fl(t − tol) + h_fix) − q·m)
+differs from its exact value by at most ū(|t − tol| + |t − tol + h_fix| + |c_in|) ≤ ū(3|c_in| + 2·mag), using
+|t − tol| ≤ |c_in| + h_fix + |q·m|. The same bound holds for c_out whatever ψ_max is, because
+ψ_max·h_fix ≤ |t| + |c_out| + |q·m|. Then a, the subtraction, the reciprocal fl(1/η) and two products each add a relative ū, so
+
+    |y − K/σ| ≤ 8ū·|K/σ| + (4ū·|a| + 2ū·mag)/(ησ)          (first order).
+
+The slack as computed is at least 127ū·(mag + |a|)/(ησ) and the relative term at least 127ū·|y|, while the two
+additions lose at most 2ū(|y| + slack). So the argument of the ceiling is at least K_in/σ and that of the floor at most
+K_out/σ, with a factor of about 14 to spare. ∎
+
+The argument is first order in u, as the report gives it. It was argued in no written source before, and it settles
+Editor's query 7: the dial above 1 is covered for any dial. The referee's attack (`k2_thresholds.py`: 1,700,000 cases
+against exact rationals, with η at its floor, |α| in the hundreds, dials to 10⁶, tol to 10³, t placed so that K/σ is an
+integer to f64 accuracy and stepped by ±3 ulps, and c_in − a at cancellation) found 0 violations [model]. The outward
+rounding cost 0 steps beyond the exact ceiling or floor in the best case, so the slack is not wasteful.
+
+**Lemma 1.18b** (the margins in f64; `referee-kernel.md` §3c). [proved, unrefereed] Let e°_ℓ be e_ℓ less its
+multiplicative slack (its two factors of 1 + 10⁻⁶). The report takes e°_ℓ still to bound the error in (1) without
+writing that step (Editor's query 16), and Theorem 1.19 assumes it. Then
+
+(i) σ·Rout_ℓ(n) ≥ B_ℓ + e°_ℓ + ψ_ℓ·X_ℓ(n);
+
+(ii) σ·Rin_ℓ(n) ≥ X_ℓ(n) + e_ℓ − B_ℓ when B_ℓ < 0;
+
+(iii) in real arithmetic, pconst_ℓ·η·ntab_ℓ[n]·(1 + 10⁻⁶) exceeds the item's true weighted error norm ρ_e (the
+quantity that η·ν_ℓ bounds; the report writes ρ) by a factor of about 1 + 1.9·10⁻⁶, which covers the two f32 products and the f64
+roundings in X_ℓ(n).
+
+*Proof.* (ii) When B_ℓ < 0, the usual case because B_ℓ is a sum of minima of tables that straddle 0, the quotient
+(X + e − B)/σ has no cancellation, so its f64 error is about 3·2⁻⁵³ relative and `up` covers it. (i) The quotient
+(B + e + ψ_ℓX)/σ can cancel. |B_ℓ|/σ is up to about 2²⁰ steps, so the f64 sum can be off by 2⁻⁵³·2²¹ ≈ 2·10⁻¹⁰ steps,
+while `up` adds only 10⁻¹² when the quotient is near 0. So `up` alone does not prove the claim. What closes it is the
+slack in e_ℓ: a shortfall is at most 2·10⁻¹⁰ steps, and e_ℓ carries at least 4·10⁻⁶ steps beyond half a step per unit
+(its two factors of 1 + 10⁻⁶ on at least 8 units), so σ·Rout ≥ B + e°_ℓ + ψ_ℓX still holds. (iii) X is computed in f64
+from f32 factors, with three roundings. The encoder guarantees fl32(fl32(pconst·η)·ntab[n]) ≥ ρ_e(1 + 10⁻⁶) + 10⁻¹² for
+the true weighted error norm ρ_e (`rust/src/v2/mod.rs` lines 1693–1706, checked by a loop on the stored code), so the real
+pconst·η·ntab[n]·(1 + 10⁻⁶) exceeds ρ_e by a factor of about 1 + 1.9·10⁻⁶. That covers the two f32 products (1.2·10⁻⁷)
+and the f64 roundings. ∎
+
+The report argues (ii) only for B_ℓ < 0 (Editor's query 16). The referee's attack (`k3_margins.py`: 296,012 cases placed
+at cancellation) found that the computed quotient fell below an integer that the exact one exceeded 63 times, all at
+|R| ≥ 1,859, by at most 1.0·10⁻¹⁰ steps, where `up` adds at least 1.9·10⁻⁹ [model]. Near small integers it never did,
+because integer multiples of σ lie on the f64 grid of the summands, σ being an f32. Rout was short of the exact quotient
+in 0 cases and Rin in 0.
+
+**Theorem 1.19** (integer decisions are implied by the real bound, as built; Theorem D of
+`reports/surge/integer-kernel.txt` §1.3 for the design, renamed here to avoid the Theorem D of the consolidated proofs,
+which is Theorem 2.11 of chapter 2; statement and proof as built from `referee-kernel.md` §2 and §6).
+[proved, unrefereed] Suppose that (1) holds with the built B_ℓ and with an allowance e°_ℓ ≤ e_ℓ, that
+σ·Rin_ℓ(n) ≥ X_ℓ(n) + e°_ℓ − B_ℓ and σ·Rout_ℓ(n) ≥ B_ℓ + e°_ℓ + ψ_ℓ·X_ℓ(n) (Lemma 1.18b), and that T_in ≥ K_in/σ and
+T_out ≤ K_out/σ (Lemma 1.18a, for thresholds the clamp leaves unchanged; Proposition 1.21′ deals with clamped ones).
+Let h_fix ≥ 0, X_ℓ(n) ≥ 0 and ψ_ℓ ≤ ψ_max. Then
+
+(i) IN at level ℓ implies est − hh ≥ t − tol, which is the lower end of the certificate of 1.10 at ψ = 1, whatever the
+dial;
+
+(ii) OUT at level ℓ implies est + ψ_ℓ·hh < t. For ψ_ℓ ≥ 1 this implies that the upper end of the certificate at ψ = 1
+is below t; for ψ_ℓ < 1 it is a statistical exclusion and nothing more.
+
+*Proof.* (i) Θ ≥ T_in + Rin_ℓ(n) gives σΘ ≥ K_in + X + e°_ℓ − B_ℓ, so ŝ_ℓ ≥ σΘ + B_ℓ − e°_ℓ ≥ K_in + X by (1).
+Multiplying by η > 0 gives q·m + α·m·r + η·ŝ_ℓ − (η·X + h_fix) ≥ t − tol, which is est − hh ≥ t − tol. (ii)
+Θ + Rout_ℓ(n) < T_out gives σΘ + B_ℓ + e°_ℓ + ψ_ℓ·X < σT_out ≤ K_out, so ŝ_ℓ + ψ_ℓ·X < K_out by (1), and
+q·m + α·m·r + η·ŝ_ℓ + ψ_ℓ·η·X + ψ_max·h_fix < t. Because h_fix ≥ 0 and ψ_max ≥ ψ_ℓ, est + ψ_ℓ(η·X + h_fix) < t. When
+ψ_ℓ ≥ 1, hh ≥ 0 gives est + hh ≤ est + ψ_ℓ·hh < t. ∎
+
+The design's Theorem 1.19 scaled both sides by one dial ψ, used |B_ℓ| with B_ℓ a remainder, and was found correct
+(`reports/surge/referee.txt` §6). The kernel referee shows that the built form follows by the same argument: the design's
+proof uses |B_ℓ| only through −|B_ℓ| ≤ B_ℓ ≤ |B_ℓ|, and putting B_ℓ itself in each place makes those two steps
+equalities, while the dial is set to 1 on the IN side. For ψ = 1 the built decisions are the design's with the tighter
+signed margin. Every rounding widens: Rin and Rout are rounded up, T_in up and T_out down. Ties fall on the safe side,
+because IN is non-strict and OUT strict at every step. An item whose score equals t therefore cannot be OUT while (A0)
+holds, and may be IN only if its lower bound equals its score; Θ + Rout = T_out leaves the item undecided
+(`referee-kernel.md` §4).
 
 **Lemma 1.20** (the two-word compare; `reports/surge/integer-kernel.txt` §1.4). [proved, refereed] For integers d and
 g, 256d + g ≥ 0 if and only if d + ⌊g/256⌋ ≥ 0.
@@ -617,37 +941,169 @@ g, 256d + g ≥ 0 if and only if d + ⌊g/256⌋ ≥ 0.
 0. ∎
 
 The kernel evaluates d = Hs − TH ∓ RH and g = Ls − TL ∓ RL on the high and low words of the thresholds and margins and
-tests d + (g >> 8) with an arithmetic shift, so the lemma makes the 16-bit compare equal to the full-width one.
+tests d + (g >> 8) with an arithmetic shift, so the lemma makes the 16-bit compare equal to the full-width one when no
+word overflows. Proposition 1.21′ deals with overflow.
 
-**1.21 Saturation.** The source's range paragraph chose h = 7 and R_cap = 16,000 so that 2U(2^h − 1) + R_cap + 64 ≤ 32,767
-with U = 64 units, and concluded that the saturating additions never saturate. [refuted] The referee showed that the
-budget counts R_cap once: on unmasked lanes Hs − TH − RH reaches −48,256, which wraps to +17,280 under wrapping arithmetic
-and gives a false IN (`reports/surge/referee.txt` §6). Two repairs work: R_cap ≤ 8,222, or every operation saturating in
-the order (Hs − TH), then ∓RH, then +(g >> 8), which gave 0 sign mismatches in 4,000,000 random cases.
+**1.21 Saturation (the design).** The source's range paragraph chose h = 7 and R_cap = 16,000 so that
+2U(2^h − 1) + R_cap + 64 ≤ 32,767 with U = 64 units, and concluded that the saturating additions never saturate.
+[refuted] The referee showed that the budget counts R_cap once: on unmasked lanes Hs − TH − RH reaches −48,256, which
+wraps to +17,280 under wrapping arithmetic and gives a false IN (`reports/surge/referee.txt` §6). Two repairs work:
+R_cap ≤ 8,222, or every operation saturating in the order (Hs − TH), then ∓RH, then +(g >> 8), which gave 0 sign
+mismatches in 4,000,000 random cases. The built kernel takes the second repair, with signed margins.
 
-The built kernel takes the second repair. [proved, unrefereed] (comment at `rust/src/v2/kern.rs` lines 386–404). T_in
-and T_out are clamped to [T_MIN, T_MAX], so their high words lie in [−24,000, 24,000] and Hs − TH is exact in 16 bits.
-Clamping only withholds decisions: lowering T_in to T_MAX cannot make an IN because Θ − R_in ≤ Θ_MAX − R_IN_MIN < T_MAX,
-and raising T_out to T_MIN cannot make an OUT because Θ + R_out ≥ R_OUT_MIN > T_MIN. A margin outside its range is
-replaced by a sentinel that never decides, as is the escape code. The rest of each compare saturates in the referee's
-order, with g in [−510, 16,575], and a saturated word has magnitude at least 32,768, which g >> 8 (in [−2, 64]) cannot
-carry across zero.
+**Proposition 1.21′** (saturation as built; `referee-kernel.md` §3a, from `cmp2w` and the comment at
+`rust/src/v2/kern.rs` lines 398–404). [proved, unrefereed] Suppose that the deterministic levels of a cluster hold at
+most 64 units, that every entry lies in [0, 65,535], that the sum of the units' largest entries is at most
+256·IHMAX (so Θ ∈ [0, THETA_MAX] and Hs ∈ [0, 8,128]), that T_in and T_out are clamped to [TMIN, TMAX], and that each
+margin lies in [RIN_MIN, RSENT) on the IN side or [ROUT_MIN, RSENT) on the OUT side, or equals RSENT. Then
 
-The referee named two further gaps. Thresholds computed in f32 "with a relative 2⁻²⁰" are not a proof, because K_in is
-a difference of nearly equal terms divided by η, so its error is absolute: (|t| + |ψ·h_fix| + |q·m| + |α·m·r|)·2⁻²²/(ησ)
-steps. The referee's repair is f64 or that absolute slack, and it adds that rounding (L_u(v) − b_u)/σ in f32 adds up to
-2⁻⁸ of a step to δ_u. The built threshold routine (`int_thresholds` in `rust/src/v2/kern.rs`) works in f64 and adds both
-an absolute slack (|t| + |h_fix| + |q·m| + |α·m·r|)·2⁻⁴⁶/(ησ) and a relative 2⁻⁴⁶ before rounding outward (Editor's
-query 7). The source also leaves the range of the per-level centring constant unbounded, which the clamps above make
-harmless in the built kernel.
+(a) the kernel's IN test, sat(sat(Hs − TH) − RH) + ((Ls − TL − RL) >> 8) ≥ 0 with the last addition saturating and the
+low word wrapping, holds exactly when Θ − Rin ≥ T_in, and its OUT test, the same with +RH, +RL and < 0, holds exactly
+when Θ + Rout < T_out;
 
-**Proposition 1.22** (centre tables by linearity; `reports/surge/integer-kernel.txt` §3). [proved, unrefereed] The
-weights of cluster c are w_c = w_q − α_c·μ_c, with w_q per (query, group) and μ_c the centre in the same coordinates.
-Tables are linear in the weights, so L^c_u(v) = L^q_u(v) − α_c·L^m_u(v), with L^q per (query, group, level) and L^m per
-cluster and independent of the query. The real table is therefore identical and so are the estimate and the half-width;
-only the rounding term changes, from 0.5 to at most 0.5 + 0.5 + 2 fine steps per unit, so e_ℓ ≤ 3Uσ. This is how the
-index builds each cluster's tables from the group's float tables and the stored centre tables while keeping α
-(`SYSTEM.md` §2.2).
+(b) a margin equal to RSENT never decides;
+
+(c) a clamped threshold only withholds decisions.
+
+*Proof.* (a) Hs ∈ [0, 8,128] and TH ∈ [−24,000, 24,000], so Hs − TH ∈ [−24,000, 32,128] is exact. RH lies in
+[−15,810, 32,767] on the IN side and in [−24,000, 32,767] on the OUT side, so d = Hs − TH ∓ RH can leave i16 in either
+direction, and the second operation saturates. Ls ≤ 64·255, so g = Ls − TL ∓ RL lies in [−510, 16,320] on the IN side
+and in [−255, 16,575] on the OUT side, so g is exact in i16 and g >> 8 = ⌊g/256⌋ ∈ [−2, 64]. Lemma 1.20 gives
+256d + g ≥ 0 ⟺ d + ⌊g/256⌋ ≥ 0 for the true d. If d was not saturated, the last saturating addition can clip
+only a sum above 32,767, whose true value is positive, or below −32,768, whose true value is negative, so the sign is
+kept. If d saturated high, the true d is at least 32,768, and both the computed word (at least 32,765)
+and the true value 256d + g are positive. If d saturated low, the true d is at most −32,769, the computed word is at
+most −32,704, and the true value is at most 256·(−32,769) + 16,575 < 0. (b) With R = RSENT,
+Θ − RSENT ≤ THETA_MAX − RSENT = −6,291,264 < TMIN ≤ T_in, so the item is never IN, and Θ + RSENT ≥ RSENT > TMAX ≥ T_out,
+so it is never OUT. (c) If T_in is lowered to TMAX, then Θ − Rin ≤ THETA_MAX − RIN_MIN = TMAX − 1, so the item is never
+IN. If T_out is raised to TMIN, then Θ + Rout ≥ ROUT_MIN = TMIN, which is never below TMIN, so the item is never OUT.
+Raising T_in to TMIN or lowering T_out to TMAX makes the test harder to pass. All of this needs Θ ∈ [0, THETA_MAX], which
+holds because entries are clamped at 0 and the code asserts the sum of the units' largest entries. ∎
+
+*Up to 127 units.* [sketch: gap named] The report's verdict is that the compare is exact for at most 127 units
+("sound with the proof above for at most 127 units"), and its attack below found no mismatch at 127. The gap is that
+the report writes the ranges of its proof for 64 units only. The editor's reading of them for U units, which is not in
+the report and which no referee has read, is as follows. Ls ≤ 255U, so g lies in [−510, 255U] on the IN side and in
+[−255, 255U + 255] on the OUT side; both lie in i16 for U ≤ 127, because 255·127 + 255 = 32,640, and then
+g >> 8 ∈ [−2, 127]. The bounds on Hs and Θ come from the assertion on the units' largest entries and not from U. The
+saturated-low step then reads −32,768 + 127 for the computed word and 256·(−32,769) + 255·127 + 255 for the true value,
+both negative (Editor's query 20).
+
+The comment in the code writes "Θ + Rout ≥ ROUT_MIN > TMIN"; it is "≥", which is enough because OUT is strict, and
+this chapter's earlier text repeated the ">". The referee's attack (`k1_compare.py`: 4,000,000 random cases per setting, half on the decision boundary, with
+thresholds and margins at their range ends, plus a sweep of every saturation corner) found 0 mismatches at 64 and at 127
+units, and the sentinel and the clamps never decided [model]. **At 128 units the OUT compare is wrong.** The first case
+found was Hs = 0, Ls = 32,639, T_out = −4,201,876, Rout = −4,234,514: the kernel says OUT and the exact compare says
+not, because Ls + RL passes 32,767 and the low word's shift turns negative. At 160 units both sides are wrong
+[model]. The shipped levels do not reach 128 units, but the code asserts the unit count on one path only (§1.8a,
+defect 3).
+
+The design's referee named two further gaps, both closed in the build. The design computed thresholds in f32 "with a
+relative 2⁻²⁰", which is not a proof, because K_in is a difference of nearly equal terms divided by η, so its error is
+absolute: (|t| + |ψ·h_fix| + |q·m| + |α·m·r|)·2⁻²²/(ησ) steps. The build computes them in f64 with an absolute and a
+relative slack (Lemma 1.18a). That referee also noted that rounding (L_u(v) − b_u)/σ in f32 adds up to 2⁻⁸ of a step
+to each unit's error, which the built tables' float term counts (the subtraction and the product with 1/σ, above). The
+source left the range of the per-level centring constant unbounded, and the build has no such constant.
+
+**Proposition 1.22** (centre tables as built; `reports/surge/integer-kernel.txt` §3 for the linearity,
+`referee-kernel.md` §3d for the construction and its bound). [proved, unrefereed]
+
+(i) *Linearity.* The weights of cluster c are w_c = w_q − α_c·w_m, with w_q per (query, group) and w_m = fl32(mv32·sig)
+(`Cl2::wm`) the centre in the same coordinates, which are the same f32 weights that the path with own tables and verify
+mode's f64 reference use. Tables are linear in the weights, so the real table of the combined path is
+L^c_u(v) = L^q_u(v) − α_c·L^m_u(v), with L^q per (query, group, level) and L^m per cluster and independent of the query.
+The estimate and the real half-width are therefore those of the path with own tables.
+
+(ii) *The combine.* The combined tables (`combine_lut`, the default `gtab` path) compute, for each unit u and code e,
+v_u(e) = fl32(Tq_u(e) − θ^m_u(e)·fl32(α·σ_m)) by one fused operation, with Tq_u the group's f32 table and θ^m_u the
+stored centre table. μ_u is the exact minimum of the 16 computed values, θ_u(e) = rne((v_u(e) − μ_u)·fl(1/σ)) is
+saturated to 16 bits, and the part's offset is Σμ_u − α·Σlo^m_u, rounded to f32, with lo^m_u the centre table's
+offset. The error bound of a part, summed into e_ℓ, is
+
+    err_q + |α|·err_m + σ·(n_p/2·(1 + 10⁻⁶) + Σ_u (4·2⁻²⁴·mag_u + 3·2⁻²⁴·65,536)) + 4·2⁻²⁴·|off| + 10⁻³⁰,
+
+with err_q = 8·2⁻²⁴·Σ|w_q|·max|E| the group table's float error, err_m the stored centre table's own bound (its grid
+step σ_m/2 per unit plus float terms), mag_u the code's bound on the unit's magnitude in steps, and off the part's
+offset. With this e_ℓ, (1) holds.
+
+(iii) The design's bound e_ℓ ≤ 3Uσ does not hold for the built combine.
+
+*Proof.* (i) is linearity of the table in the weights, in real arithmetic on the f32 weights w_q − α·w_m. (ii) Each
+term covers what it names. The FMA's rounding and the rounded factor α·σ_m need 0.5·2⁻²⁴·(|α|σ_m·θ^m_max + max|v|)/σ
+steps against 4·2⁻²⁴·mag_u. The subtraction and the product with 1/σ need 1.5·2⁻²⁴·65,536 against 3·2⁻²⁴·65,536. The
+offset's cast needs 0.5·2⁻²⁴·|off| against 4·2⁻²⁴·|off|. err_q and |α|·err_m carry the float error of the group's table
+and the grid and float error of the centre's table, scaled by |α|. Saturation never acts, because
+σ ≥ (largest combined range)·(1 + 1/512)/65,533, computed by `det_spans` from the same f32 values that `combine_lut`
+recomputes. (iii) The centre table's grid enters as |α|·σ_m/2 per unit, in the centre table's step σ_m, which is
+unrelated to the cluster's step σ. When the query is close to α times the centre in the group's coordinates, the
+combined range, and with it σ, is small while |α|σ_m is not. ∎
+
+The float constants are the referee's count by hand. The design's statement, an integer combine by `mulhi` with
+0.5 + 0.5 + 2 fine steps per unit and so e_ℓ ≤ 3Uσ, describes a construction the build does not use, and that bound is
+false for the built form. The loss is of tightness and not of soundness. In the referee's model (`k4_tables.py`, as
+above), e_ℓ per unit with combined tables had a median of 0.6–0.84 fine steps and a maximum of 1.8 in the ordinary
+weight regimes, against the design's 3, but a median of 344–367 and a maximum of 1,750 when w_q = α·w_m·(1 ± 10⁻³)
+[model]. This is how the index builds each cluster's tables from the group's float tables and the stored centre tables
+while keeping α (`SYSTEM.md` §2.2).
+
+*Differences between the code and the design* (`referee-kernel.md` §§1–3, 6):
+
+- *Signed B_ℓ.* The design's margin is ⌈(ψ·X + e_ℓ + |B_ℓ|)/σ⌉ on both sides, with B_ℓ a remainder. The built margins
+  carry −B_ℓ on the IN side and +B_ℓ on the OUT side, with B_ℓ the whole sum. Theorem 1.19's argument covers it. The
+  margins can then be negative, down to RIN_MIN and ROUT_MIN, which changes the saturation argument (Proposition 1.21′)
+  but not the implication.
+- *No centring constant.* The design adds ⌊B_ℓ/σ⌋ to the accumulators per level; the code adds nothing, and the
+  accumulators are unsigned sums. This removes the design referee's third gap.
+- *The dial on the OUT side only.* The built IN carries no dial, in K_in or in Rin, so every IN is certified at ψ = 1
+  whatever the dial. The built OUT carries ψ_ℓ on η·X_ℓ(n) and ψ_max on h_fix. This matches the f32 path
+  (`lb = est − hh`, `ub = est + hh·dial`) and `check_det`. The design scaled both sides by ψ, so its IN at ψ < 1 was not
+  a certificate.
+- *ψ_max on the fixed term.* One T_out serves every deterministic level, so the fixed term takes the largest dial. This
+  only lowers T_out, so the integer OUT asks for slightly more than the f32 path's `ub < t` at a level whose dial is
+  below the largest. It is conservative.
+- *tol.* K_in carries t − tol, so IN certifies score ≥ t − tol, the left inclusion of the guarantee with d = tol. The
+  design has no tol.
+- *`out.iv`.* With it set, K_in = +∞ and T_in = TMAX, so nothing is taken in by the integer levels.
+- *Thresholds* are computed in f64 with an absolute and a relative slack of 2⁻⁴⁶ (Lemma 1.18a), not in f32 with a
+  relative 2⁻²⁰, and are clamped to [TMIN, TMAX].
+- *Margins* are computed in f64, rounded by `up`, and replaced by the sentinel RSENT outside their ranges and for code
+  15, in place of the design's R_ℓ ∈ [0, R_cap] with R_cap = 16,000.
+- *Entries* are 16-bit integers in [0, 65,535], where the design had [0, 2^(h+8) − 1] with h = 7.
+- *The compare* saturates in the design referee's order (Proposition 1.21′).
+- *Centre tables* are combined in f32 by one fused operation, not in integers by `mulhi` (Proposition 1.22).
+- *The unit count* is asserted at most 64 only on the path with own tables (`int_sigma`, `rust/src/v2/kern.rs`
+  line 435), and not on the default path (§1.8a, defect 3).
+
+*Checked, no error found* (`referee-kernel.md` §§2–6, in brief). The referee found no input on which an integer
+decision contradicts the real certificate (A0). It found no error in:
+
+- Theorem 1.19 as built, given (1), the thresholds, the margins and the compare;
+- the compare for at most 127 units, the sentinel and the clamps (Proposition 1.21′, whose written proof covers 64
+  units; the sketch after it covers 127);
+- the f64 thresholds (Lemma 1.18a) and the f64 margins (Lemma 1.18b);
+- the tables, own and combined: in its model inequality (1) was never exceeded, no entry was clamped, the sum of the
+  largest entries never exceeded `qsum` or 256·IHMAX, and of 72,711 decisions placed near the boundary, 11,567 of them
+  within a few steps of it, none was not implied by the real certificate [model];
+- the linearity of the combined tables;
+- the item scale η and the query weights, the latter within the condition stated after 1.10;
+- ties: IN non-strict and OUT strict at every step;
+- a zero residual: η is floored, so K/σ is huge and both thresholds clamp to values that only withhold, although the
+  rows nearest their centre are the ones whose key is clamped (§1.8a, defect 1);
+- empty and single-row clusters: `run_cluster` indexes `cands[0]`, so a caller must not call it with no candidates (a
+  panic, not a wrong answer); with one candidate, the block's other 31 lanes are computed and masked out by
+  `inm & act` and `outm & act`, and lanes past the candidate count rounded up to 8 keep stale thresholds and are masked
+  the same way;
+- norm code 15, and a NaN or out-of-range margin, which become RSENT on both sides and never decide at that level;
+- widths that are not a multiple of the SIMD width: a part's units are a multiple of 4 (asserted in `Part::pack`), a
+  block is always 32 padded slots, `int_thresholds` rounds the item count up to 8 (4 on AVX2) inside arrays padded to whole blocks
+  plus one, the hand-over from f32 to integers at the first randomised level steps by 4 inside the same padding, `dot32`
+  has a scalar tail, and `qv_exact_v` asserts n % 32 = 0.
+
+What the referee could not settle without the binary is whether its transcriptions match the compiled kernels (the lane
+orders of `order32`, `order16` and `look16`, and the AVX2 and AVX-512 `cmp2w`). It traced them by hand and found no
+error. The crate's tests `two_word_compare_matches_i64`, `int_level_matches_scalar`, `int_thresholds_match_scalar`,
+`combine_lut_within_bound` and `part_sums2_at_the_largest_part` in `rust/src/v2/kern.rs` settle it, once built for
+AVX-512 and once for AVX2 without AVX-512 (`referee-kernel.md` §7 item 1).
 
 **Full vectors** (`SYSTEM.md` §§1, 2.2). [sketch: gap named] Items still undecided after 256 bytes are scored from
 their f16 vector in float32, with an exact integer product only when the float score lies within its rounding bound of
@@ -659,6 +1115,183 @@ Measured end to end [measured]: on a 50k index (200 item and 200 text queries, s
 sets, k-NN, float64 oracle, `check.sh`), every step of `rust/REPORT_BOUNDS.md` gave 0 wrong answers, 0 deterministic and
 0 randomised violations in about 44M interval checks, 0 of 10.6M integer decisions not implied, and exact k-NN on 400 of
 400 queries. At 1M the index's answers were byte-identical to the plain f16 scan at every visible set (`SYSTEM.md` §3).
+
+## 1.8a Open defects of the build
+
+This section lists the defects that the two referees of the program's kernel track found in the code at commit
+8c0b316f9 (`program/kernel/referee-range.md`, `program/kernel/referee-kernel.md`), and one that the partition
+experiment found in the build's grouping (`program/partition/experiment/RESULTS.md`). The first seven are [model]:
+they rest on the referees' reading of the code at commit 8c0b316f9 and, for defects 1, 2, 3 and 5, on float64 or
+numpy transcriptions of it, and none was reproduced in a binary. In each transcription the referee rewrote the named
+Rust functions in Python by reading the code, ran them in float64 on small synthetic indexes or on synthetic inputs to
+one routine, and compared the decisions with exact scores in rational arithmetic; the binary's summation order and lane
+order were not reproduced. Defects 4 and 6 come from reading the code alone, and defect 7 from an estimate with
+standard rounding bounds. Defect 8 is [measured]. Verify mode cannot reach the first
+two in the cut and the sorted range, because it compares answers with brute force but takes its thresholds from answer
+sizes (`referee-range.md`, "Not settled without the binary or the data", item 2). The kernel referee names a verify
+run on a purpose-built index that could confirm defect 1 in the certificate, though a zero there would not clear it
+(entry 1 below). All eight were passed to the implementing
+session on 21 November 2026. None is repaired at commit 8c0b316f9.
+
+1. **The key clamp** (`referee-range.md` F1, F2, F6, F7; `referee-kernel.md` §3e (b), finding K3). The two referees
+   found this defect independently.
+   - *What the code does.* `rows_of` (`rust/src/v2/mod.rs` line 1589) stores round(clamp(x·m̂, −1, 1)·32767). A stored
+     row has an f16-rounded norm, not norm 1, so x·m̂ can exceed 1 for a row lying along its centre, and the clamp then
+     discards the excess. The key's error is then x·m̂ − 1, which exceeds DA as soon as x·m̂ > 1 + DA ≈ 1 + 1.536·10⁻⁵.
+     Everything that assumes |ã − â| ≤ DA is then unsound for that row: `sorted_range2` and `key_interval2` (Lemma 1.5),
+     the r_max, b_min and b_max of `cluster_info` and `build2` (Proposition 1.6, h_fix), the |α|·‖m‖·DA term of the
+     levels' fixed half-width (1.10), and the m·r that the randomised levels and the f32 path read.
+   - *Breaking input, cut and range* [model] (`range_attack.py`, `range_corner.py` part A). Over seeds 2, 3 and 5 as
+     built, 872,256 (cluster, query, threshold) checks offered 81.8M row decisions and took 26.8M; 1,729 were wrong, all
+     of them rows with |x·m̂| > 1 + DA. The constructed case: n = 16, two clusters with orthogonal centre directions as
+     the anchors, and a cluster of six near-duplicates along its centre direction m̂, one of norm 1 + 1.197·10⁻⁴ with
+     true key 1 + 1.197·10⁻⁴, stored as 32767. With q = unit(0.75·p̂ + 0.65·m̂) rounded to f16 and t equal to that row's
+     exact score 0.655012466, the not-excluded key interval is [1.0000885, 1.0001616], wholly above 1 + DA + 10⁻⁹, so
+     the stored key 1.0 falls outside it and the row is decided out although its score equals t.
+   - *Breaking input, norm sort* [model] (`nucut_attack.py`). 748 wrong decisions and 979 exact scores outside the
+     bounds of their norm code in 244,800 checks, all rows with |x·m̂| > 1 + DA.
+   - *Breaking input, certificate* [model] (`k6_key.py`, 24,000 rows). For a cluster whose mean is one row (a single
+     row, or exact duplicates), with the centre stored in int8 with one scale as the fit does, the key's error exceeds
+     DA for 0% of rows at n = 768 (largest 1.5·10⁻⁵, just inside), 4.2% at n = 256, 16% at n = 100, 32% at n = 32, and
+     44% for rows with a few large coordinates at any n. The largest errors are 5·10⁻⁵ to 3·10⁻⁴, against an allowance
+     of 1.5·10⁻⁵·|α|‖m‖ + 4·10⁻⁶. The estimate is then low by α·‖m‖·(x·m̂ − 1), and the certificate does not contain
+     the score. On the integer path such an item is very likely not decided at all, because its scale is tiny and its
+     norm code is the escape, which may be why the deterministic counts never showed it.
+   - *Exposure of the 1M index.* `rust/results/run1m.log` and `scale.log` print "x2 bound 4.882e-4", so
+     √x₂ − 1 = 2.44·10⁻⁴, sixteen times DA. A row at the top of that norm range is clamped past DA when its angle to its
+     centre direction is under about 21 mrad. The range referee estimates, without measuring, that the 8-bit centre of
+     a cluster of duplicates sits about 8 mrad from its rows at n = 768. Whether any row qualifies has not been counted.
+   - *Repairs proposed.* The range referee: assert |x·m̂| ≤ 1 + 10⁻⁷ at build, or widen the sorted range by
+     DA + max(0, √x₂ − 1). In its model the widening gave 0 wrong decisions in 369,600 checks of seed 2, and rows decided
+     fell from 10.73M to 10.57M, where √x₂ − 1 is near 10⁻³ [model]. The kernel referee: assert |x·m̂| ≤ 1 + 10⁻⁷ at
+     build and scale the key's range, or add the cluster's largest clamp excess to DA per cluster.
+   - *What would settle it on a binary.* Count at build, in `rows_of`, the rows with |x·m̂| > 1 + DA; or, on a built
+     index, the rows with stored key ±32767 and their x·m̂ in f64. A unit test beside `e2e.rs` would build an index
+     holding a row of norm 1.0002 along its centre and run the query of `range_corner.py` part A at the row's exact
+     score, expecting the row in the answer. For the certificate, build a small index at n ≤ 256 from a corpus with
+     groups of exact duplicates large enough to be clusters of their own, use those rows as item queries, and run
+     verify mode (`--v2 --index <dir> --in-memory verify`), reading `cert_viol`, `viol_det`, `viol_rand` and the wrong
+     in and out counts. A non-zero `cert_viol` or `viol_rand` on those rows confirms the defect; zero does not clear it,
+     because the violation needs a threshold within about 10⁻⁴ of the row's score.
+
+2. **The square root of a cancelling difference** (`referee-range.md` F3).
+   - *What the code does.* ρ_⊥ = √max(‖q‖² − β², 0)·(1 + 10⁻¹²) + 10⁻¹² (`anc_of`, `rust/src/v2/q.rs` line 182), and
+     likewise s1 = √max(‖q‖² − (q·m̂)², 0)·(1 + 10⁻¹²) + 10⁻¹² (line 705) and rp = √max(ρ_⊥² − rm², 0)·(1 + 10⁻¹²) +
+     10⁻¹² (line 711), with rm the computed q_⊥·m̂; s1 and rp are the norms of q_m and (q_⊥)_m in Lemma 1.5a. Exactly,
+     ‖q − βp̂‖² = ‖q‖² − β² + β²(‖p̂‖² − 1) + 2β(β − q·p̂), and the computed difference carries the rounding of ‖q‖², β²
+     and β, an absolute error ε_r of order 10⁻¹⁶·‖q‖² (in the worst case about 2n·2⁻⁵³·‖q‖², and up to 2·10⁻¹²·β² for
+     a loaded anchor of norm 1 ± 10⁻¹²). The square root turns ε_r into a deficit of ε_r/(2ρ_⊥), and of √ε_r ≈ 10⁻⁸
+     when ρ_⊥ itself is of that size. The slack 10⁻¹² covers it only for ρ_⊥ ≳ 10⁻⁴, and the 10⁻⁹ on the threshold
+     only for ρ_⊥ ≳ 10⁻⁷. Proposition 1.4 and Lemma 1.5a need ρ_⊥ ≥ ‖q_⊥‖ and the constants rounded outward, so they do
+     not apply when the deficit is not covered.
+   - *Breaking input* [model] (`range_corner.py` part B, `range_corner_c.py`, exact values in rationals). For a query
+     equal to a centre's int8 vector (exact in f16), ρ_⊥ as coded was below the exact ‖q − βp̂‖ in 219 of 400 queries
+     at n = 32 (largest deficit 1.83·10⁻⁸, above 10⁻⁹ in 101) and in 45 of 60 at n = 768 (largest 1.36·10⁻⁸, above
+     10⁻⁹ in 13); s1 was short in 209 of 400 and 49 of 60. With that query and a top row whose p̂·x lies just under a
+     point of the table's 2⁻¹⁵ grid, `support_pre` skips the cluster at t equal to the top row's exact score: in one
+     printed case at n = 8, ρ_⊥ as coded is 1.0·10⁻¹² against an exact 1.726·10⁻⁸, and
+     β·hi + ρ_⊥·√x₂ = 0.827366226830 < t − 10⁻⁹ = 0.827366231872 while the row scores exactly t. A matching row is
+     skipped with its cluster, in 8 cases from 400 centres tried. The binary sums q·p̂ in another order, which changes
+     which queries hit the defect and not whether the formula is safe. In the sorted range the same deficit in s1 and rp
+     is in practice hidden by the 10⁻⁷ in DA, but nothing written says so, and the worst-case ε_r is larger than that
+     margin.
+   - *Repair proposed.* Add the rounding before the root: ρ_⊥ = √(max(‖q‖² − β², 0) + c·n·2⁻⁵³·‖q‖² + 2·10⁻¹²·β²)
+     with c ≈ 4, and the same for s1 and rp, where for rp the term is 2|rm| times the error of rm. The referee puts the
+     cost at under 10⁻⁶ of width at ρ_⊥ = 0 and nothing measurable elsewhere.
+   - *What would settle it on a binary.* A unit test of `support_pre` with the query equal to a centre's int8 vector
+     and a top row placed just under a grid point of the table, as in `range_corner_c.py`. Verify mode does not reach
+     it.
+
+3. **The missing unit-count guard** (`referee-kernel.md` §3a, finding K1).
+   - *What the code does.* "At most 64 deterministic units" is asserted only in `int_sigma` (`rust/src/v2/kern.rs`
+     line 435), the path without combined tables. The default plan has `gtab: true`, whose step is computed in
+     `CQ2::enable_int` (`rust/src/v2/q.rs` lines 488–498) with no such assertion. The build accepts any deterministic
+     schedule below the first randomised level (`rust/src/v2/mod.rs` lines 2345–2350), so a build with `--dlv` ending
+     at 64 bytes or more, and `--rlv` starting above it, gives 128 or more units.
+   - *Breaking input* [model] (`k1_compare.py`). At 128 units the OUT compare is wrong: Hs = 0, Ls = 32,639,
+     T_out = −4,201,876, Rout = −4,234,514 gives OUT where the exact compare does not, because Ls + RL passes 32,767. At
+     160 units both sides are wrong. With the shipped schedules (at most 32 bytes, 64 units) the compare is exact by
+     Proposition 1.21′. The report puts the limit at 127 units, so that any schedule up to 63 bytes (126 units) is
+     exact; the chapter carries that extension as a sketch after Proposition 1.21′.
+   - *Repair proposed.* Assert at most 127 units in `enable_int` (or at most 64, to keep the comment's ranges), or
+     refuse such a schedule at build.
+   - *What would settle it on a binary.* Verify mode cannot show it in practice, because it needs a low-word sum above
+     32,512. Extending the crate test `two_word_compare_matches_i64` to Ls ≤ 255·units for the largest unit count a
+     build accepts would.
+
+4. **The NaN threshold** (`referee-kernel.md` §3b, finding K2; edge, low).
+   - *What the code does.* `int_thresholds` clamps as min(max(v, TMIN), TMAX) with x86 semantics
+     (`rust/src/v2/kern.rs` line 526 on AVX2, line 556 on AVX-512), which sends a NaN to TMIN for both thresholds. TMIN
+     is the safe end for T_out and the unsafe end for T_in. With finite inputs no NaN arises: η > 0, every product is
+     finite, and K_in = +∞ under `out.iv` gives TMAX.
+   - *Breaking input* [model] (the referee's reading of `int_thresholds` at commit 8c0b316f9; nothing was run). A
+     threshold query with t = NaN gives T_in = TMIN, so every item whose margin is not the sentinel
+     is taken IN, where the f32 path, with ordered compares, decides nothing. The refiner's NaN threshold runs in
+     Interval mode, which never uses the integer path, so only a caller passing t = NaN to a threshold query reaches it.
+     t = −∞ also gives T_in = TMIN, which is the right answer there. The finding is from reading the code; the report
+     gives no count for it.
+   - *Repair proposed.* Write the clamp of T_in as min(TMAX, max(TMIN, v)) with the operands ordered so that NaN goes to
+     TMAX, or refuse a NaN threshold at the entry.
+   - *What would settle it on a binary.* The report names no test. The editor's reading is that one threshold query
+     with t = NaN on any index, through the integer path, would show it.
+
+5. **The m·r allowance** (`referee-kernel.md` §3e (a), finding K4; a small gap).
+   - *What the code does.* m·r = fl32(‖m‖₃₂·(ã) − ‖m‖₃₂²) from the key, with the f32 centre norm, and its allowance in
+     h_fix is |α|·‖m‖·DA + 4·10⁻⁶ (`rust/src/v2/q.rs` line 574).
+   - *Breaking input* [model] (`k6_key.py`, every key times 404 centre norms). The f32 evaluation differs from
+     ‖m‖ã − ‖m‖² by up to 2.7·10⁻⁷·‖m‖, which is more than the 10⁻⁷ in DA. The rest must come out of the absolute
+     4·10⁻⁶, which suffices while |α|·‖m‖ ≤ 23. Nothing bounds |α|, which is a least-squares coefficient in weighted
+     coordinates, and for |α|·‖m‖ > 23 the allowance is short by 1.7·10⁻⁷·|α|‖m‖ − 4·10⁻⁶.
+   - *Repair proposed.* DA = 0.5/32767 + 3·10⁻⁷.
+   - *What would settle it on a binary.* Print the largest |α|·‖m‖ over opened clusters on the text queries. Above 23
+     the float share of the m·r allowance is short.
+
+6. **The table cache keyed by level only** (`referee-kernel.md` §4; latent).
+   - *What the code does.* `cq.luts[l]` (`rust/src/v2/q.rs` lines 1369–1384) caches a cluster's tables by level only.
+     Tables built in Interval mode, with a step per part, would be reused on the integer path with step σ if one `CQ2`
+     with the integer path enabled were ever run in both modes.
+   - *Breaking input* [model] (the referee's reading of the code at commit 8c0b316f9; nothing was run). None
+     reachable: the three `Mode2::Thr` call sites open a fresh cluster setup, and the Interval
+     call sites never enable the integer path. The finding is from reading the code.
+   - *Repair proposed.* Assert that a cached deterministic table's step equals σ, which would make the reuse impossible.
+   - *What would settle it on a binary.* No input reaches it; the assertion would keep it unreachable.
+
+7. **e_inv does not bound the rounding of z̃** (`referee-range.md` F8).
+   - *What the code does.* e_inv = (the computed Frobenius defect of V·X)·(1 + 10⁻⁶) + 10⁻¹² (`rust/src/v2/mod.rs`
+     line 747), with X the computed inverse. It does not bound the rounding of z̃ = fl(X·r), or of the defect itself.
+     Lemma 1.9 and Proposition 1.6 need e_inv ≥ ‖ε‖/‖r‖ for the stored z̃.
+   - *Size* [model] (standard rounding bounds applied to the code as read, not the binary's summation order). The
+     referee estimates the missing rounding at up to about 5·10⁻¹⁰ relative at
+     n = 768 and condition 227, and typically far less. The +10⁻⁹ in `NuCut`'s E_α (q.rs line 654) and the 4·10⁻⁶ in
+     the levels' fixed term (q.rs line 574) absorb it, but no source says so. The report gives no breaking input.
+   - *Repair proposed.* The report proposes none, beyond placing the point with the gap named in 1.10. The editor's
+     reading is that the absorbing argument should be written, or the rounding of z̃ added to e_inv.
+   - *What would settle it on a binary.* The report names nothing. The editor's reading is that only the written
+     argument settles it, and that a measurement on the binary would show the size of the rounding against the margins
+     that absorb it.
+
+8. **Groups with fewer rows than the dimension** (`program/partition/experiment/RESULTS.md`, item 1 notes, item 2 "Where
+   the coding spread comes from", and "Limits of the evidence").
+   - *What the code does.* `rust/tools/fit.py` sets G = min(64, K, N/(20n)), which gives 20n rows a group on average,
+     and assigns clusters to groups by k-means on the unit centre directions, with one dual basis per group
+     (`program/partition/NOTEBOOK.md`, "What is built, checked in the source"). `RESULTS.md` finds that this rule
+     "does not hold a group above n rows" at 200,000 rows and G = 12. A group of fewer than n rows has a singular pooled
+     covariance, which the fit floors (Editor's query 21).
+   - *Breaking input* [measured] (200,000-row BioCLIP-2 sample, n = 768, K = 200, G = 12, `diag_groups.py`; costs under
+     the floor's idealised level model, not the built code's bytes). With build seed 1 the grouping holds a group of 2
+     cells and 617 fit rows, fewer than n, whose pooled covariance is singular and floored. The 208 held-out rows of that group need
+     200 B at w* = 0.06, against a mean of 36 B, which by itself adds about 0.7 B to the mean. Build seed 2 made two
+     groups of one cell each, with 1 and 3 fit rows. Over groups of at least 3n fit rows, the seed spread of the coding
+     score falls from 1.08 B to about 0.6 B. The defect costs bytes and not soundness, because every bound of this
+     chapter holds for any basis (§1.4, "The fit as built").
+   - *Repair proposed.* `RESULTS.md` proposes none for the build. Its experiments B and C hold a floor of 3n = 2,304
+     fit rows a group, B by refusing moves out of a smaller group and C by reverting them; the editor's reading is that
+     such a floor in `fit.py` would be one repair.
+   - *What would settle it on a binary.* The source names nothing. The editor's reading is that the group sizes of the
+     1M index's fit show whether any group there has fewer than n rows.
+
+A further precondition that the code does not assert, the largest decoded coordinate value behind e_fl, is recorded
+after 1.10; the kernel referee did not list it as a finding.
 
 ## 1.9 Prior work
 
@@ -691,11 +1324,19 @@ citation.
 
 ## Open
 
-- Lemma 1.5 and Propositions 1.13, 1.15 and 1.16 are short proofs that no referee has checked (`groups/REPORT.md` §5
-  says the same of Propositions 1–3). Chapter 4's Lemma 4.10 and chapter 2's Propositions 2.8 and 2.9 are the same
-  results and share this status.
-- The floating-point allowances of the certificate as built (§1.3, 1.10), the float32 rounding bound of the full-vector
-  step and the two-norm bound of Proposition 1.12 need written proofs.
+- Propositions 1.13, 1.15 and 1.16 are short proofs that no referee has checked (`groups/REPORT.md` §5 says the same
+  of Propositions 1–3). Chapter 2's Propositions 2.8 and 2.9 are the same results and share this status. The earlier,
+  exact-key form of Lemma 1.5, which is Lemma 4.10 of chapter 4 in its annulus case, has now been checked by the
+  referee of the cluster cut and found correct (§1.2); the restatements of §1.2 (Proposition 1.4, Lemmas 1.5a, 1.5b
+  and 1.5, Proposition 1.6) are that referee's own and await a referee.
+- The statements of §1.8 as built (Lemmas 1.18a and 1.18b, Theorem 1.19, Propositions 1.21′ and 1.22) are the kernel
+  referee's own proofs, with float constants counted by hand, and await a referee. The extension of Proposition 1.21′
+  from 64 to 127 units is a sketch whose ranges no source writes (Editor's query 20).
+- The floating-point allowances of the f32 certificate (§1.3, 1.10: e_fl, `edet`, `fl` and the constant 4·10⁻⁶), the
+  float32 rounding bound of the full-vector step and the two-norm bound of Proposition 1.12 need written proofs. The
+  integer kernel's own allowances (thresholds, margins, tables) are now argued in §1.8, and parts of e_fl and h_fix
+  are argued after 1.10 under conditions the code does not assert.
+- The eight defects of §1.8a are open at commit 8c0b316f9.
 - The ν-sort of Proposition 1.6 has not been run natively. It would remove the support table, whose size and anchor
   ratio at 10⁹ rows are unresolved (`review/REPORT.md` §1.3), and the atomic widening of the table on insert.
 - Two measures of the dual basis's zero-bit slack disagree (for text with the data-only fit, 0.232 → 0.228 for the
@@ -745,11 +1386,19 @@ citation.
    complement of one range and the in rows as the complement of a nested range within it. The description in `SYSTEM.md`
    reads as the usual arrangement for q·m̂ > 0, and the editor has not checked whether in rows can lie on both sides in
    other cases.
+   *Settled, 21 November 2026,* by `program/kernel/referee-range.md` (F2 and "Verdicts"). In rows can lie at either
+   end, and so can out rows: in the referee's model the decided rows took every arrangement listed after Lemma 1.5,
+   OuO, IuI and IuO among them [model]. The description in `SYSTEM.md` §2.2 is wrong in general, and Lemma 1.5 now
+   says that it does not fix the ends. The referee's rule for the annulus bound alone is given after Lemma 1.5
+   [sketch: gap named]. `SYSTEM.md` itself is unchanged.
 7. The referee's absolute slack for the f32 thresholds includes |α·m·r|. The editor read `int_thresholds`
    (`rust/src/v2/kern.rs`): it adds |α·m·r| per item to the scale |t| + |h_fix| + |q·m| passed from `q.rs`, and it works
    in f64 with 2⁻⁴⁶ in place of 2⁻²², so the referee's term is covered. Two small points remain unwritten. The scale
    carries |h_fix| where the referee writes |ψ·h_fix|, which matters only for a dial above 1. The f64 slack is argued
    in no written source.
+   *Settled, 21 November 2026,* by `program/kernel/referee-kernel.md` §3b. The f64 slack is now argued in writing
+   (Lemma 1.18a, [proved, unrefereed], first order in the rounding unit; Editor's query 19). The scale's |h_fix| in
+   place of |ψ·h_fix| is covered for any dial, because ψ_max·h_fix ≤ |t| + |c_out| + |q·m|.
 8. Proposition 1.12 and the coordinate facts after Proposition 1.13 contain steps written out by the editor: the
    enclosing-ellipsoid argument for the former and the substitution checks for the latter. The sources assert both
    without these steps, and the tags were kept at the sources' level.
@@ -757,6 +1406,9 @@ citation.
    optimality) of the consolidated proofs; it is Theorem 1.19 here.
 10. `DESIGN.md` §2 describes a 1-byte error norm per level and a level-0 norm byte; `SYSTEM.md` and `quant/REPORT.md`
     describe a 4-bit norm code per level and no level-0 norm. This chapter follows `SYSTEM.md`, which follows the code.
+    *Note, 21 November 2026:* the kernel referee's reading of the code (`program/kernel/referee-kernel.md` §1 and §4:
+    margins for norm codes n < 15, with code 15 the escape) agrees with `SYSTEM.md`. The point about `DESIGN.md`
+    stands.
 11. Proposition 1.3(a) is refereed for α = q·m/‖m‖² in the randomised setting of `reports/surge/level0/REPORT.txt`. The
     index computes a different α, a least-squares coefficient in the weighted coordinates, which Lemma 1.1 makes sound at
     the deterministic levels. Whether one α per (query, cluster) is used consistently at every randomised level, as
@@ -771,8 +1423,58 @@ citation.
     the built index. The proof combines Lemmas 1.1 and 1.9 and Cauchy–Schwarz; no source writes it out, and the tag is
     kept at [proved, unrefereed]. The code also takes the tighter of the bounds for three values of α, which is sound
     because each holds.
+    *Settled, 21 November 2026,* by `program/kernel/referee-range.md` ("Verdicts" and "The statements and proofs as
+    they should stand"). The referee found the statement and proof above correct, basis term included, and restated
+    the proposition with two additions: the best of several values of α, and the claim that at most one of the two
+    prefixes is non-empty. The restatement now stands in §1.2. It is the referee's own, so the tag stays
+    [proved, unrefereed]. Two points remain against the code: the hypothesis e_inv ≥ ‖ε‖/‖r‖ is not established as a
+    bound (§1.8a, defect 7), and every wrong decision in the referee's model of `NuCut` came from the key clamp
+    (defect 1).
 14. The built kernel (comment at `rust/src/v2/kern.rs` lines 386–404, and `q.rs` where `int_thresholds` is called)
     differs from the design of `reports/surge/integer-kernel.txt` §1.3 in two places. It uses the signed remainder,
     −B_ℓ in the IN margin and +B_ℓ in the OUT margin, which the proof of Theorem 1.19 covers. It also applies the dial
     to the OUT side only (K_in carries h_fix and R_in carries w_ℓ(n) + e_fl without ψ), so for ψ ≠ 1 the built IN test
     is that of ψ = 1. Neither change is in a written source, and neither was refereed.
+    *Settled, 21 November 2026,* by `program/kernel/referee-kernel.md` §2 and §6. Both changes are sound by the
+    theorem's own argument, and Theorem 1.19 is now stated as built: B_ℓ the signed full sum, no centring constant,
+    the dial on the OUT side only (ψ_ℓ on η·X_ℓ(n) and ψ_max on h_fix), and t − tol on the IN side. Every IN is
+    certified at ψ = 1 whatever the dial, and OUT at a dial below 1 is a statistical exclusion. The statement and proof
+    are the kernel referee's, so they are tagged [proved, unrefereed]. The referee lists further differences, given
+    after Proposition 1.22.
+15. The earlier text of §1.2 said the support table stores lo_c and hi_c "in 2 bytes each". The referee of the cluster
+    cut found them stored as f32 on a 2⁻¹⁵ grid, 4 bytes a value in memory (`referee-range.md` F8). Neither report says
+    how they are stored on disk, and the chapter named no source for the 2-byte figure. `SYSTEM.md` §2.1 and the
+    on-disk format should be checked, because the size of the table at 10⁹ rows is one of the open questions of §1.2.
+16. Lemma 1.18b (ii) is argued in `referee-kernel.md` §3c only for B_ℓ < 0, which the report calls the usual case. For
+    B_ℓ ≥ 0 the quotient (X + e − B)/σ can cancel as Rout's can, and the report gives no argument; its attack found Rin
+    short of the exact quotient in 0 cases [model]. The editor's reading is that the slack of e_ℓ used for Rout would
+    cover the same shortfall, but no source writes that step, so Theorem 1.19 takes the IN margin inequality as a
+    hypothesis. The proof of (i) also needs e°_ℓ, e_ℓ less its two factors of 1 + 10⁻⁶, still to bound the error in
+    (1). The report says only that σ·Rout ≥ B_ℓ + e°_ℓ + ψ_ℓX "still holds", and its §3d uses part of the same factors
+    to cover the `as f32` rounding of each error bound, so the step is not written; Theorem 1.19 takes it as a
+    hypothesis too.
+17. The referee of the cluster cut read Lemmas 1.1 and 1.2, the earlier statement of Proposition 1.4 and the earlier,
+    exact-key Lemma 1.5 (now part (d) of Lemma 1.5) and found no error in any of them ("Verdicts"). Their tags were not
+    raised in this transcription, because the referee's attack was aimed at the code and its own restatements replace
+    the earlier statements. Whether these statements, and Lemma 4.10 of chapter 4 (the annulus case), now enter as
+    [proved, refereed] is for the PI to decide.
+18. Other chapters still describe the kernel's allowances and departures as unargued: `06-open-problems.md` (the
+    entries on the floating-point allowances, the f64 threshold slack, "the built kernel's departures from the refereed
+    design" and the unrefereed Lemma 1.5) and chapter 4's Lemma 4.10. The kernel referee's report now argues the f64
+    slack, the margins, the tables and the departures (§1.8, [proved, unrefereed]), and the range referee's report
+    covers Lemma 1.5. Those entries should be revised by their chapters' editor; this transcription did not touch them.
+19. Lemma 1.18a's proof is first order in the rounding unit ū, as `referee-kernel.md` §3b writes it ("(first
+    order)"). The report claims a factor of about 14 to spare and writes no second-order terms. The float constants of
+    the built tables (after Lemma 1.18) and of Proposition 1.22 are likewise the referee's count by hand. Proposition
+    1.22 also uses a per-unit magnitude mag_u, which the report does not define beyond comparing 4·2⁻²⁴·mag_u with
+    0.5·2⁻²⁴·(|α|σ_m·θ^m_max + max|v|)/σ; that it is a bound in steps is the editor's reading of that comparison.
+20. Proposition 1.21′ is stated for at most 64 units, because `referee-kernel.md` §3a writes its proof with the ranges
+    for 64 (g ∈ [−510, 16,320] or [−255, 16,575], g >> 8 ∈ [−2, 64], a saturated-low word at most −32,704). The same
+    report's verdict, and its attack at 127 units [model], put the limit at 127 units, and the code's own comment
+    (`rust/src/v2/kern.rs` lines 391 and 398–404) gives the 64-unit ranges. The ranges for U ≤ 127 after the
+    proposition are the editor's and are tagged [sketch: gap named]. A referee should read them, or the report should
+    write them.
+21. Defect 8's account of the grouping rule is taken from the partition track's reading of `rust/tools/fit.py`
+    (`program/partition/NOTEBOOK.md`) and from `RESULTS.md`. Neither gives line numbers for `fit.py` or
+    `rust/tools/rules.py`, nor the size of the eigenvalue floor in the build's fit (the experiment's own model floors
+    at 10⁻¹² of the largest, `EXPERIMENT-SPEC.md`), so this chapter gives neither.
