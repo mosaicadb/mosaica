@@ -1,0 +1,61 @@
+Model C in population, tail rate 2.2 a spread. The author's kappa_q, then the largest the model allows.
+
+iNaturalist, 12: f 0.92, kappa_q 0.360 (largest allowed 0.622), kappa_q/sqrt(1-f) 1.27; bulk rho_es 0.45; Cov(a,e)/tau^2 0.60 (so actual over form 1 = 0.68); slope of s on a, all rows 1.058; s_res/(sqrt f tau) 1.26; tail line y = 1.27 x -1.81
+   measured for this index: median r 0.33, median y/x 1.17, slope 1.21; y/x 1.06 at x 0.5-2 rising to 1.3 at x 4-5; (zeta+psi0 sqrt f) tau keeps 0.918/0.975 at psi0 2/3; plain psi 4 0.818
+   median y/x by height:  x 0.5-2: 0.40 (n 6506673)  x 2-3: 0.58 (n 571140)  x 3-4: 0.74 (n 71953)  x 4-5: 0.85 (n 8019)  x 5-6: 0.94 (n 911)
+   at the threshold, zeta 3 (8368 rows): mean y 2.09, sd 1.17; plain psi 4: 0.945;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.778/0.940/0.991/0.999;  kappa 1-f, psi0 2/3/4: 0.720/0.915/0.984;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.927/0.992/1.000 (with my intercept -1.49 s_res added: 0.482/0.831/0.974)
+   at the threshold, zeta 4 (956 rows): mean y 3.35, sd 1.22; plain psi 4: 0.702;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.702/0.913/0.983/0.997;  kappa 1-f, psi0 2/3/4: 0.390/0.704/0.914;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.927/0.991/0.999 (with my intercept -1.49 s_res added: 0.476/0.831/0.979)
+
+iNaturalist, 12 at the largest kappa_q: f 0.92, kappa_q 0.622 (largest allowed 0.622), kappa_q/sqrt(1-f) 2.20; bulk rho_es 0.45; Cov(a,e)/tau^2 0.61 (so actual over form 1 = 0.67); slope of s on a, all rows 1.059; s_res/(sqrt f tau) 2.04; tail line y = 2.20 x -3.84
+   measured for this index: median r 0.33, median y/x 1.17, slope 1.21; y/x 1.06 at x 0.5-2 rising to 1.3 at x 4-5; (zeta+psi0 sqrt f) tau keeps 0.918/0.975 at psi0 2/3; plain psi 4 0.818
+   median y/x by height:  x 0.5-2: 0.14 (n 6509215)  x 2-3: 0.69 (n 570047)  x 3-4: 1.06 (n 71581)  x 4-5: 1.32 (n 7974)  x 5-6: 1.46 (n 902)
+   at the threshold, zeta 3 (8391 rows): mean y 2.90, sd 1.85; plain psi 4: 0.723;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.533/0.716/0.858/0.938;  kappa 1-f, psi0 2/3/4: 0.486/0.674/0.830;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.973/0.997/1.000 (with my intercept -1.96 s_res added: 0.484/0.836/0.974)
+   at the threshold, zeta 4 (914 rows): mean y 5.00, sd 1.81; plain psi 4: 0.288;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.288/0.499/0.686/0.857;  kappa 1-f, psi0 2/3/4: 0.137/0.292/0.500;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.984/0.999/1.000 (with my intercept -1.96 s_res added: 0.499/0.862/0.987)
+
+iNaturalist, 1: f 0.86, kappa_q 0.500 (largest allowed 0.823), kappa_q/sqrt(1-f) 1.34; bulk rho_es 0.51; Cov(a,e)/tau^2 0.37 (so actual over form 1 = 0.76); slope of s on a, all rows 1.068; s_res/(sqrt f tau) 1.28; tail line y = 1.34 x -1.81
+   measured for this index: median r 0.47, median y/x 1.21, slope 1.24; keeps 0.918/0.972; plain 0.824
+   median y/x by height:  x 0.5-2: 0.45 (n 6508280)  x 2-3: 0.64 (n 570413)  x 3-4: 0.80 (n 71922)  x 4-5: 0.92 (n 8001)  x 5-6: 1.00 (n 899)
+   at the threshold, zeta 3 (8259 rows): mean y 2.32, sd 1.15; plain psi 4: 0.923;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.723/0.915/0.985/0.998;  kappa 1-f, psi0 2/3/4: 0.718/0.913/0.985;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.924/0.992/1.000 (with my intercept -1.52 s_res added: 0.468/0.819/0.973)
+   at the threshold, zeta 4 (942 rows): mean y 3.58, sd 1.19; plain psi 4: 0.635;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.635/0.875/0.968/0.999;  kappa 1-f, psi0 2/3/4: 0.398/0.731/0.917;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.933/0.998/1.000 (with my intercept -1.52 s_res added: 0.461/0.838/0.970)
+
+iNaturalist, 1 at the largest kappa_q: f 0.86, kappa_q 0.823 (largest allowed 0.823), kappa_q/sqrt(1-f) 2.20; bulk rho_es 0.45; Cov(a,e)/tau^2 0.22 (so actual over form 1 = 0.84); slope of s on a, all rows 1.038; s_res/(sqrt f tau) 2.11; tail line y = 2.20 x -3.84
+   measured for this index: median r 0.47, median y/x 1.21, slope 1.24; keeps 0.918/0.972; plain 0.824
+   median y/x by height:  x 0.5-2: 0.15 (n 6508171)  x 2-3: 0.69 (n 569914)  x 3-4: 1.06 (n 71903)  x 4-5: 1.31 (n 8120)  x 5-6: 1.48 (n 920)
+   at the threshold, zeta 3 (8300 rows): mean y 2.94, sd 1.85; plain psi 4: 0.716;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.521/0.702/0.845/0.932;  kappa 1-f, psi0 2/3/4: 0.516/0.699/0.843;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.970/0.998/1.000 (with my intercept -1.96 s_res added: 0.471/0.826/0.972)
+   at the threshold, zeta 4 (953 rows): mean y 5.03, sd 1.94; plain psi 4: 0.301;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.301/0.471/0.665/0.815;  kappa 1-f, psi0 2/3/4: 0.194/0.352/0.534;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.974/0.999/1.000 (with my intercept -1.96 s_res added: 0.476/0.825/0.976)
+
+yahoo: f 0.82, kappa_q 0.390 (largest allowed 0.933), kappa_q/sqrt(1-f) 0.92; bulk rho_es 0.54; Cov(a,e)/tau^2 0.27 (so actual over form 1 = 0.80); slope of s on a, all rows 1.068; s_res/(sqrt f tau) 1.02; tail line y = 0.92 x -0.83
+   measured for this index: median r 0.36, median y/x 0.94, slope 0.99; keeps 0.976/0.992; plain 0.803; kappa 1-f at psi0 2/3/4: 0.47-0.73 / 0.77-0.90 / 0.934
+   median y/x by height:  x 0.5-2: 0.53 (n 6507776)  x 2-3: 0.60 (n 572559)  x 3-4: 0.67 (n 72504)  x 4-5: 0.73 (n 8149)  x 5-6: 0.75 (n 888)
+   at the threshold, zeta 3 (8257 rows): mean y 1.99, sd 0.91; plain psi 4: 0.986;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.868/0.980/0.999/1.000;  kappa 1-f, psi0 2/3/4: 0.886/0.985/0.999;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.802/0.965/0.997 (with my intercept -0.90 s_res added: 0.474/0.827/0.973)
+   at the threshold, zeta 4 (935 rows): mean y 2.91, sd 0.92; plain psi 4: 0.897;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.897/0.984/0.999/1.000;  kappa 1-f, psi0 2/3/4: 0.735/0.953/0.996;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.794/0.968/0.998 (with my intercept -0.90 s_res added: 0.463/0.825/0.974)
+
+yahoo at the largest kappa_q: f 0.82, kappa_q 0.933 (largest allowed 0.933), kappa_q/sqrt(1-f) 2.20; bulk rho_es 0.45; Cov(a,e)/tau^2 0.07 (so actual over form 1 = 0.94); slope of s on a, all rows 1.016; s_res/(sqrt f tau) 2.16; tail line y = 2.20 x -3.84
+   measured for this index: median r 0.36, median y/x 0.94, slope 0.99; keeps 0.976/0.992; plain 0.803; kappa 1-f at psi0 2/3/4: 0.47-0.73 / 0.77-0.90 / 0.934
+   median y/x by height:  x 0.5-2: 0.15 (n 6508195)  x 2-3: 0.69 (n 573119)  x 3-4: 1.06 (n 71947)  x 4-5: 1.31 (n 8007)  x 5-6: 1.46 (n 909)
+   at the threshold, zeta 3 (8412 rows): mean y 2.93, sd 1.83; plain psi 4: 0.723;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.528/0.707/0.842/0.930;  kappa 1-f, psi0 2/3/4: 0.543/0.721/0.854;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.972/0.999/1.000 (with my intercept -1.96 s_res added: 0.475/0.831/0.976)
+   at the threshold, zeta 4 (920 rows): mean y 5.01, sd 1.94; plain psi 4: 0.312;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.312/0.488/0.667/0.802;  kappa 1-f, psi0 2/3/4: 0.229/0.382/0.572;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.971/0.996/1.000 (with my intercept -1.96 s_res added: 0.501/0.828/0.974)
+
+LAION, 64: f 0.71, kappa_q 0.500 (largest allowed 1.185), kappa_q/sqrt(1-f) 0.93; bulk rho_es 0.63; Cov(a,e)/tau^2 0.18 (so actual over form 1 = 0.86); slope of s on a, all rows 1.085; s_res/(sqrt f tau) 0.98; tail line y = 0.93 x -0.65
+   measured for this index: median r 0.46, median y/x 0.89, slope 0.92; keeps 0.969/0.985; plain 0.809
+   median y/x by height:  x 0.5-2: 0.62 (n 6508031)  x 2-3: 0.68 (n 571425)  x 3-4: 0.74 (n 71822)  x 4-5: 0.78 (n 8136)  x 5-6: 0.80 (n 936)
+   at the threshold, zeta 3 (8186 rows): mean y 2.20, sd 0.82; plain psi 4: 0.986;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.838/0.977/0.999/1.000;  kappa 1-f, psi0 2/3/4: 0.912/0.991/1.000;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.763/0.957/0.996 (with my intercept -0.78 s_res added: 0.469/0.828/0.973)
+   at the threshold, zeta 4 (964 rows): mean y 3.10, sd 0.79; plain psi 4: 0.863;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.863/0.985/1.000/1.000;  kappa 1-f, psi0 2/3/4: 0.822/0.974/0.999;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.787/0.963/0.998 (with my intercept -0.78 s_res added: 0.490/0.832/0.975)
+
+LAION, 64 at the largest kappa_q: f 0.71, kappa_q 1.185 (largest allowed 1.185), kappa_q/sqrt(1-f) 2.20; bulk rho_es 0.45; Cov(a,e)/tau^2 -0.16 (so actual over form 1 = 1.20); slope of s on a, all rows 0.944; s_res/(sqrt f tau) 2.33; tail line y = 2.20 x -3.84
+   measured for this index: median r 0.46, median y/x 0.89, slope 0.92; keeps 0.969/0.985; plain 0.809
+   median y/x by height:  x 0.5-2: 0.15 (n 6506432)  x 2-3: 0.69 (n 570579)  x 3-4: 1.06 (n 72088)  x 4-5: 1.31 (n 8241)  x 5-6: 1.47 (n 884)
+   at the threshold, zeta 3 (8388 rows): mean y 2.95, sd 1.85; plain psi 4: 0.715;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.522/0.691/0.818/0.910;  kappa 1-f, psi0 2/3/4: 0.581/0.739/0.857;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.974/0.998/1.000 (with my intercept -1.96 s_res added: 0.472/0.822/0.976)
+   at the threshold, zeta 4 (934 rows): mean y 5.02, sd 2.05; plain psi 4: 0.294;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.294/0.444/0.607/0.778;  kappa 1-f, psi0 2/3/4: 0.266/0.421/0.579;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.968/0.997/1.000 (with my intercept -1.96 s_res added: 0.469/0.827/0.971)
+
+LAION, 8: f 0.67, kappa_q 0.580 (largest allowed 1.264), kappa_q/sqrt(1-f) 1.01; bulk rho_es 0.66; Cov(a,e)/tau^2 0.15 (so actual over form 1 = 0.88); slope of s on a, all rows 1.089; s_res/(sqrt f tau) 1.01; tail line y = 1.01 x -0.76
+   measured for this index: median r 0.55, median y/x 0.96, slope 0.98; keeps 0.964/0.981; plain 0.790
+   median y/x by height:  x 0.5-2: 0.65 (n 6508682)  x 2-3: 0.72 (n 572032)  x 3-4: 0.78 (n 72079)  x 4-5: 0.83 (n 8168)  x 5-6: 0.87 (n 891)
+   at the threshold, zeta 3 (8270 rows): mean y 2.32, sd 0.81; plain psi 4: 0.980;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.801/0.968/0.997/1.000;  kappa 1-f, psi0 2/3/4: 0.901/0.988/1.000;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.809/0.971/0.998 (with my intercept -0.93 s_res added: 0.470/0.827/0.975)
+   at the threshold, zeta 4 (947 rows): mean y 3.33, sd 0.83; plain psi 4: 0.793;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.793/0.965/0.996/1.000;  kappa 1-f, psi0 2/3/4: 0.768/0.957/0.996;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.806/0.969/0.996 (with my intercept -0.93 s_res added: 0.467/0.823/0.978)
+
+LAION, 8 at the largest kappa_q: f 0.67, kappa_q 1.264 (largest allowed 1.264), kappa_q/sqrt(1-f) 2.20; bulk rho_es 0.45; Cov(a,e)/tau^2 -0.21 (so actual over form 1 = 1.31); slope of s on a, all rows 0.915; s_res/(sqrt f tau) 2.39; tail line y = 2.20 x -3.84
+   measured for this index: median r 0.55, median y/x 0.96, slope 0.98; keeps 0.964/0.981; plain 0.790
+   median y/x by height:  x 0.5-2: 0.15 (n 6508501)  x 2-3: 0.69 (n 569824)  x 3-4: 1.06 (n 71677)  x 4-5: 1.32 (n 8014)  x 5-6: 1.49 (n 817)
+   at the threshold, zeta 3 (8355 rows): mean y 2.95, sd 1.85; plain psi 4: 0.719;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.518/0.683/0.818/0.907;  kappa 1-f, psi0 2/3/4: 0.590/0.749/0.862;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.969/0.998/1.000 (with my intercept -1.96 s_res added: 0.469/0.829/0.972)
+   at the threshold, zeta 4 (936 rows): mean y 5.03, sd 1.96; plain psi 4: 0.306;  (zeta + psi0 sqrt f) tau, psi0 0/1/2/3: 0.306/0.464/0.626/0.772;  kappa 1-f, psi0 2/3/4: 0.290/0.442/0.611;  kappa_q T + psi0 s_res, psi0 0/1/2: 0.970/0.997/1.000 (with my intercept -1.96 s_res added: 0.493/0.840/0.972)

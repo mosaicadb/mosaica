@@ -1,0 +1,5 @@
+296012 cases; f64 error of the OUT quotient: -1.983e-10 to 2.012e-10 steps
+Rin short of the exact quotient: 0; Rout short: 0 (worst 0.000e+00 steps)
+OUT quotient against the integer it was placed at: {'exact>k, computed>=k': 147986, 'exact>k, computed<k': 63, 'exact<=k, computed>=k': 13519, 'exact<=k, computed<k': 134444}
+slack e carries beyond half a step per unit (two factors of 1 + 1e-6): 8.0e-06 steps at 8 units, 6.4e-05 at 64
+crossings 63: smallest |k| 1859; computed below k by at most 1.037e-10; `up` adds at least 1.860e-09 there

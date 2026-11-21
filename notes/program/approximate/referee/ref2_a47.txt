@@ -1,0 +1,9 @@
+tau^2 0.0839, sigma^2 0.2901, mean error variance of the randomised level 0.0118 (v_R/tau^2 = 0.14); cos of Delta_j with y_j, rms 0.22
+per row, over seeds: max |E a_R - s| 0.0038 (one standard error 0.0017);  max |E[(a_R - a)^2 - v_R] - e^2| 0.0051;  max |E[(a_R - a) a_R - v_R] - e s| 0.0061
+correlation over seeds of two rows' errors: near-duplicate pair +0.97; other pairs mean +0.000, rms 0.016; its correlation with the cosine of the two rows' residuals +0.19 (rows' cosines rms 0.11)
+sample estimates over the truth (mean over seeds):
+  with v_R:                       tau^2 1.001   sigma^2 1.000   (sd over seeds of the tau^2 estimate 0.099)
+  with sd_R^2 (upper bound):      tau^2 0.993   sigma^2 0.998
+  with v_R from the level's own estimate of Delta_j.y_j:  tau^2 1.003
+  one block uncoded:              tau^2 0.300   sigma^2 0.710   mean of a_R - s +0.0087 (share of tau^2 in that block 0.39)
+  estimator's scale up by 3%:     tau^2 1.069   max |E a_R - s| 0.0249

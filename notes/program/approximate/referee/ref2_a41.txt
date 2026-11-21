@@ -1,0 +1,4 @@
+equal a_i                          rho 0.0510  normal: rms of ratio / rho 1.007, ratio of moments / rho 1.007;  one scale per row, lognormal 0.5: rms of ratio / rho 0.999, ratio of moments / rho 1.000
+water-filled, 70% coded            rho 0.0537  normal: rms of ratio / rho 0.997, ratio of moments / rho 0.997;  one scale per row, lognormal 0.5: rms of ratio / rho 0.992, ratio of moments / rho 0.986
+log-normal, sd 1                   rho 0.0798  normal: rms of ratio / rho 0.990, ratio of moments / rho 0.996;  one scale per row, lognormal 0.5: rms of ratio / rho 0.996, ratio of moments / rho 0.989
+log-normal, sd 2                   rho 0.1533  normal: rms of ratio / rho 0.976, ratio of moments / rho 0.999;  one scale per row, lognormal 0.5: rms of ratio / rho 0.969, ratio of moments / rho 0.994

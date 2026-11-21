@@ -1,0 +1,56 @@
+width at 32 B 0.3322; built level: plain 0.2405, R8 at E=0 0.2394
+  built [2,0,0,0]                    rates [2, 0, 0, 0]  plain 0.2405 (+0.0%)  R8 0.2394 (+0.0%)  xi^2 0.070
+  3 blocks at 1, 1/2, 1/8            rates [1, 0.5, 0.125, 0]  plain 0.2046 (-14.9%)  R8 0.1825 (-23.8%)  xi^2 0.266
+  4 blocks at 1/2, 1/2, 1/8, 1/8     rates [0.5, 0.5, 0.125, 0.125]  plain 0.2371 (-1.4%)  R8 0.1981 (-17.3%)  xi^2 0.433
+  2 blocks at 1, 1/2                 rates [1, 0.5, 0, 0]  plain 0.2331 (-3.1%)  R8 0.2138 (-10.7%)  xi^2 0.290
+  2 blocks at 0.96, 0.78 (S1's)      rates [0.96, 0.78, 0, 0]  plain 0.1982 (-17.6%)  R8 0.1857 (-22.4%)  xi^2 0.232
+  2 blocks, free under R8            rates [0.931, 0.801, 0.0, 0.0]  plain 0.1982 (-17.6%)  R8 0.1856 (-22.5%)  xi^2 0.234
+  2 blocks, best menu under R8       rates [1, 0.5, 0, 0]  plain 0.2331 (-3.1%)  R8 0.2138 (-10.7%)  xi^2 0.290
+  3 blocks, free under R8            rates [0.722, 0.617, 0.171, 0.0]  plain 0.1944 (-19.2%)  R8 0.1694 (-29.3%)  xi^2 0.327
+  3 blocks, best menu under R8       rates [1, 0.5, 0.125, 0]  plain 0.2046 (-14.9%)  R8 0.1825 (-23.8%)  xi^2 0.266
+  4 blocks, free under R8            rates [0.701, 0.599, 0.165, 0.02]  plain 0.1952 (-18.8%)  R8 0.1688 (-29.5%)  xi^2 0.337
+  4 blocks, best menu under R8       rates [0.5, 0.5, 0.125, 0.125]  plain 0.2371 (-1.4%)  R8 0.1981 (-17.3%)  xi^2 0.433
+  item 1% (enter 56 B 0.068, 96 B 0.040):
+     3 blocks at 1, 1/2, 1/8: 96 B -32%, -0.31 B, pays below 1.04 ns
+     4 blocks at 1/2, 1/2, 1/8, 1/8: 96 B -24%, -0.08 B, pays below 0.43 ns
+     2 blocks at 1, 1/2: 96 B -15%, -0.14 B, pays below 0.98 ns
+     2 blocks at 0.96, 0.78 (S1's): 96 B -30%, -0.39 B, pays below 3.04 ns
+     2 blocks, free under R8: 96 B -30%, -0.39 B, pays below 3.06 ns
+     2 blocks, best menu under R8: 96 B -15%, -0.14 B, pays below 0.98 ns
+     3 blocks, free under R8: 96 B -38%, -0.41 B, pays below 1.35 ns
+     3 blocks, best menu under R8: 96 B -32%, -0.31 B, pays below 1.04 ns
+     4 blocks, free under R8: 96 B -39%, -0.32 B, pays below 0.78 ns
+     4 blocks, best menu under R8: 96 B -24%, -0.08 B, pays below 0.43 ns
+  item 50% (enter 56 B 0.536, 96 B 0.411):
+     3 blocks at 1, 1/2, 1/8: 96 B -21%, -1.96 B, pays below 0.87 ns
+     4 blocks at 1/2, 1/2, 1/8, 1/8: 96 B -15%, -0.15 B, pays below 0.36 ns
+     2 blocks at 1, 1/2: 96 B -9%, -0.76 B, pays below 0.74 ns
+     2 blocks at 0.96, 0.78 (S1's): 96 B -20%, -2.56 B, pays below 2.31 ns
+     2 blocks, free under R8: 96 B -20%, -2.56 B, pays below 2.31 ns
+     2 blocks, best menu under R8: 96 B -9%, -0.76 B, pays below 0.74 ns
+     3 blocks, free under R8: 96 B -27%, -2.83 B, pays below 1.18 ns
+     3 blocks, best menu under R8: 96 B -21%, -1.96 B, pays below 0.87 ns
+     4 blocks, free under R8: 96 B -27%, -2.06 B, pays below 0.69 ns
+     4 blocks, best menu under R8: 96 B -15%, -0.15 B, pays below 0.36 ns
+  text 1% (enter 56 B 0.480, 96 B 0.287):
+     3 blocks at 1, 1/2, 1/8: 96 B -40%, -3.25 B, pays below 1.51 ns
+     4 blocks at 1/2, 1/2, 1/8, 1/8: 96 B -30%, -1.32 B, pays below 0.58 ns
+     2 blocks at 1, 1/2: 96 B -19%, -1.47 B, pays below 1.36 ns
+     2 blocks at 0.96, 0.78 (S1's): 96 B -38%, -3.72 B, pays below 5.80 ns
+     2 blocks, free under R8: 96 B -38%, -3.73 B, pays below 5.84 ns
+     2 blocks, best menu under R8: 96 B -19%, -1.47 B, pays below 1.36 ns
+     3 blocks, free under R8: 96 B -48%, -4.19 B, pays below 2.04 ns
+     3 blocks, best menu under R8: 96 B -40%, -3.25 B, pays below 1.51 ns
+     4 blocks, free under R8: 96 B -49%, -3.50 B, pays below 1.10 ns
+     4 blocks, best menu under R8: 96 B -30%, -1.32 B, pays below 0.58 ns
+  text 50% (enter 56 B 0.910, 96 B 0.827):
+     3 blocks at 1, 1/2, 1/8: 96 B -11%, -1.07 B, pays below 0.49 ns
+     4 blocks at 1/2, 1/2, 1/8, 1/8: 96 B -8%, +1.53 B, pays below 0.20 ns
+     2 blocks at 1, 1/2: 96 B -4%, -0.12 B, pays below 0.36 ns
+     2 blocks at 0.96, 0.78 (S1's): 96 B -11%, -2.17 B, pays below 1.07 ns
+     2 blocks, free under R8: 96 B -11%, -2.18 B, pays below 1.08 ns
+     2 blocks, best menu under R8: 96 B -4%, -0.12 B, pays below 0.36 ns
+     3 blocks, free under R8: 96 B -15%, -2.24 B, pays below 0.67 ns
+     3 blocks, best menu under R8: 96 B -11%, -1.07 B, pays below 0.49 ns
+     4 blocks, free under R8: 96 B -15%, -0.92 B, pays below 0.42 ns
+     4 blocks, best menu under R8: 96 B -8%, +1.53 B, pays below 0.20 ns

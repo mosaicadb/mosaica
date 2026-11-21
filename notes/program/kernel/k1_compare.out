@@ -1,0 +1,13 @@
+constants {'THETA_MAX': 2097088, 'TMIN': -6144000, 'TMAX': 6144255, 'RSENT': 8388352, 'RIN_MIN': -4047166, 'ROUT_MIN': -6144000}
+as built units=64: 4000000 cases, IN mismatches 0, OUT mismatches 0
+   sentinel decides: in 0, out 0; Tin=TMAX takes in 0; Tout=TMIN puts out 0
+largest safe units=127: 4000000 cases, IN mismatches 0, OUT mismatches 0
+   sentinel decides: in 0, out 0; Tin=TMAX takes in 0; Tout=TMIN puts out 0
+one more units=128: 4000000 cases, IN mismatches 0, OUT mismatches 102313
+   first OUT mismatch: Hs=0 Ls=32639 Tin=6144190 Tout=-4201876 Rin=-4047166 Rout=-4234514 kernel=yes exact=no
+   sentinel decides: in 0, out 0; Tin=TMAX takes in 0; Tout=TMIN puts out 7303
+80-byte deterministic prefix units=160: 4000000 cases, IN mismatches 321491, OUT mismatches 360366
+   first IN mismatch: Hs=6531 Ls=40800 Tin=388066 Tout=1099006 Rin=1324667 Rout=-613733 kernel=no exact=yes
+   first OUT mismatch: Hs=4949 Ls=36194 Tin=-2141954 Tout=-4153767 Rin=3445095 Rout=-5456902 kernel=yes exact=no
+   sentinel decides: in 0, out 0; Tin=TMAX takes in 0; Tout=TMIN puts out 54386
+corner sweep mismatches: 0

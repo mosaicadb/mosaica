@@ -1,0 +1,30 @@
+n = 256
+  f32: rho (svd) = 5.1026e-08, Frobenius = 4.0653e-07, max row 2-norm = 2.955e-08
+    depth 1: rms tan 0.7539; share at rms tan 1.74e-05%; per-item share median 1.74e-05% max 1.9e-05%; worst-query change/allowance max 0.578 (long double 0.578); slot form / E1 form median 2.00 max 2.00
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+    depth 4: rms tan 0.1047; share at rms tan 0.0001%; per-item share median 0.000101% max 0.000131%; worst-query change/allowance max 0.571 (long double 0.571); slot form / E1 form median 2.62 max 3.56
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+    depth 8: rms tan 0.0074; share at rms tan 0.00141%; per-item share median 0.00148% max 0.00189%; worst-query change/allowance max 0.575 (long double 0.575); slot form / E1 form median 3.00 max 4.21
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+  int16: rho (svd) = 7.3768e-05, Frobenius = 5.9639e-04, max row 2-norm = 4.058e-05
+    depth 1: rms tan 0.7539; share at rms tan 0.0251%; per-item share median 0.0251% max 0.0275%; worst-query change/allowance max 0.571 (long double 0.571); slot form / E1 form median 2.00 max 2.00
+             code from rounded matrix differs for 0.0100 of items; mean changed coordinates 0.010; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1.01
+    depth 4: rms tan 0.1047; share at rms tan 0.145%; per-item share median 0.146% max 0.189%; worst-query change/allowance max 0.567 (long double 0.567); slot form / E1 form median 2.62 max 3.56
+             code from rounded matrix differs for 0.0300 of items; mean changed coordinates 0.030; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1.03
+    depth 8: rms tan 0.0074; share at rms tan 2.04%; per-item share median 2.14% max 2.73%; worst-query change/allowance max 0.568 (long double 0.568); slot form / E1 form median 3.00 max 4.21
+             code from rounded matrix differs for 0.2700 of items; mean changed coordinates 0.293; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1.317
+n = 768
+  f32: rho (svd) = 5.1519e-08, Frobenius = 7.0399e-07, max row 2-norm = 2.843e-08
+    depth 1: rms tan 0.7552; share at rms tan 3.04e-05%; per-item share median 3.04e-05% max 3.19e-05%; worst-query change/allowance max 0.520 (long double 0.520); slot form / E1 form median 2.00 max 2.00
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+    depth 4: rms tan 0.1073; share at rms tan 0.000171%; per-item share median 0.000173% max 0.000195%; worst-query change/allowance max 0.526 (long double 0.526); slot form / E1 form median 2.62 max 3.03
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+    depth 8: rms tan 0.0082; share at rms tan 0.00223%; per-item share median 0.00231% max 0.00282%; worst-query change/allowance max 0.527 (long double 0.527); slot form / E1 form median 3.50 max 4.21
+             code from rounded matrix differs for 0.0000 of items; mean changed coordinates 0.000; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1
+  int16: rho (svd) = 8.2494e-05, Frobenius = 1.1470e-03, max row 2-norm = 4.355e-05
+    depth 1: rms tan 0.7552; share at rms tan 0.0486%; per-item share median 0.0486% max 0.0511%; worst-query change/allowance max 0.536 (long double 0.536); slot form / E1 form median 2.00 max 2.00
+             code from rounded matrix differs for 0.0133 of items; mean changed coordinates 0.013; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1.013
+    depth 4: rms tan 0.1073; share at rms tan 0.274%; per-item share median 0.277% max 0.313%; worst-query change/allowance max 0.537 (long double 0.537); slot form / E1 form median 2.62 max 3.03
+             code from rounded matrix differs for 0.1033 of items; mean changed coordinates 0.110; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 1.117
+    depth 8: rms tan 0.0082; share at rms tan 3.57%; per-item share median 3.7% max 4.51%; worst-query change/allowance max 0.538 (long double 0.538); slot form / E1 form median 3.50 max 4.21
+             code from rounded matrix differs for 0.6167 of items; mean changed coordinates 1.007; scale changed for 0.0000; mean 2^Q over items (Q = changed coordinates) 2.823

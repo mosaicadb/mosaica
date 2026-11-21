@@ -1,0 +1,9 @@
+plain: 340000 cases, violations 0
+tiny_s: 340000 cases, violations 0
+big_alpha: 340000 cases, violations 0
+big_dial: 340000 cases, violations 0
+tol: 340000 cases, violations 0
+total 1700000 cases, violations 0; least excess over the exact rounding: Tin 0, Tout 0 steps
+clamp nan -> -6144000 (TMIN is the unsafe end for Tin, the safe end for Tout)
+clamp inf -> 6144255 (TMIN is the unsafe end for Tin, the safe end for Tout)
+clamp -inf -> -6144000 (TMIN is the unsafe end for Tin, the safe end for Tout)

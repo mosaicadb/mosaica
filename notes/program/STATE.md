@@ -138,3 +138,16 @@ filters and for clusters smaller than the sample.
   16-direction σ's error.
 - Across 18 cases the rule keeps 0.93 to 0.99 at ψ0 = 2, at rows within 0 to 5% of the best rule for each case, except
   LAION at 8 groups unfiltered (+17%).
+
+## Level width: the visit-order session's answers to referee 2 (21 November; [measured, by that session])
+
+- The plain rule's kept share at ψ = 2 over the same 18 cases: unfiltered 0.36, 0.23, 0.32, 0.30, 0.22 (iNaturalist,
+  iNaturalist at 1 group, yahoo, LAION, LAION at 8 groups); random-25 0.62, 0.57, 0.52; region-25 0.53, 0.51, 0.43;
+  top-25 0.66, 0.58, 0.51; bottom-25 0.93, 0.95, 0.95 (iNaturalist, yahoo, LAION). So 0.22 to 0.95, against 0.93 to
+  0.99 for (ζ + ψ0·√f)·τ. The fairer comparison is at equal rows.
+- The slope measurement (pair_check.py): y = e/τ not centred; x = (s − mean)/sd with τ, mean and sd all from the same
+  64-row sample, so the slope's x used the sample's spread, not the library's σ_c(q).
+- The whole-cluster variant (width_checks.py --whole): ζ and f from the library's μ_c and 16-direction σ_c(q); τ and
+  the shift from the visible sample; the shift was mean(e).
+- The build now adds the sample's mean of e − τ·(s − μ_c)/σ_c (m = 1, whole-cluster μ_c and σ_c), as referee 2's
+  point 3 asks, in place of mean(e).

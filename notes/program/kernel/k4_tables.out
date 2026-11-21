@@ -1,0 +1,26 @@
+{'trials': 600, 'worst_ratio': 0.9588199780190642, 'viol1': 0, 'clamped': 0, 'qover': 0, 'dec_in': 18344, 'dec_out': 17630, 'imp_fail': 0, 'tight': 5807, 'sent': 0, 'e_steps_max': 1750.3546532748485}
+worst |sigma Theta + B - A| / e by kind (levels checked, worst ratio): {'plain': (720, 0.9302), 'spread': (720, 0.9588), 'cancel': (720, 0.9255), 'big_alpha': (720, 0.9479), 'tiny': (720, 0.9378)}
+e in fine steps per unit (median, largest), by kind; the design's figures are 0.5 (own tables) and 3 (combined):
+   plain      own       median      0.529  largest        0.613
+   plain      combined  median      0.695  largest        1.320
+   spread     own       median      0.511  largest        0.550
+   spread     combined  median      0.598  largest        1.672
+   cancel     own       median      0.521  largest        0.585
+   cancel     combined  median    343.798  largest     1750.355
+   big_alpha  own       median      0.527  largest        0.628
+   big_alpha  combined  median      0.843  largest        1.152
+   tiny       own       median      0.526  largest        0.610
+   tiny       combined  median      0.652  largest        1.420
+{'trials': 600, 'worst_ratio': 0.976209164962316, 'viol1': 0, 'clamped': 0, 'qover': 0, 'dec_in': 18770, 'dec_out': 17967, 'imp_fail': 0, 'tight': 5760, 'sent': 0, 'e_steps_max': 1698.6951474314862}
+worst |sigma Theta + B - A| / e by kind (levels checked, worst ratio): {'plain': (720, 0.9432), 'spread': (720, 0.9762), 'cancel': (720, 0.9401), 'big_alpha': (720, 0.9248), 'tiny': (720, 0.9456)}
+e in fine steps per unit (median, largest), by kind; the design's figures are 0.5 (own tables) and 3 (combined):
+   plain      own       median      0.527  largest        0.589
+   plain      combined  median      0.674  largest        1.800
+   spread     own       median      0.512  largest        0.547
+   spread     combined  median      0.625  largest        1.714
+   cancel     own       median      0.523  largest        0.593
+   cancel     combined  median    366.955  largest     1698.695
+   big_alpha  own       median      0.528  largest        0.590
+   big_alpha  combined  median      0.841  largest        1.110
+   tiny       own       median      0.528  largest        0.604
+   tiny       combined  median      0.648  largest        1.558

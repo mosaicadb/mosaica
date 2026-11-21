@@ -1,0 +1,3 @@
+f 0.92 kappa 0.36: mean of s - a/(1-k) among the top 0.1% by midpoint -1.312 (derived -1.431), spread 0.463 (derived 0.536); constant of the efficient rule -2.67 s_res, of the stable dial -1.49 s_res, difference 1.18
+f 0.82 kappa 0.39: mean of s - a/(1-k) among the top 0.1% by midpoint -1.369 (derived -1.487), spread 0.580 (derived 0.642); constant of the efficient rule -2.32 s_res, of the stable dial -0.90 s_res, difference 1.41
+f 0.71 kappa 0.5: mean of s - a/(1-k) among the top 0.1% by midpoint -2.122 (derived -2.442), spread 0.746 (derived 0.891); constant of the efficient rule -2.74 s_res, of the stable dial -0.78 s_res, difference 1.96

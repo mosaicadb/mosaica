@@ -1,0 +1,10 @@
+(a) largest |mr_f32 - (mn a_q - mn^2)| / mn over all keys: 2.705e-07; DA's float share is 1.0e-07
+    so 4e-6 must absorb |alpha| mn * 1.71e-07: enough while |alpha| mn <= 23 (less what else 4e-6 covers: 3e-8 |q.m|)
+(b) rows equal to their cluster's mean (centre int8 with one scale): norm excess, x.mhat - 1, key error |a - a_q|
+    allowance: DA = 1.536e-05 per unit of |alpha| mn, plus 4e-6 absolute
+    n= 768 dense: sd of |x|-1 1.27e-05; largest x.mhat-1 +1.50e-05; key error > DA in  0.00% (largest 1.53e-05); beyond DA + 4e-6/mn at alpha = 1 in  0.00%
+    n= 256 dense: sd of |x|-1 2.30e-05; largest x.mhat-1 +5.39e-05; key error > DA in  4.20% (largest 5.39e-05); beyond DA + 4e-6/mn at alpha = 1 in  3.00%
+    n= 100 dense: sd of |x|-1 3.55e-05; largest x.mhat-1 +1.02e-04; key error > DA in 16.40% (largest 1.02e-04); beyond DA + 4e-6/mn at alpha = 1 in 13.90%
+    n=  32 dense: sd of |x|-1 6.02e-05; largest x.mhat-1 +1.84e-04; key error > DA in 32.12% (largest 1.84e-04); beyond DA + 4e-6/mn at alpha = 1 in 29.70%
+    n= 768 spiky: sd of |x|-1 1.13e-04; largest x.mhat-1 +3.16e-04; key error > DA in 43.80% (largest 3.16e-04); beyond DA + 4e-6/mn at alpha = 1 in 42.48%
+    n= 100 spiky: sd of |x|-1 1.15e-04; largest x.mhat-1 +3.07e-04; key error > DA in 44.67% (largest 3.07e-04); beyond DA + 4e-6/mn at alpha = 1 in 43.73%

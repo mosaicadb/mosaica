@@ -1,0 +1,17 @@
+== D2: is the sign of the error a function of z? butterfly n = 16, y = e0, Delta = e1, depth 1 ==
+ | |err| - |formula| | max 1.7e-11; share of draws with err = +formula 0.501, = -formula 0.499
+
+== F2: R4 (Theorem 3.21) constants, one-sided, delta = eps/(N L), eps = 1e-9, L = 4 ==
+ N = 1e9: n = 768 four blocks 8.815 (theta 1.00231); n = 2048 four blocks: R4 8.944, sphere quantile in 2050 dims 8.830; each halved: R4 8.952, sphere quantile in 2054 dims 8.830; 32 x 64: R4 8.969, sphere quantile in 2078 dims 8.831; 128 x 16: R4 9.079, sphere quantile in 2174 dims 8.834;
+ N = 2^20: n = 768 four blocks 8.083 (theta 1.00231); n = 2048 four blocks: R4 8.179, sphere quantile in 2050 dims 8.055; each halved: R4 8.187, sphere quantile in 2054 dims 8.055; 32 x 64: R4 8.203, sphere quantile in 2078 dims 8.056; 128 x 16: R4 8.304, sphere quantile in 2174 dims 8.059;
+
+== F3 / F5: one kappa for the block, radial term; half-width over the one-rotation half-width, c = 7.8 ==
+ 256 = 2 x 128: F3 width ratio at depths 1/2/4: 1.13 / 1.18 / 1.20; radial term alone: 0.10 / 0.15 / 0.15; F2 worst-query width (max over sub-blocks): 1.05 / 1.05 / 1.06
+ 256 = 4 x 64: F3 width ratio at depths 1/2/4: 1.26 / 1.37 / 1.43; radial term alone: 0.21 / 0.28 / 0.30; F2 worst-query width (max over sub-blocks): 1.13 / 1.14 / 1.15
+ 768 = 2 x 384: F3 width ratio at depths 1/2/4: 1.12 / 1.17 / 1.21; radial term alone: 0.11 / 0.15 / 0.16; F2 worst-query width (max over sub-blocks): 1.03 / 1.03 / 1.05
+ 768 = 3 x 256: F3 width ratio at depths 1/2/4: 1.19 / 1.28 / 1.34; radial term alone: 0.17 / 0.24 / 0.26; F2 worst-query width (max over sub-blocks): 1.05 / 1.06 / 1.09
+
+== G5a: constants at N = 1e9 (delta = 2.5e-19), N = 2^20, N = 2^16 ==
+ N = 1e+09: sub-Gaussian 9.256; Gaussian 8.912; Gaussian at delta/3.178 9.040; sphere d = 255/767/2046 8.282/8.694/8.830; uniforms equal weights (Lugannani-Rice) m = 64/256/768/2048 8.354/8.778/8.868/8.896
+ N = 1.05e+06: sub-Gaussian 8.482; Gaussian 8.117; Gaussian at delta/3.178 8.256; sphere d = 255/767/2046 7.640/7.953/8.055; uniforms equal weights (Lugannani-Rice) m = 64/256/768/2048 7.702/8.017/8.084/8.105
+ N = 6.55e+04: sub-Gaussian 8.149; Gaussian 7.774; Gaussian at delta/3.178 7.919; sphere d = 255/767/2046 7.354/7.630/7.719; uniforms equal weights (Lugannani-Rice) m = 64/256/768/2048 7.412/7.686/7.744/7.763
