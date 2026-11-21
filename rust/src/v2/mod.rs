@@ -1707,11 +1707,15 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                 setnib(&mut lc[l], lp.units, i, f.unit as usize, (code << f.off) as u8);
             }
             let mut rho2 = 0.0;
+            let mut usq = w2.as_deref_mut().map(|w| w.usq_mut(l));
             for c in 0..n {
                 let e = z[c] - s * gp.sig[c] as f64 * val[c];
                 let q = e / gp.d[l][c] as f64;
                 uvec[c] = q;
                 rho2 += q * q;
+                if let Some(u) = usq.as_deref_mut() {
+                    u[c] += q * q;
+                }
             }
             if let Some(w) = w2.as_deref_mut() {
                 w.add(l, &uvec);

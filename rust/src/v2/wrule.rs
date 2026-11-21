@@ -198,14 +198,14 @@ fn dual_of(ix: &Index2, c: usize) -> Vec<Dual> {
 }
 
 /// What W2 needs of one cluster's rows' coding errors, summed as the build encodes them (`encode_cluster`, which hands
-/// each row's error vector u at each deterministic level to `add`): per level, over the rows, the sums of (B~'u)(B~'u)'
-/// (r x r), of |Q'u|^2 (Q an orthonormal basis of span B) and of u_t^2 per coordinate. The rows wait in a block of
-/// `Sums::ROWS` per level, taken in by one product each.
+/// each row's error vector u at each deterministic level to `add`, and adds u_t^2 per coordinate into `usq_mut` as it
+/// forms u): per level, over the rows, the sums of (B~'u)(B~'u)' (r x r), of |Q'u|^2 (Q an orthonormal basis of span
+/// B) and of u_t^2 per coordinate. The rows wait in a block of `Sums::ROWS` per level (small enough to stay in L2),
+/// taken in by one product against [B~ | Q].
 pub struct Sums {
-    /// per level: B~ as n x r and Q as n x rq (row-major, for the products), and the rows waiting
-    bt: Vec<Vec<f64>>,
-    qb: Vec<Vec<f64>>,
-    rq: Vec<usize>,
+    /// per level: [B~ | Q] as n x (r + rq) (row-major, for the product), its width, and the rows waiting
+    bq: Vec<Vec<f64>>,
+    wid: Vec<usize>,
     wait: Vec<Vec<f64>>,
     n: usize,
     r: usize,
@@ -218,19 +218,23 @@ pub struct Sums {
 }
 
 impl Sums {
-    const ROWS: usize = 256;
+    const ROWS: usize = 64;
 
     /// The sums of a cluster with order directions `dirs8` and scales `dsc` in group `gp`, none taken yet.
     pub fn new(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Sums {
         let t = Timer::new();
         let r = dsc.len();
-        let (mut bt, mut qb, mut rq) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut bq, mut wid) = (Vec::new(), Vec::new());
         for (b, q) in dual_dirs(gp, dirs8, dsc, n, ndl) {
-            bt.push((0..n).flat_map(|t| b.iter().map(move |v| v[t])).collect());
-            rq.push(q.len());
-            qb.push((0..n).flat_map(|t| q.iter().map(move |v| v[t])).collect());
+            wid.push(r + q.len());
+            bq.push((0..n).flat_map(|t| b.iter().chain(&q).map(move |v| v[t])).collect());
         }
-        Sums { bt, qb, rq, wait: vec![Vec::with_capacity(Self::ROWS * n); ndl], n, r, yy: vec![vec![0.0; r * r]; ndl], qq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl], rows: 0, secs: t.s() }
+        Sums { bq, wid, wait: vec![Vec::with_capacity(Self::ROWS * n); ndl], n, r, yy: vec![vec![0.0; r * r]; ndl], qq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl], rows: 0, secs: t.s() }
+    }
+
+    /// The sums of u_t^2 at level l, for the encoder to add each row's into as it forms u.
+    pub fn usq_mut(&mut self, l: usize) -> &mut [f64] {
+        &mut self.usq[l]
     }
 
     /// Row error vector `u` (n values) at level l; level 0 counts the row.
@@ -245,29 +249,21 @@ impl Sums {
     /// The rows waiting at level l, taken into the sums.
     fn take(&mut self, l: usize) {
         let t = Timer::new();
-        let (n, r, rq) = (self.n, self.r, self.rq[l]);
+        let (n, r, k) = (self.n, self.r, self.wid[l]);
         let w = std::mem::take(&mut self.wait[l]);
         let m = w.len() / n;
-        let prod = |b: &[f64], k: usize| -> Vec<f64> {
-            let mut y = vec![0f64; m * k];
-            unsafe {
-                matrixmultiply::dgemm(m, n, k, 1.0, w.as_ptr(), n as isize, 1, b.as_ptr(), k as isize, 1, 0.0, y.as_mut_ptr(), k as isize, 1);
-            }
-            y
-        };
-        let (y, yq) = (prod(&self.bt[l], r), prod(&self.qb[l], rq));
-        for i in 0..m {
-            let yi = &y[i * r..(i + 1) * r];
+        let mut y = vec![0f64; m * k];
+        unsafe {
+            matrixmultiply::dgemm(m, n, k, 1.0, w.as_ptr(), n as isize, 1, self.bq[l].as_ptr(), k as isize, 1, 0.0, y.as_mut_ptr(), k as isize, 1);
+        }
+        for yi in y.chunks_exact(k) {
             for a in 0..r {
                 for b in 0..r {
                     self.yy[l][a * r + b] += yi[a] * yi[b];
                 }
             }
-            for t in 0..n {
-                self.usq[l][t] += w[i * n + t] * w[i * n + t];
-            }
+            self.qq[l] += yi[r..].iter().map(|x| x * x).sum::<f64>();
         }
-        self.qq[l] += yq.iter().map(|x| x * x).sum::<f64>();
         self.wait[l] = w;
         self.wait[l].clear();
         self.secs += t.s();
