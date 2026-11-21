@@ -146,29 +146,22 @@ type Dual = (Vec<Vec<f64>>, Vec<Vec<f64>>);
 
 /// Per level of a cluster with order directions `dirs8` (r rows of n int8) and scales `dsc` (p_j = dirs8_j dsc_j, as
 /// the order state holds them) in group `gp`: B~ = B (P'P)^-1 (r vectors of n), b_j = (V_q^T p_j) d_l, and an
-/// orthonormal basis of span B. V_q^T P is one product per cluster (the int8 basis taken to f64 a block of its rows
-/// at a time), scaled by d_l at each level; P'P is inverted once. Both P's rank and B's take the order state's rule
-/// (`order::orthonormal64`): a direction left with under 1e-6 of the largest one's norm once the others are taken out
-/// is in their span. Such a p_j (the order state leaves zero directions where a cluster is too small to span r) has a
-/// zero column in B~, and P'P is inverted over the others; such a b_j adds no column to Q.
+/// orthonormal basis of span B. V_q^T P is formed once per cluster, exactly: each entry an int8 dot product of the
+/// basis's row with the direction's, summed in i32, times the two scales (so `Sums::new` and `finish`, which both form
+/// it, get the same bits); it is scaled by d_l at each level, and P'P is inverted once. Both P's rank and B's take the
+/// order state's rule (`order::orthonormal64`): a direction left with under 1e-6 of the largest one's norm once the
+/// others are taken out is in their span. Such a p_j (the order state leaves zero directions where a cluster is too
+/// small to span r) has a zero column in B~, and P'P is inverted over the others; such a b_j adds no column to Q.
 fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Vec<Dual> {
-    const ROWS: usize = 256;
     let r = dsc.len();
     let p: Vec<f64> = (0..r * n).map(|i| dirs8[i] as f64 * dsc[i / n] as f64).collect();
-    // vp[j n + t] = (V_q^T p_j)_t = vsc_t sum_k v8t[t n + k] p_j[k]
+    // vp[j n + t] = (V_q^T p_j)_t = vsc_t dsc_j sum_k v8t[t n + k] dirs8[j n + k], the sum exact in i32 (|sum| <= n 127^2)
     let mut vp = vec![0f64; r * n];
-    let mut blk = Vec::with_capacity(ROWS * n);
-    for t0 in (0..n).step_by(ROWS) {
-        let t1 = (t0 + ROWS).min(n);
-        blk.clear();
-        blk.extend(gp.v8t[t0 * n..t1 * n].iter().map(|&v| v as f64));
-        unsafe {
-            matrixmultiply::dgemm(r, n, t1 - t0, 1.0, p.as_ptr(), n as isize, 1, blk.as_ptr(), 1, n as isize, 0.0, vp.as_mut_ptr().add(t0), n as isize, 1);
-        }
-    }
-    for j in 0..r {
-        for t in 0..n {
-            vp[j * n + t] *= gp.vsc[t];
+    for t in 0..n {
+        let row = &gp.v8t[t * n..(t + 1) * n];
+        for j in 0..r {
+            let s: i32 = row.iter().zip(&dirs8[j * n..(j + 1) * n]).map(|(&a, &b)| a as i32 * b as i32).sum();
+            vp[j * n + t] = s as f64 * gp.vsc[t] * dsc[j] as f64;
         }
     }
     let dot = |x: &[f64], y: &[f64]| x.iter().zip(y).map(|(a, b)| a * b).sum::<f64>();
