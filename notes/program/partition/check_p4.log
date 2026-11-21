@@ -1,0 +1,13 @@
+balanced / optimal distortion, Gaussian density, D: {5: 1.1045, 10: 1.022, 19: 1.0058, 40: 1.0013}
+second-order form exp(2/(D(D+2))): {5: 1.0588, 10: 1.0168, 19: 1.005, 40: 1.0012}
+E max of n standard normals (20,000 draws by the quantile transform): {1000: 3.24, 2000: 3.43, 4000: 3.62, 16000: 3.96}
+largest / typical radius at n_eff 76, 2,000 rows: 1.321
+lambda*w between rows: [124. 150. 187. 246. 365.]  bits saved per doubling of K: [ 6.6  8.   9.9 13.1 19.3]  bytes: [0.82 1.   1.24 1.63 2.42]
+radius 10% larger = doublings of K lost at D = 19: 2.61
+leaf size, n 128 [98, 295, 166, 497]
+leaf size, n 512 [375, 1126, 633, 1900]
+leaf size, n 768 [560, 1681, 945, 2836]
+S* by time: 6458
+S* by time: 16977
+S* by time: 2744
+S* by bytes, centre only: [665, 222]  by time: [1588, 8664]

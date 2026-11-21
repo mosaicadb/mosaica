@@ -1,0 +1,5 @@
+one basis for all cells:                Psi 8.0997
+k-means cells, groups by centre:        Psi 8.0580  k-means objective 0.9728  kind purity of cells 0.84
+same cells, cells to bases by cost:     Psi 7.5188  k-means objective 0.9728  (1 steps, monotone True)
+rows to cells by certified width:       Psi 6.9985  k-means objective 1.0144  kind purity of cells 0.95  (31 steps, monotone True); rows moved 0.25; cells of under 50 rows 0
+ratios of rms zero-read width to the built grouping: cell level 0.966, row level 0.932

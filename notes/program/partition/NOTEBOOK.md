@@ -69,3 +69,33 @@ corrected at 08:10.
   (k_a/D) bits a row per doubling of K, more than one bit, because finer cells are closer to Gaussian. The measured
   uniform scaling of the residual (rms ∝ K^(−0.053), D ≈ 19, with about 50 to 170 coordinates above the water level)
   is of that kind. P2 is written with the second-moment currency and says so.
+- 08:16. The PI sent the librarian's report (`../library/partition.md`, read in full) and asked that the claims be placed
+  against it and that P3 be treated at the level of rows as well as cells. Consequences:
+  - An error of mine found by reading `groups/scripts/prep_m.py`: the 3.4 experiment used ONE metric for the whole
+    corpus (M⁻¹ of the covariance pooled over all cells), not each group's. P1.4 said it tested the within-group rule;
+    it did not, and nothing has tested a row choosing its basis. P1.4 rewritten with the two cases apart.
+  - Archer and Leen's regions are (mean, transform, allocation) triples, so in this index's terms their partition is
+    rows to bases, with G of 16 to 32. Their 1.1 to 1.8 dB over k-means is a factor 0.81 to 0.88 in rms error at equal
+    rate. That is the published size for the row-level scheme, on image blocks.
+  - Ma et al.'s regularised length ½ log det(I + Σ/θ′) is Σ ½ ln(1 + γᵢ/θ′): linear below the level and logarithmic above.
+    The floor's φ is a square root below and logarithmic above. So Ma's objective runs from k-means to the
+    log-determinant and the certified width's from the nuclear norm to the log-determinant.
+  - High-resolution theory does not apply at 0.5 bit per intrinsic dimension; my balance estimate from the point
+    density formula is to be marked as outside its regime, and model U's exponent as a measured local slope.
+  - The librarian's premise "about 1,000 rows a cluster" is `SYSTEM.md`'s; the code's default is 2,000·√(N/1M).
+- 08:20. CLAIMS.md now has P2 (scaling), P3 (cell level P3.1 to P3.4, row level P3.5), P4 (alternatives and ranking), P5
+  (scoring recipe), L (placement against the librarian), S (short answer), "What failed". `check_p3_rows.py`: toy
+  with two kinds of residual in every blob; rms zero-read width 0.966 (cell level) and 0.932 (row level) of the
+  built grouping, 25% of rows moved, k-means objective +4%, monotone in 31 steps. `check_p4.py`: the arithmetic of
+  P2 and P4 (balance ratio 1.0058 at D = 19; λw = 124 to 365; S* by time 6,458 / 16,977 / 2,744; leaf sizes).
+  Next: EXPERIMENT-SPEC.md.
+- 08:23. EXPERIMENT-SPEC.md written: partitions A0 to A3 (built rule, three seeds for the noise), controls (random
+  groups, one group, a basis per cell), B (cells to bases), C (rows to the narrowest interval), D (balanced); scores
+  S1 to S5 on held-out rows; a sweep in K for P2; a prediction and a drop rule for each. It reuses
+  `../stage0-block-norms/work/setup.npz` (K = 200, G = 12, queries, thresholds, Σ_Q). Nothing of it was run: no data
+  file was read by this track.
+- 08:23. State at hand-over. Done: P1 to P5, the placement against the librarian, the spec. Not done: no referee; the
+  region-filter study in `vexact-sc` not read (P4.7); the per-cell head directions of P4.3 not specified; the row-level
+  scheme's level-B cost is the floor's idealisation, not the built code; a neighbour-graph partition is scored only
+  through its objective on the built cells. `git status` shows CLAIMS.md, NOTEBOOK.md and the first two check scripts
+  as tracked, so someone committed them during the session; I ran no git command that changes anything.
