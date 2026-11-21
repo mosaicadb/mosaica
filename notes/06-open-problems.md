@@ -9,10 +9,11 @@ queries that comparing the chapters raised; and then the work the theory program
 
 ### Floors and lower bounds
 
-- **The full floor** (Conjecture 2.14, [conjecture]). Missing: one argument that gives the head term k·√θ and the tail
-  Σ_{i>k} √γᵢ together, without Theorem 2.6's factor 1/√e, its extra bit and the concentration penalty. The best proved
-  bound is 0.70 of the conjectured floor at 0 bytes. Stated in chapter 2 §2.10 and Open
-  (`proofcheck/CONSOLIDATED_PROOFS.md` §6); its hypotheses are the editor's reading (chapter 2, query 8).
+- **The full floor** (Conjecture 2.14): settled. Theorem 2.24 proves it for Gaussian residuals and Gaussian offsets
+  independent of them, [proved, refereed], and Theorem 2.25 adds Corollary 2.3's constant κ_k on the head. What it
+  leaves open is in chapter 2's Open list: a floor for the real data, offsets that are not Gaussian, a code that attains
+  the floor in the mean, and codes whose cells couple the head and the tail in high dimension, which nobody has tested.
+  Chapter 2 §2.9a and §2.10 (`program/floors/CLAIMS.md`, "For the notes"; `program/floors/referee/referee-core.md`).
 - **Gaussian residuals as the worst case** (Conjecture 2.15, [conjecture]). Missing: an achievability argument at low
   rate; the high-rate case rests on a one-dimensional numerical check (chapter 2, query 10). Chapter 2 §2.10.
 - **Non-Gaussian offsets** (Conjecture 2.16, [conjecture]). Missing: replacements for E[g_⊥ | g_S] = 0 and for rotation
@@ -69,7 +70,9 @@ queries that comparing the chapters raised; and then the work the theory program
   optimistic, and why the per-group fit fails is a [conjecture]. Chapter 1 §1.4 and Open.
 - **Non-unit vectors and L2.** The sorted-range lemma does not transfer, and the fixed-point similarity on stored
   integers is covered for unit f16 rows only. Chapter 1 Open.
-- **Prior art for the matrix-geometric-mean metric** has not been searched. Chapter 1 Open.
+- **Prior art for the matrix-geometric-mean metric** has been searched: Proposition 1.13 is Bhatia, Jain and Lim's
+  Theorem 2 ([cited], source read by the extensions referee), and no search, quantisation or sketching paper was found
+  that uses the metric ([cited, unchecked]). Chapter 1 §1.4 and Open; §6.4 below.
 
 ### Codes
 
@@ -184,6 +187,8 @@ The queries are summarised here; the full text is at the end of each chapter.
 15. The [proved, refereed] tag of the random-W identity rests on a referee remark.
 16. Which of three points are the referee's "two small fixes".
 17. `floor2.py`'s "before" differs from the bytes-read "before" of `quant/REPORT.md`.
+18. The least value of κ_k − k (√e − 1, at k = 1) is stated without a tag or proof; the chapter tags it [computed]
+    for k ≤ 5,000 and a grid to 10⁷, the range the referee computed.
 
 ### Chapter 3
 
@@ -266,7 +271,7 @@ until refereed; this section says what each track and check is for and where its
 
 | Track or check | Subject | Notebook directory |
 |---|---|---|
-| floors | one floor giving the head and the tail of Conjecture 2.14 together; certificates as optimal transport | `program/floors/` |
+| floors | one floor giving the head and the tail of Conjecture 2.14 together (now in chapter 2 §2.9a); certificates as optimal transport | `program/floors/` |
 | confidence | a lower bound for randomised certificates (what the confidence constant must cost), the gap in R9, the hand-over from deterministic to randomised levels, a rate–margin law for bytes read | `program/confidence/` |
 | codes | closing the gap between the randomised levels' code and the sphere's rate–distortion bound with table-decodable codes | `program/codes/` |
 | approximate | a random-energy model of the read, a stop on expected misses, a per-query spread at the levels | `program/approximate/` |
@@ -281,13 +286,21 @@ source was read, are `program/library/theory.md` and `program/library/codes-and-
 here until the track that depends on it has read the source itself.
 
 - **Proposition 1.13 (the geometric-mean metric) is published.** Bhatia, Jain and Lim (Expo. Math. 2019), Theorem 2,
-  eq. (16): F(A, B) = min over X > 0 of √(tr(AX)·tr(BX⁻¹)), with minimiser A⁻¹#B. Zadeh, Hosseini and Sra (ICML 2016)
+  eq. (16): F(A, B) = min over X > 0 of √(tr(AX)·tr(BX⁻¹)), with minimiser A⁻¹#B. This attribution is [cited], with
+  the source read: the extensions referee confirmed it, equation numbers and minimiser included, from the arXiv TeX
+  source (`program/floors/referee/referee-extensions.md`, B1; chapter 1 §1.4). Zadeh, Hosseini and Sra (ICML 2016)
   solve the same problem for metric learning. No search, quantisation or sketching paper was found that uses it.
-- **The full-floor conjecture (Conjecture 2.14) appears to be published in an asymptotic, equal-covariance form.**
-  Ingber, Courtade and Weissman (IEEE Trans. Inf. Theory 2015) and Wu, Wang and Flierl (arXiv:2001.07941) study
-  compressed Gaussian data answering similarity queries with no false negatives; the latter's Theorem 1 is read as rate
-  Σ log⁺(ξ/τ) for a certified level Σ min(ξ, τ). The earlier survey's "apparently new" verdict on the floors missed this
-  line. A finite-n statement and unequal covariances were not found.
+- **The full-floor formula (Conjecture 2.14, Theorem 2.24) was stated before, and its converse at finite n is new as
+  far as the program's search goes.** Wu, Wang and Flierl (arXiv:2001.07941) state the formula for Σ_Q = Σ_R without a
+  proved converse. The converses that are proved are isotropic: asymptotic in Ingber, Courtade and Weissman (IEEE Trans.
+  Inf. Theory 61, 2015), and at finite blocklength for the probability of the answer "maybe" in Steiner, Dempfle,
+  Ingber and Weissman (arXiv:1404.5173). Theorem 2.24 is the first proof of the converse at finite n, for covariances
+  that need not commute, in the mean-width form, as far as the program's search goes. Tightness holds in probability by
+  Ingber, Courtade and Weissman's scheme and, in the mean, only by computed codes. This point is [cited], with the
+  sources read: the extensions referee read the arXiv sources of Wu, Wang and Flierl and of Ingber, Courtade and
+  Weissman, and the librarian read that of Steiner, Dempfle, Ingber and Weissman
+  (`program/floors/referee/referee-extensions.md` P1–P2, `program/library/floors-novelty.md` §3). Chapter 2 §2.9a and
+  §2.11.
 - **Codes beyond the scalar gap are published as a mechanism.** BlockQuant (arXiv:2605.19972), QuIP#, NestQuant and QTIP
   code rotated vectors with block-spherical, lattice and trellis codes. Nested codes read prefix by prefix, the loss
   from nesting them, and a per-item angle bound inside a certificate were not found.

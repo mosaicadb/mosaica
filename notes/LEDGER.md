@@ -43,7 +43,7 @@ as the chapter cites them; paths are those of the chapter.
 | 1.s | A stored exact scalar along a learnt g saves 10–25% of text bytes | [conjecture] | 1.3 | `ood/REPORT.txt` item 2 |
 | 1.t | Box ∩ ball, sign and Hölder bounds no better than weighted Cauchy–Schwarz | [conjecture] | 1.3 | `FINDINGS.md` §7 |
 | 1.u | Deterministic width ≈ Σa_i, randomised ≈ c√(Σa_i²); gain ≈ √(coded coordinates)/c | [model] | 1.3 | `FINDINGS.md` §5 |
-| 1.13 | tr(MΣ_Q)·tr(M⁻¹Σ_R) ≥ (Σ√γ_i)², equality at the geometric mean Σ_Q⁻¹ # Σ_R | [proved, unrefereed] | 1.4 | `groups/REPORT.md` §2.4 Proposition 3 |
+| 1.13 | tr(MΣ_Q)·tr(M⁻¹Σ_R) ≥ (Σ√γ_i)², equality at the geometric mean Σ_Q⁻¹ # Σ_R; published as Bhatia–Jain–Lim 2019, Theorem 2, eq. (16) [cited] | [proved, unrefereed] | 1.4 | `groups/REPORT.md` §2.4 Proposition 3; `program/floors/referee/referee-extensions.md` B1 |
 | 1.14 | The zero-bit M-ball is within AM/GM of √γ_i of the best zero-bit certificate (uses 2.3 [proved, refereed], κ_k ≥ k [computed]) | [proved, unrefereed] | 1.4 | `groups/REPORT.md` §2.4; `proofcheck/constants.py` |
 | 1.v | Dual basis in exact coordinates cuts coordinates read (text and item) | [measured] | 1.4 | `groups/REPORT.md` §3.3 |
 | 1.w | Native dual basis cuts bytes; mixed fit 20–22% more on OOD; 0 wrong | [measured] | 1.4 | `dualproto/REPORT.md` §§2–3; `rust/results/combined/s1/bytes_dual_vs_dualmix.log` |
@@ -109,7 +109,21 @@ as the chapter cites them; paths are those of the chapter.
 | 2.s | Agent 3a's model ratios, corrected to count scalars: 1.49–2.11 | [model] | 2.9 | `agent3a/exp_c.py` E4; `REFEREE.md` "Most important error" |
 | 2.t | Code track on real residuals: before → after against both floors; E8 7% is [conjecture] | [computed] | 2.9 | `quant/floor2.py`; `quant/logs/floor_*.log` |
 | 2.u | Per-item floors on bytes read; baseline 3.9–10× above | [model] | 2.9 | `agent3b/stats.py`; `agent3b/REPORT.md` |
-| 2.14 | Full floor E h ≥ Σ√min(γ_i, θ) | [conjecture] | 2.10 | `CONSOLIDATED_PROOFS.md` §6 |
+| 2.19 | H(μ) ≤ ln(√(2πe)·C(μ)) for a law on ℝ: Bolley–Gentil–Guillin 2018, Theorem 2.1 at n = 1; proof kept, text read by the librarian only | [cited] | 2.9a | `program/floors/CLAIMS.md` N.1; `program/library/floors-novelty.md` §1; `referee-core.md` stage 1; `stage0-floor-check/RESULTS.md` §1 (a consequence) |
+| 2.20 | H(ν) ≤ Σᵢ ln(√(2πe)·Cᵢ(ν)) along the triangular coupling; that it implies the published n-dimensional form is [proved, unrefereed] | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.2; `referee-core.md` stage 1; `stage0-floor-check/RESULTS.md` §2 (the per-cell bound, which rests on it) |
+| 2.21 | The water-filling programme: W(H) = Σ√min(γ_i, θ) | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.3; `referee-core.md` stages 1, 3 |
+| 2.22 | Convexity and bounds for Ψ, W and V_S (items 1–5); item 6, the sum bound, and the condition γ₁ > γ₂ in item 4 are [proved, unrefereed] | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.4; `referee-core.md` stages 2, 3 |
+| 2.23 | κ_k ≥ k for every k; least value of κ_k − k is √e − 1 at k = 1, [computed] for k ≤ 5,000 and a grid to 10⁷ only | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.5; `referee-core.md` stages 2, 3; `referee/core_f2_misc.log` |
+| 2.24 | Full floor: E h ≥ W(I(z; c)) ≥ Σ√min(γ_i, θ) for Gaussian r and Δ, any n, non-commuting covariances (= 2.14); the case I = ∞ is [proved, unrefereed] | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.6; `referee-core.md` stage 1; `RESULTS.md` |
+| 2.25 | E h ≥ V_S(I(z; c)) for every head set S; k ≥ 1, empty T and I = ∞ are [proved, unrefereed] | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.7; `referee-core.md` stage 3; `RESULTS.md` |
+| 2.26 | With the water-filling head, E h ≥ κ_k√θ + Σ_{i>k}√γ_i; ties and k = n₊ in the proof are [proved, unrefereed] | [proved, refereed] | 2.9a | `program/floors/CLAIMS.md` N.7; `referee-core.md` stage 3; `RESULTS.md` §3 (head sets near the water level) |
+| 2.x | Tightness of 2.24: computed codes within 1.00055 and 1.0026 of W; Ingber–Courtade–Weissman's scheme tight in probability only [cited] | [computed] | 2.9a | `program/floors/CLAIMS.md` N.6; `referee/core_f2_misc.log`; `RESULTS.md`; `referee-extensions.md` P1 |
+| 2.y | The water-filling head is not always the best (3.649 against 4.091 for γ = (4, 1, 1)); best head gains 1–2% over W on the measured spectra | [computed] | 2.9a | `program/floors/CLAIMS.md` N.7; `floors_eval.py`; `check_after_referees.log` line 2 |
+| 2.z | A seed shared by encoder and certificate: the floors hold at I(z; c \| ω) | [proved, unrefereed] | 2.9a | `program/floors/CLAIMS.md` N.7 |
+| 2.aa | Corollary 2.3 and Theorems 2.5 and 2.6 follow from 2.24–2.25; Theorem 2.2 does not | [proved, unrefereed] | 2.9a, 2.5 | `program/floors/CLAIMS.md` N.7; `referee-core.md` "Summary for the PI"; `check_after_referees.log` line 1 |
+| 2.ab | The formula was stated before (Wu–Wang–Flierl, no converse; isotropic converses by Ingber–Courtade–Weissman and Steiner–Dempfle–Ingber–Weissman); 2.24 is the first finite-n, non-commuting, mean-width converse as far as the search goes | [cited] | 2.9a, 2.11 | `program/library/floors-novelty.md` §3; `referee-extensions.md` P1–P2 |
+| 2.ac | Numerical checks by the author, the core referee and the falsifier: no code below the floors | [computed] | 2.9a | `check_schemes.py`; `check_chain1d.py`; `referee/core_*.py`; `RESULTS.md` |
+| 2.14 | Full floor E h ≥ Σ√min(γ_i, θ); settled by 2.24 (= 2.24) | [proved, refereed] | 2.10 | `CONSOLIDATED_PROOFS.md` §6; `program/floors/CLAIMS.md` N.6 |
 | 2.15 | Gaussian residuals are the worst case for the true optimum | [conjecture] | 2.10 | `CONSOLIDATED_PROOFS.md` §6 |
 | 2.16 | Theorem 2.2 holds for non-Gaussian offsets with covariance Σ_Q | [conjecture] | 2.10 | `CONSOLIDATED_PROOFS.md` §6 |
 | 2.17 | √k unavoidable for a class unknown at build | [conjecture] | 2.10 | `CONSOLIDATED_PROOFS.md` §6 |
@@ -285,23 +299,24 @@ as the chapter cites them; paths are those of the chapter.
 
 | Tag | Rows |
 |---|---|
-| [proved, refereed] | 39 |
-| [proved, unrefereed] | 68 |
+| [proved, refereed] | 47 |
+| [proved, unrefereed] | 70 |
 | [sketch: gap named] | 9 |
-| [conjecture] | 11 |
+| [conjecture] | 10 |
 | [refuted] | 6 |
 | [measured] | 86 |
-| [computed] | 19 |
+| [computed] | 22 |
 | [model] | 16 |
-| [cited] | 4 |
+| [cited] | 6 |
 | [cited, unchecked] | 8 |
 | outside the scheme | 5 |
-| total | 271 |
+| total | 285 |
 
 Rows are claims as the chapters group them, so a measured row often holds several figures, and a row's secondary tags
 (a [conjecture] inside a [measured] row, for example) are not counted. Six results and one measurement appear in two
 chapters (1.5 = 4.10, 1.7 = 2.7, 1.15 = 2.8, 1.16 = 2.9, 2.10 = 4.3, 2.13 = 4.1, and 2.l = 4.i), and each appearance
-has its own row.
+has its own row. Conjecture 2.14 and Theorem 2.24 are one statement within chapter 2, and each has its own row. The
+letters 2.x to 2.ac follow 2.w although section 2.9a comes before section 2.10, so that no earlier letter changes.
 
 ## Tags outside the scheme
 

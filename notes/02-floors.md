@@ -5,8 +5,10 @@ how few bytes a reader of a fixed stream can read and still return the exact ans
 to 2.5 give the lower bounds on the mean half-width of a deterministic certificate. Section 2.6
 says what a grouping or a shared summary can add to the bits an item stores, and section 2.7
 proves that reading levels in order until the exact range excludes t is optimal for one stream.
-Section 2.8 gives the entropy bound that applies to any index, section 2.9 sets the codes that were
-built against the floors, and section 2.10 lists the conjectures with what each one lacks.
+Section 2.8 gives the entropy bound that applies to any index, and section 2.9 sets the codes that
+were built against the floors. Section 2.9a proves the full floor of Conjecture 2.14 under the
+Gaussian model, with a second floor that keeps Corollary 2.3's constant on the head, and section 2.10
+lists the conjectures with what each one lacks.
 
 ## 2.0 Local symbols
 
@@ -36,6 +38,34 @@ s(x) = q·m + m·r + Δ·r. The following are local to this chapter.
 - **Groups (section 2.6).** A partition V₁, …, V_K of space with fixed centres m_j assigns the label
   j to x ∈ V_j. N_g items share a message s of at most B_s bits. Angles to a representative p are
   φ_q = ∠(q, p) and φ_x = ∠(x, p), as in chapter 1's Proposition 1.7.
+- **The full floor (section 2.9a).** These symbols hold in section 2.9a, and sections 2.5, 2.10 and
+  2.11 use W and V_S as defined here.
+  - *Eigen-coordinates.* Σ_Q^½ Σ_R Σ_Q^½ = VΓVᵀ with V = (v₁, …, vₙ) orthogonal and
+    Γ = diag(γ₁, …, γₙ), and n₊ is the number of positive γᵢ. For i ≤ n₊,
+    zᵢ = γᵢ^(−½) vᵢᵀ Σ_Q^½ r, and z = (z₁, …, z_{n₊}).
+  - *Cells.* For P_c > 0, ν_c is the law of z given **c** = c and Z_c is its closed support.
+    Z′_c = {(√γᵢ zᵢ)_{i≤n₊} : z ∈ Z_c}, so that h_{Z′_c}(y) is the supremum of Σᵢ √γᵢ yᵢ zᵢ over
+    z ∈ Z_c. In section 2.9a Z_c and Z′_c take the place of K_c and K′_c.
+  - *Laws and entropies.* N_k is the standard Gaussian law N(0, I_k) on ℝᵏ, for any dimension k,
+    and Φ and φ are the standard normal distribution function and density. KL(·‖·) is the relative
+    entropy and I(z; **c**) the mutual information, both in nats. H(·) of a law is its differential
+    entropy in nats, with values in [−∞, ∞).
+  - *Correlations.* For a law μ on ℝ, F_μ is its distribution function, Q_μ its quantile function
+    and m₂(μ) its second moment. T_μ = Q_μ∘Φ is the non-decreasing map that sends N₁ to μ, and
+    C(μ) = E[g·T_μ(g)] for g ~ N₁. For a law ν on ℝᵏ with a density and an order of the coordinates,
+    T^ν is the Knothe–Rosenblatt (triangular) map from N_k to ν: its i-th coordinate is T_μ(gᵢ),
+    with μ the conditional law of the i-th coordinate under ν given that the earlier coordinates
+    equal T^ν_<i(g_<i). Cᵢ(ν) = E[gᵢ·T^ν_i(g)]. These correlations are unrelated to the byte sizes
+    C_ℓ of section 2.7.
+  - *Floors, as functions of a rate H ≥ 0 in nats.* W(H) = min{Σᵢ √γᵢ sᵢ : sᵢ ∈ (0, 1],
+    Σᵢ ln(1/sᵢ) ≤ H}. For a set T of indices, W_T is the same over i ∈ T only, and W_∅ = 0. For a
+    set S of k ≥ 1 indices, with T = S^c its complement in {1, …, n₊},
+    V_S(H) = min over 0 ≤ u ≤ H of κ_k·(Π_{i∈S} γᵢ)^(1/2k)·e^(−(H−u)/k) + W_T(u), and V_∅ = W.
+    W and V_S are extended to H = ∞ by their limit, which is 0. For comparison only,
+    β(s) = ½(s² − 1) − ln s and Ψ(H) = min{Σᵢ √γᵢ sᵢ : sᵢ ∈ (0, 1], Σᵢ β(sᵢ) ≤ H}. ln⁺ = max(ln, 0).
+  - Symbols local to one proof of that section (f, τ, 𝒩₁, 𝒩₂, 𝒲₂, T = T_μ in Lemma 2.19, λ, aᵢ, the
+    function L of Lemma 2.21's proof, ρ, the set G of Urysohn's inequality, a_c, b_c, u, j) are
+    declared where they are used.
 - **Symbols local to one proof or section.** In the proof of Theorem 2.6, (σ, τ) are the S- and
   T-coordinates of a point, G is a set of S-coordinates and η > 0 is a small number; chapter 1's
   table step σ, item scale η and chapter 0's group count G do not appear in this chapter. In
@@ -54,7 +84,8 @@ said to be about 1.2–2× above it.
 
 Status: **[refuted]** as stated, by Proposition 2.1, because B counted only the code bits while the
 scheme also stores exact scalars. The source marked it "argued, not proved". The formula, with every
-stored bit counted in B and the Gaussian model of Corollary 2.3, survives as Conjecture 2.14.
+stored bit counted in B and the Gaussian model of Corollary 2.3, survives as Conjecture 2.14, which
+Theorem 2.24 proves.
 Source: `FINDINGS.md` section 5; `agent1/REPORT.md` section 2; `PROOFS.md`, Agent 1, "Claimed
 corrections".
 
@@ -148,7 +179,7 @@ so the bound at that k equals κ_k·√θ.
   κ_k/k ≈ (πk)^(1/2k)·(1 − 1/4k). The bound is therefore at least k·√θ, the head term of
   Σᵢ √min(γᵢ, θ). Status: **[computed]** (`proofcheck/constants.py`; agent 1 checked k < 6,000 in
   `agent1/theory.py`). Source: `proofcheck/CONSOLIDATED_PROOFS.md` section 1, remarks;
-  `proofcheck/REFEREE.md`, "Other checks".
+  `proofcheck/REFEREE.md`, "Other checks". Lemma 2.23 proves κ_k ≥ k for every k.
 - In one dimension at high rate an entropy-coded uniform quantiser attains the bound, at a ratio of
   1.0001 for step 0.05σ. No tested code fell below the bound: the referee tried 4,000 random product
   codes, optimised interval partitions and 300 Voronoi or merged non-convex partitions. Status:
@@ -288,6 +319,18 @@ The source gives no reason why the ratio exceeds 1. The editor's reading is that
 term is κ_k·√θ with κ_k > k, against k·√θ in the conjectured formula, and that on these spectra
 this excess outweighs the conjectured tail Σ_{i>k} √γᵢ. A proved bound above the conjectured one
 does not contradict the conjecture, because both are lower bounds.
+
+The figures above compare Corollary 2.3 and Theorems 2.5 and 2.6 with the conjectured floor, and
+section 2.9a proves that floor for Gaussian residuals (Theorem 2.24). Under the Gaussian model the new
+floors contain the three earlier ones. Corollary 2.3 follows from Theorem 2.25 with item 5 of
+Lemma 2.22, Theorem 2.5 from Theorem 2.24 with item 4, and Theorem 2.6 from Theorem 2.25 with item 6,
+with no added bit and no factor 1/√e (**[proved, unrefereed]**, section 2.9a, "Relation to
+Theorems 2.2 to 2.6"). The best proved bound for Gaussian residuals is therefore the largest V_S over
+head sets S. With the water-filling head it is at least κ_k·√θ + Σ_{i>k} √γᵢ (Corollary 2.26), which
+exceeds the conjectured floor by (κ_k − k)√θ, and this excess is non-negative for every k because
+κ_k ≥ k (Lemma 2.23). On the measured spectra the best head set gains 1 to 2 % over the conjectured
+floor (**[computed]**, section 2.9a). Theorem 2.2 itself, which covers any residual with a density on
+a subspace, does not follow from the new floors.
 
 ## 2.6 What a grouping or a shared summary can be worth
 
@@ -507,7 +550,8 @@ is the following multiple of the best proved bound, for group 12:
 
 Status: **[measured]** on synthetic data (`agent1/theory.py`, `agent1/theory.log`); no code beat a
 proved floor. Group 2 agrees to within 0.03 for the escape code. Source: `agent1/REPORT.md`
-section 2.
+section 2. The best proved bound of this table is that of section 2.5, the largest of Corollary 2.3
+and Theorems 2.5 and 2.6, and the table has not been recomputed against Theorems 2.24 and 2.25.
 
 Agent 1 summarised this as "from 96 B up the floor is proved to within 7 %, and weighted
 Cauchy–Schwarz on an ideal quantiser meets it". The referee accepted the claim only in a narrow
@@ -560,6 +604,14 @@ at depth 3 and beyond (**[conjecture]**, not built). Source: `quant/REPORT.md`, 
 floor". The residuals are real, so Corollary 2.3 is the Gaussian-model floor for these spectra and
 not a proved floor for this data (see the list below and Editor's queries 3 and 12).
 
+The conjectured floor of this table, Σᵢ √min(γᵢ, θ), is now proved for the Gaussian model
+(Theorem 2.24). The table's first ratio column therefore measures the code against a floor that is
+proved for Gaussian residuals with these spectra, and the "after" code is 1.17–1.32× above it. It is
+not a floor for these real residuals, for the reasons listed below. In particular, for residuals that
+are not Gaussian the proved bound of Theorem 2.2 falls by the factor exp(−J/k), with J their negentropy
+(section 2.1), so a floor for them needs J bounded from above, and the only estimates of J on these
+data are lower bounds (`entropy/REPORT.md`, Summary: "Every gap is a lower bound on J").
+
 **Per-item floors on bytes read (agent 3b).** Agent 3b turned the conjectured floor into a share of
 the dataset read, by reverse water-filling on γᵢ per group with an ideal quantiser and the prior
 treated as free. At n = 768 this gives 0.077, 0.131, 0.364 and 1.378 % at thresholds 0.95, 0.9, 0.8
@@ -581,16 +633,465 @@ hypothesis of Corollary 2.3 that the data or the accounting fails:
 
 Source: `proofcheck/REFEREE.md`, "Headline claim".
 
+## 2.9a The full floor, proved
+
+This section proves Conjecture 2.14 under the Gaussian model (Theorem 2.24), and a second floor that
+keeps the constant κ_k of Corollary 2.3 on the head while it keeps the tail in full (Theorem 2.25 and
+Corollary 2.26). Both proofs couple the standard Gaussian with each cell's own law through a
+triangular map. They then use one entropy inequality per coordinate (Lemma 2.20), which is a published
+inequality on the line (Lemma 2.19) applied along the map. Lemmas 2.21 to 2.23 are the facts about the
+floors and about κ_k that the theorems need.
+
+The source for the whole section is `program/floors/CLAIMS.md`, "For the notes" (N.0 to N.7). The core
+referee (`program/floors/referee/referee-core.md`) read the text in which these results were proved
+(`program/floors/CLAIMS_before_referees.md`, sections 0 to 4) and found no error in any of them, and an
+independent numerical attack (`program/stage0-floor-check/RESULTS.md`) refuted nothing. Clauses added
+after the referee read the text are named under the result they belong to, and their list is the
+section "Changes after the referees" of `program/floors/CLAIMS.md`.
+
+### Setting
+
+*The model.* Chapter 0's setting holds with α = 1. The residual is r ~ N(0, Σ_R), with mean zero. The
+offset is Δ = Σ_Q^½ g, with g a standard Gaussian vector in ℝⁿ independent of r. Σ_Q and Σ_R are
+positive semidefinite, and they need not commute or be invertible.
+
+*The message.* **c** takes countably many values. It is a function of r and, if the encoder is
+randomised, of randomness independent of Δ, so the pair (r, **c**) is independent of Δ.
+P_c = Pr[**c** = c]. If the message is B bits of fixed length, or a uniquely decodable code of expected
+length B bits, H(**c**) ≤ B ln 2.
+
+*The certificate.* For each value c and each Δ the certificate gives an interval of half-width
+h(c, Δ) ≥ 0, and three things are assumed of it.
+
+1. It depends on the item only through c and on the query only through Δ.
+2. h(c, ·) is a measurable function of Δ.
+3. It is sound: for every c with P_c > 0 and every Δ, the interval contains Δ·r for almost every r
+   under the law of r given **c** = c. This is weaker than the soundness of section 2.0, which asks
+   it for every r ∈ K_c, so a floor proved under it holds under that definition too.
+
+E h is the mean of h(c, Δ) over the message and the offset, and by independence
+E h = Σ_c P_c E_g h(c, Σ_Q^½ g).
+
+Hypotheses 1 and 2 were stated after the core referee read the text, at the referee's request: its
+report lists them among the unstated hypotheses (`program/floors/referee/referee-core.md`, "Unstated
+hypotheses", items 3 and 1; `program/floors/CLAIMS.md`, "Changes after the referees").
+
+*Eigen-coordinates.* With z as in section 2.0, z ~ N_{n₊} and z is a function of r. Replace g by
+Vᵀg, which is again standard Gaussian and independent of z and **c**. Then
+
+Δ·r = Σ_{i≤n₊} √γᵢ gᵢ zᵢ   almost surely,
+
+because the components of Σ_Q^½ r along the eigenvectors of eigenvalue 0 have variance 0. Every sum
+or product over i in this section runs over i ≤ n₊ unless it names another range.
+
+*Cells.* For P_c > 0, P_c ν_c ≤ N_{n₊} as measures, so ν_c has a density and
+KL(ν_c ‖ N_{n₊}) ≤ ln(1/P_c). The mutual information is I(z; **c**) = Σ_c P_c KL(ν_c ‖ N_{n₊}), and
+I(z; **c**) ≤ H(**c**).
+
+*The width of a cell.* Fix c with P_c > 0 and fix Δ. A linear function of z is continuous, so its
+essential supremum under ν_c is its supremum over Z_c. Soundness therefore gives
+2h(c, Δ) ≥ h_{Z′_c}(g) + h_{Z′_c}(−g), and since g and −g have the same law,
+
+E_g h(c, ·) ≥ E_g h_{Z′_c}(g).   (★)
+
+This is step 1 of Theorem 2.2. h_{Z′_c} is a supremum of linear functions, so it is Borel and
+dominates a linear function, and its mean is well defined in (−∞, ∞].
+
+### Lemmas
+
+**Lemma 2.19 (Lemma 1 of the floors track: entropy against the Gaussian correlation of the quantile
+function).** Let μ be a law on ℝ with a density f and a finite second moment. Then
+0 < C(μ) ≤ √Var(μ) and
+
+H(μ) ≤ ln(√(2πe)·C(μ)),   equivalently   KL(μ ‖ N₁) ≥ ½ m₂(μ) − ½ − ln C(μ).
+
+Equality holds when μ is Gaussian.
+
+Status: **[cited]**. It is the case n = 1 of the dimensional Talagrand inequality for the Gaussian
+measure: Bolley, Gentil and Guillin, "Dimensional improvements of the logarithmic Sobolev, Talagrand
+and Brascamp–Lieb inequalities", Ann. Probab. 46 (2018), Theorem 2.1 at n = 1 (arXiv:1507.01086).
+Bakry, Bolley and Gentil first proved it, by semigroup methods (Probab. Theory Related Fields 154,
+2012). The librarian read the paper's LaTeX source (`program/library/floors-novelty.md` section 1), and
+no one else in the program opened the paper's text: the core referee confirmed only the arXiv record,
+and the author of the source checked only that the theorem as the librarian quotes it reduces to this
+lemma. The proof is kept so that the chapter can be read without the paper, and the core referee found
+no error in it. The falsifier tested a consequence of the second form, C(μ) ≥ s with s ∈ (0, 1] and
+β(s) = KL(μ ‖ N₁) (it follows with m₂ ≥ C²), over seven families of laws, and refuted nothing (closest
+approach 1.00000000007; **[computed]**). Source: `program/floors/CLAIMS.md`, N.1;
+`program/floors/referee/referee-core.md`, stage 1; `program/stage0-floor-check/RESULTS.md`, section 1.
+
+With the standard Gaussian, their theorem at n = 1 reads
+½𝒲₂²(N₁, μ) ≤ ½(m₂ − 1) + 1 − exp(½(m₂ − 1) − KL(μ ‖ N₁)), where 𝒲₂ is the quadratic Wasserstein
+distance. On the line the monotone coupling is optimal, so 𝒲₂² = m₂ + 1 − 2C(μ), and the inequality
+becomes C(μ) ≥ exp(½(m₂ − 1) − KL), which is the second form. Their proof is the one below
+(transport, Jensen, Gaussian integration by parts).
+
+*Proof.* Write T = T_μ and g ~ N₁.
+
+1. *T(g) has law μ, and E T(g)² = m₂.* The quantile transform of a uniform variable has law μ.
+2. *C = ∫ φ dτ*, where τ is the Lebesgue–Stieltjes measure of the non-decreasing function T. For
+   x > 0, T(x) − T(0) = τ([0, x)) and x·φ(x) ≥ 0, so by Tonelli
+   E[g(T(g) − T(0)); g > 0] = ∫_{[0,∞)} τ(dy) ∫_{x>y} xφ(x) dx = ∫_{[0,∞)} φ dτ. The half-line g < 0
+   is the same with both factors negative, and E[g·T(0)] = 0. C is finite by Cauchy–Schwarz,
+   C = E[g(T(g) − E T(g))] ≤ √Var(μ), and positive because μ is not a point mass.
+3. *C ≥ E T′(g).* T is differentiable almost everywhere and τ = T′(x)dx + τ_s with τ_s ≥ 0 singular
+   (Lebesgue).
+4. *H(μ) = ½ ln(2πe) + E ln T′(g).* F_μ is absolutely continuous with F_μ′ = f off a Lebesgue-null
+   set 𝒩₁. Then μ(𝒩₁) = 0, so Pr[T(g) ∈ 𝒩₁] = 0. T is differentiable off a null set 𝒩₂. F_μ is
+   continuous, so F_μ(T(x)) = Φ(x) for every x. For x outside 𝒩₂ ∪ T⁻¹(𝒩₁) the chain rule gives
+   f(T(x))·T′(x) = φ(x). So T′(x) > 0 and ln T′(x) = ln φ(x) − ln f(T(x)) for almost every x. Take
+   expectations: E ln φ(g) = −½ ln(2πe), and E[−ln f(T(g))] = −∫ f ln f = H(μ), which is well defined
+   in [−∞, ∞) because f ln(1/f) ≤ φ − f + f·(½ ln 2π + y²/2).
+5. *Jensen.* E ln T′(g) ≤ ln E T′(g) ≤ ln C by step 3. With step 4, H(μ) ≤ ½ ln(2πe) + ln C.
+
+The second form is the first with KL(μ ‖ N₁) = −H(μ) + ½ ln 2π + ½ m₂. ∎
+
+**Lemma 2.20 (Lemma 2 of the floors track: the same along a triangular coupling).** Let ν be a law on
+ℝᵏ with a density, finite second moments and H(ν) > −∞. For any order of the coordinates:
+
+1. T^ν(g) has law ν when g is standard Gaussian in ℝᵏ;
+2. 0 < Cᵢ(ν) ≤ √(E_ν zᵢ²) for every i;
+3. H(ν) ≤ Σᵢ ln(√(2πe)·Cᵢ(ν)),
+
+where the sums and the index i run over the k coordinates of ν.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.2;
+`program/floors/referee/referee-core.md`, stage 1 ("no error found"; an adversary in the plane found
+no gap below 0.091 nats); `program/stage0-floor-check/RESULTS.md`, section 2 (the falsifier's per-cell
+bound, which rests on this lemma, is not refuted on the families that finished).
+
+*Proof.* *The map.* Regular conditional laws exist. The conditional distribution functions are
+jointly measurable, and so are their quantile functions, because
+{Q(u | z_<i) ≤ t} = {u ≤ F(t | z_<i)}. Given g_<i, Φ(gᵢ) is uniform and independent of g_<i, so
+T^ν_i(g) has the conditional law of the i-th coordinate given that the earlier ones equal
+T^ν_<i(g_<i). By induction T^ν(g) has law ν. No continuity of the conditional distribution functions
+is used, because the map goes from the Gaussian law, which has no atoms, to ν.
+
+*The entropy.* Write ν_{i|<i}(· | z_<i) for the conditional law of the i-th coordinate given that the
+earlier ones equal z_<i. ν has a density, so for ν-almost every z_<i this law has a density, and it
+has a finite second moment. The chain rule holds for KL(ν ‖ N_k), with non-negative terms:
+KL(ν ‖ N_k) = Σᵢ ∫ KL(ν_{i|<i}(· | z_<i) ‖ N₁) dν. Apply the second form of Lemma 2.19 to each
+conditional law and integrate:
+
+KL(ν ‖ N_k) ≥ Σᵢ [½ E_ν zᵢ² − ½ − E ln C(ν_{i|<i}(· | T^ν_<i(g_<i)))].
+
+The last expectation is well defined: its positive part by ln C ≤ ½(m₂ − 1), its negative part by
+Lemma 2.19 and the finiteness of the conditional KL. By Jensen for the logarithm,
+E ln C(ν_{i|<i}) ≤ ln E C(ν_{i|<i}) = ln Cᵢ(ν), the equality because
+E[gᵢ T^ν_i(g) | g_<i] = C(ν_{i|<i}). With KL(ν ‖ N_k) = −H(ν) + (k/2) ln 2π + ½ E_ν‖z‖² this is
+item 3. Item 2 is Cauchy–Schwarz and the positivity in Lemma 2.19. ∎
+
+*Relation to the published form.* Bolley, Gentil and Guillin's theorem in k dimensions uses the Brenier
+map and gives H(ν) ≤ k·ln(√(2πe)·C*/k), with C* the largest E⟨g, x⟩ over couplings of N_k and ν.
+Lemma 2.20 implies it, because Σᵢ ln Cᵢ ≤ k·ln(Σᵢ Cᵢ/k) by the inequality of the means and
+Σᵢ Cᵢ ≤ C* because the triangular coupling is one coupling. What Lemma 2.20 adds is one correlation
+per coordinate, which the water-filling of Theorem 2.24 needs. The librarian did not find it stated in
+this form. This paragraph was written after the core referee read the text, on the librarian's report,
+so it is **[proved, unrefereed]** (`program/library/floors-novelty.md` section 2).
+
+**Lemma 2.21 (Lemma 3 of the floors track: the water-filling programme).** Let aᵢ > 0 and H ≥ 0, and
+let λ ∈ (0, max aᵢ] solve Σᵢ ln⁺(aᵢ/λ) = H. Then
+
+min{Σᵢ aᵢ sᵢ : sᵢ ∈ (0, 1], Σᵢ ln(1/sᵢ) ≤ H} = Σᵢ min(aᵢ, λ),
+
+attained at sᵢ* = min(1, λ/aᵢ). With aᵢ = √γᵢ and θ = λ², W(H) = Σᵢ √min(γᵢ, θ), where
+Σᵢ ½ ln⁺(γᵢ/θ) = H.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.3;
+`program/floors/referee/referee-core.md`, stage 1 ("no error found"; stage 3 compares the closed form
+with a numerical minimiser on 300 programmes).
+
+*Proof.* For H > 0, λ exists and is unique because λ ↦ Σᵢ ln⁺(aᵢ/λ) is continuous and strictly
+decreasing on (0, max aᵢ], from ∞ to 0; for H = 0 take λ = max aᵢ. Let
+L(s) = Σᵢ aᵢ sᵢ − λ Σᵢ ln sᵢ. In each coordinate L is convex on (0, 1] with derivative aᵢ − λ/sᵢ, so
+it is least at sᵢ*. For a feasible s, Σᵢ ln sᵢ + H ≥ 0, so
+Σᵢ aᵢ sᵢ ≥ L(s) − λH ≥ L(s*) − λH = Σᵢ aᵢ sᵢ* + λ(Σᵢ ln(1/sᵢ*) − H) = Σᵢ aᵢ sᵢ*. ∎
+
+**Lemma 2.22 (Lemma 4 of the floors track: properties of the floors).** Ψ and β are as in section
+2.0. Ψ is the floor of the floors track's Conjecture A (`program/floors/CLAIMS.md`), which these notes
+do not state, and it appears here only for comparison.
+
+1. Ψ, W and V_S are convex and non-increasing in H, the minima are attained, and Ψ(0) = W(0) = F.
+2. W(H) ≥ Ψ(H).
+3. Ψ(H) ≥ F − √(H·Σᵢ γᵢ).
+4. W(H) ≥ F − min(√γ₁·H, √(H·Σᵢ γᵢ)). If γ₁ > γ₂ and H ≤ ½ ln(γ₁/γ₂), then
+   W(H) = F − √γ₁(1 − e^(−H)).
+5. V_S(H) ≥ max(W_T(H), κ_k (Π_{i∈S} γᵢ)^(1/2k) e^(−H/k)), with T = S^c.
+6. V_S(H) ≥ κ_k (Π_{i∈S} γᵢ)^(1/2k) e^(−H/k) + W_T(H), with T = S^c. The same holds with T replaced
+   by any subset of S^c.
+
+Status: items 1 to 5 **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.4;
+`program/floors/referee/referee-core.md`, stage 2 ("no error found"; stage 3 checks every inequality on
+400 spectra). Item 6, which the core referee
+suggested, and the condition γ₁ > γ₂ in item 4 were added after the referee read the text, so they are
+**[proved, unrefereed]** (`program/floors/CLAIMS.md`, "Changes after the referees").
+
+*Proof.* (1) Ψ and W are the least values of a linear objective over a set that is jointly convex in
+(s, H), because β and −ln are convex. Each term of the constraint is non-negative on (0, 1] and tends
+to infinity as s → 0, so the feasible set is compact and the minimum is attained. β(s) = 0 or
+ln(1/s) = 0 on (0, 1] only at s = 1, so Ψ(0) = W(0) = F. V_S is the infimal convolution on [0, ∞) of
+u ↦ W_T(u) and v ↦ κ_k(Π_S γᵢ)^(1/2k)e^(−v/k), both convex and non-increasing. (2) β(s) ≤ ln(1/s) on
+(0, 1], so W minimises over a smaller set. (3) β(1) = β′(1) = 0 and β″ = 1 + s⁻² ≥ 2, so
+β(s) ≥ (1 − s)². A feasible s has Σᵢ(1 − sᵢ)² ≤ H, and Σᵢ √γᵢ(1 − sᵢ) ≤ √(Σᵢ γᵢ)·√H by
+Cauchy–Schwarz. (4) Use Lemma 2.21. For a = √γᵢ > λ: a − λ ≤ a ln(a/λ), which sums to at most
+√γ₁·H; and ((a − λ)/a)² ≤ 1 − λ/a ≤ ln(a/λ), so Σᵢ(√γᵢ − λ)⁺ ≤ √(Σᵢ γᵢ)·√H by Cauchy–Schwarz. The
+exact form is Lemma 2.21 with one coded coordinate. (5) and (6) In the minimand of V_S the head term
+increases with u, so it is at least its value at u = 0; and W_T(u) ≥ W_T(H) for u ≤ H, because W_T is
+non-increasing. This gives (6), and (5) follows because both terms are non-negative. For a subset T′
+of S^c, W_{S^c} ≥ W_{T′}, because restricting a feasible point of the larger programme to T′ leaves it
+feasible and drops non-negative terms. ∎
+
+**Lemma 2.23 (Lemma 5 of the floors track).** κ_k ≥ k for every k ≥ 1.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.5;
+`program/floors/referee/referee-core.md`, stage 2 ("no error found; confirmed by a second proof"), and
+stage 3 (κ_k − k ≥ 0.6487 over every k ≤ 5,000 and a logarithmic grid to 10⁷,
+`program/floors/referee/core_f2_misc.log`).
+
+*Proof.* Let ν be uniform on the ball of radius ρ in ℝᵏ. T^ν(g) lies in the ball almost surely, so
+ρ‖g‖ ≥ g·T^ν(g) and ρ·E‖g_k‖ ≥ Σᵢ Cᵢ(ν). By Lemma 2.20, Σᵢ ln(√(2πe)·Cᵢ(ν)) ≥ H(ν) = ln(ω_k ρᵏ),
+and by the inequality of the means Σᵢ Cᵢ ≥ k(Πᵢ Cᵢ)^(1/k) ≥ k·ω_k^(1/k)·ρ/√(2πe). So
+E‖g_k‖·√(2πe) ≥ k·ω_k^(1/k), which is κ_k ≥ k. ∎
+
+The core referee gives a second proof that does not use Lemma 2.20, from Wendel's inequality for
+E‖g_k‖ and Stirling's lower bound for ω_k (`program/floors/referee/referee-core.md`, stage 2). The
+least value of κ_k − k is √e − 1 = 0.649, at k = 1 (**[computed]** by the core referee over
+k ≤ 5,000 and a logarithmic grid to 10⁷ only, `program/floors/referee/core_f2_misc.log`; no proof
+covers every k; see Editor's query 18).
+
+### The water-filling floor
+
+**Theorem 2.24 (Theorem F1 of the floors track: the water-filling floor).** Under the model, the
+message and the certificate of this section,
+
+E h ≥ W(I(z; **c**)) ≥ W(H(**c**)) = Σᵢ √min(γᵢ, θ),   where Σᵢ ½ ln⁺(γᵢ/θ) = H(**c**).
+
+More precisely, when I(z; **c**) < ∞ there are numbers C̄ᵢ ∈ (0, 1] with E h ≥ Σᵢ √γᵢ C̄ᵢ and
+Σᵢ ln(1/C̄ᵢ) ≤ I(z; **c**). When I(z; **c**) = ∞ the statement is E h ≥ 0.
+
+With H(**c**) ≤ B ln 2 this is Conjecture 2.14, the "full floor" of the consolidated proofs' section 6:
+W is non-increasing, and at H = B ln 2 the θ above is the water level for B of section 2.0. It holds
+for every n, and for Σ_Q and Σ_R that need not commute.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.6;
+`program/floors/referee/referee-core.md`, stage 1 ("no error found; it is the section 6 conjecture,
+and a little more"); `program/stage0-floor-check/RESULTS.md` ("not refuted"; closest approach 1.0026).
+The case I(z; **c**) = ∞, and the factorisation of the slack in "How tight" below, were added after the
+core referee read the text, at its request, so they are **[proved, unrefereed]**
+(`program/floors/CLAIMS.md`, "Changes after the referees").
+
+*Proof.* Let I(z; **c**) < ∞.
+
+1. *Width.* By (★), E_g h(c, ·) ≥ E_g h_{Z′_c}(g) for every c with P_c > 0.
+2. *Coupling.* P_c ν_c ≤ N_{n₊}, so ν_c has a density at most (2π)^(−n₊/2)/P_c, finite second
+   moments, and H(ν_c) ≥ ln(P_c(2π)^(n₊/2)) > −∞. Let T^{ν_c} be its triangular map (Lemma 2.20).
+   T^{ν_c}(g) has law ν_c, so it lies in Z_c almost surely. It is a function of the same g at which the
+   support function is taken, so pointwise h_{Z′_c}(g) ≥ Σᵢ √γᵢ gᵢ T^{ν_c}_i(g), and
+   E_g h_{Z′_c}(g) ≥ Σᵢ √γᵢ Cᵢ(ν_c). The right side is integrable:
+   E|gᵢ T^{ν_c}_i(g)| ≤ √(E_{ν_c} zᵢ²) ≤ P_c^(−½).
+3. *Entropy.* By Lemma 2.20, H(ν_c) ≤ Σᵢ ln(√(2πe)·Cᵢ(ν_c)).
+4. *Averaging.* The cell laws mix back to the Gaussian, Σ_c P_c ν_c = N_{n₊}. So
+   Σ_c P_c H(ν_c) = H(z | **c**) = H(z) − I(z; **c**) = (n₊/2) ln(2πe) − I(z; **c**). With step 3,
+   Σᵢ Σ_c P_c ln Cᵢ(ν_c) ≥ −I(z; **c**). Put C̄ᵢ = Σ_c P_c Cᵢ(ν_c). By Jensen for the logarithm,
+   Σᵢ ln C̄ᵢ ≥ −I(z; **c**).
+5. *C̄ᵢ ≤ 1.* By Lemma 2.20 and Jensen for the square root,
+   C̄ᵢ ≤ Σ_c P_c √(E_{ν_c} zᵢ²) ≤ √(Σ_c P_c E_{ν_c} zᵢ²) = √(E zᵢ²) = 1.
+6. E h = Σ_c P_c E_g h(c, ·) ≥ Σᵢ √γᵢ C̄ᵢ, and C̄ is feasible for the programme of W at rate
+   I(z; **c**), so E h ≥ W(I(z; **c**)). W is non-increasing and I(z; **c**) ≤ H(**c**). The closed
+   form is Lemma 2.21. ∎
+
+The proof uses that the cell laws mix back to N_{n₊} in two places: in step 4, through
+H(z | **c**) = H(z) − I(z; **c**), and in step 5. A bound proved cell by cell cannot use it, and it
+loses for that reason (the floor Ψ of Lemma 2.22).
+
+**How tight.** The inequalities of steps 3 to 6 are equalities when every ν_c is a Gaussian law with
+covariance diag(sᵢ²), the same sᵢ for every cell, and no cell has such a law. For an actual code the
+slack between E h and W is the product of the coupling step (the supremum over a cell against the
+correlation with the cell's own law) and the gap in Lemma 2.20 for the cell law, which for an interval
+cell at high rate are √2 and √(e/2). Computed codes come close in high dimension at low rate: shells of
+the norm reach E h / W = 1.00055 at n = 10⁴ for an isotropic spectrum, as the core referee found, and
+a grid on one head coordinate with a grid on the tail's norm reaches 1.0026 at 2,001 eigenvalues, as
+the falsifier found (**[computed]**; `program/floors/referee/core_f2_misc.log`,
+`program/stage0-floor-check/RESULTS.md`). For an isotropic spectrum Ingber, Courtade and Weissman's
+scheme reaches the level of W with probability tending to 1 as n → ∞, at every rate, but its mean
+width is infinite, so that is tightness in probability and not tightness of Theorem 2.24 (**[cited]**;
+`program/floors/referee/referee-extensions.md`, P1). Whether some code attains W(H)(1 + o(1)) in the
+mean is open.
+
+### The combined floor
+
+**Theorem 2.25 (Theorem F2 of the floors track: Theorem 2.2's constant on the head, the tail in
+full).** Under the model, the message and the certificate of this section, for every set S of k ≥ 1
+indices in {1, …, n₊}, with T = S^c,
+
+E h ≥ V_S(I(z; **c**)) ≥ V_S(H(**c**)),
+
+V_S(H) = min over 0 ≤ u ≤ H of { κ_k·(Π_{i∈S} γᵢ)^(1/2k)·e^(−(H−u)/k) + W_T(u) }.
+
+T may be empty, and then V_S(H) = κ_{n₊} (Πᵢ γᵢ)^(1/2n₊) e^(−H/n₊). When I(z; **c**) = ∞ the
+statement is E h ≥ 0.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.7;
+`program/floors/referee/referee-core.md`, stage 3 ("no error found"; the inequality in which head and
+tail meet, attacked in the plane and in space, kept a smallest ratio of 1.0006);
+`program/stage0-floor-check/RESULTS.md` ("not refuted"; closest approaches 1.0005 and 1.0023). The
+requirement k ≥ 1, the case of an empty T and the case I(z; **c**) = ∞ were stated after the core
+referee read the text, at its request, so they are **[proved, unrefereed]**
+(`program/floors/CLAIMS.md`, "Changes after the referees").
+
+**Corollary 2.26 (Corollary F2a of the floors track).** Let H = H(**c**) > 0, let θ solve
+Σᵢ ½ ln⁺(γᵢ/θ) = H, and let k = #{i : γᵢ > θ}, so that eigenvalues equal to θ are in the tail. Then
+k ≥ 1 and
+
+E h ≥ κ_k·√θ + Σ_{i>k} √γᵢ.
+
+This is the full floor with κ_k in place of k on the head. It exceeds Σᵢ √min(γᵢ, θ) by (κ_k − k)√θ.
+
+Status: **[proved, refereed]**. Source: `program/floors/CLAIMS.md`, N.7;
+`program/floors/referee/referee-core.md`, stage 3 ("no error found, ties included"; a brute force over
+u agrees with the formula to within 5·10⁻¹⁶); `program/stage0-floor-check/RESULTS.md`, section 3
+(Theorem 2.25 at top-k head sets that include those near the water level; nothing refuted). The rule that eigenvalues equal to θ are in the tail, and the treatment of repeated
+eigenvalues and of k = n₊ in the proof, were written in after the core referee read the text, at its
+request, so they are **[proved, unrefereed]**, although the referee checked the case of ties in its own
+reading and by brute force (`program/floors/CLAIMS.md`, "Changes after the referees").
+
+*Proof of Theorem 2.25.* The proof uses one fact from step 3 of Theorem 2.2 (Urysohn's inequality):
+for a bounded Borel set G in ℝᵏ and g_k standard Gaussian, E h_G(g_k) ≥ E‖g_k‖·(vol(G)/ω_k)^(1/k).
+Let I(z; **c**) < ∞, and order the coordinates with those of T first.
+
+1. *Tail first.* Fix c with P_c > 0. Let ν_{c,T} be the marginal of ν_c on the T-coordinates and
+   T^{ν_{c,T}} its triangular map (Lemma 2.20 in ℝ^T; the density of ν_{c,T} is at most
+   (2π)^(−|T|/2)/P_c). Put z_T = T^{ν_{c,T}}(g_T). It has law ν_{c,T} exactly, and since it is a
+   function of g_T it is independent of g_S.
+2. *Head on the fibre.* Let Z_c^{z_T} = {s : (s, z_T) ∈ Z_c}, and let ν_{c,S|z_T} be the conditional
+   law under ν_c of the S-coordinates given that the T-coordinates equal z_T. Since ν_c(Z_c) = 1, for
+   ν_{c,T}-almost every z_T the law ν_{c,S|z_T} has a density and is carried by Z_c^{z_T}; and z_T has
+   law ν_{c,T}, so this holds at T^{ν_{c,T}}(g_T) almost surely. For every s in the fibre,
+   (s, z_T) ∈ Z_c, so pointwise in g = (g_T, g_S)
+
+   h_{Z′_c}(g) ≥ Σ_{i∈T} √γᵢ gᵢ (z_T)ᵢ + sup over s ∈ Z_c^{z_T} of Σ_{i∈S} √γᵢ gᵢ sᵢ.
+
+   No point of the fibre is selected. The supremum is a Borel function of (z_T, g_S), because Z_c is a
+   countable union of compact sets and the supremum over the fibre of a compact set is upper
+   semicontinuous.
+3. *Urysohn.* Given g_T the fibre is a fixed closed set and g_S is standard Gaussian in ℝᵏ. Apply
+   Urysohn's inequality to the image of the fibre under s ↦ (√γᵢ sᵢ)_{i∈S}, whose volume is
+   (Π_{i∈S} γᵢ)^½ vol(Z_c^{z_T}):
+
+   E[sup over the fibre | g_T] ≥ E‖g_k‖·ω_k^(−1/k)·(Π_{i∈S} γᵢ)^(1/2k)·vol(Z_c^{z_T})^(1/k).
+
+   An unbounded fibre makes the left side infinite. A support function that is finite in every
+   direction belongs to a bounded set; otherwise the directions in which it is finite form a convex
+   cone that is not the whole space, so it is +∞ on a set of Gaussian measure at least ½. The uniform
+   law maximises entropy on a set, so ln vol(Z_c^{z_T}) ≥ H(ν_{c,S|z_T}).
+4. *Jensen in the cell.* z_T has law ν_{c,T}, so E exp(H(ν_{c,S|z_T})/k) ≥ exp(a_c/k), where
+   a_c = ∫ H(ν_{c,S|z_T}) dν_{c,T} is the conditional entropy of z_S given z_T in the cell. With (★),
+   step 2, and step 2 of Theorem 2.24 applied to the tail,
+
+   E_g h(c, ·) ≥ Σ_{i∈T} √γᵢ Cᵢ(ν_{c,T}) + E‖g_k‖·ω_k^(−1/k)·(Π_{i∈S} γᵢ)^(1/2k)·e^(a_c/k).
+
+5. *Entropies.* b_c = H(ν_{c,T}) ≤ Σ_{i∈T} ln(√(2πe)·Cᵢ(ν_{c,T})) by Lemma 2.20, and
+   a_c + b_c = H(ν_c) by the chain rule. All three are finite, because the densities are bounded and
+   the second moments finite.
+6. *Averaging over cells.* Write I = I(z; **c**). Let ā and b̄ be the means of a_c and b_c over c, and
+   C̄ᵢ the mean of Cᵢ(ν_{c,T}). By Jensen, Σ_c P_c e^(a_c/k) ≥ e^(ā/k) and
+   b̄ ≤ Σ_{i∈T} ln(√(2πe)·C̄ᵢ). Also ā + b̄ = H(z | **c**) = (n₊/2) ln(2πe) − I, and C̄ᵢ ≤ 1 as in
+   Theorem 2.24. Put u = Σ_{i∈T} ln(1/C̄ᵢ) ≥ 0. Then b̄ ≤ (|T|/2) ln(2πe) − u, so
+   ā ≥ (k/2) ln(2πe) − (I − u), and, because E‖g_k‖·ω_k^(−1/k)·√(2πe) = κ_k,
+
+   E h ≥ κ_k·(Π_{i∈S} γᵢ)^(1/2k)·e^(−(I−u)/k) + Σ_{i∈T} √γᵢ C̄ᵢ
+       ≥ κ_k·(Π_{i∈S} γᵢ)^(1/2k)·e^(−(I−u)/k) + W_T(u).
+
+   Finally u ≤ I, because ā = H(z_S | z_T, **c**) ≤ H(z_S) = (k/2) ln(2πe). So E h ≥ V_S(I), and V_S
+   is non-increasing. ∎
+
+The rate splits exactly, I(z; **c**) = I(z_T; **c**) + I(z_S; **c** | z_T), and the minimum over u lets
+the code choose the split. The order of the coordinates matters for two reasons. The tail point has
+exactly the cell's tail law, so entropies and second moments average over it. The head supremum is
+taken over a whole fibre at a point independent of the head Gaussian, so nothing is selected.
+
+*Proof of Corollary 2.26.* H > 0 gives θ < γ₁, so k ≥ 1. Take S = {1, …, k}. By the water-filling
+equation, (Π_{i≤k} γᵢ)^(1/2k) e^(−H/k) = √θ. If k = n₊ the tail is empty and V_S(H) = κ_{n₊}√θ.
+Otherwise f(u) = κ_k (Π_{i≤k} γᵢ)^(1/2k) e^(−(H−u)/k) + W_T(u) is convex on [0, H]. If the largest
+eigenvalue of the tail is repeated j times, Lemma 2.21 gives
+W_T(u) = j·√γ_{k+1}·e^(−u/j) + Σ_{i>k+j} √γᵢ for small u, so W_T′(0⁺) = −√γ_{k+1} with or without
+ties. Hence f′(0⁺) = (κ_k/k)√θ − √γ_{k+1}. Now γ_{k+1} ≤ θ by the definition of k, and κ_k ≥ k
+(Lemma 2.23), so f′(0⁺) ≥ 0 and the minimum is at u = 0: V_S(H) = κ_k√θ + Σ_{i>k} √γᵢ. ∎
+
+### Remarks on Theorems 2.24 and 2.25
+
+- *The water-filling head is not always the best head.* Every S gives a floor. For γ = (4, 1, 1) and
+  H = ln 2 the water-filling head is {1}, and Corollary 2.26 gives κ₁ + 2 = 3.649, while S = {1, 2, 3}
+  gives κ₃ = 4.091. On the measured spectra the best top-k head is a little larger than the
+  water-filling one, and the gain over W is 1 to 2 % (**[computed]**; `program/floors/floors_eval.py`,
+  and line 2 of `program/floors/check_after_referees.log` for the example, which is the core
+  referee's).
+- *A seed shared by the encoder and the certificate.* If both read a seed ω independent of (r, Δ), the
+  hypotheses hold conditionally on ω. W and V_S are convex (Lemma 2.22), so averaging over ω gives
+  E h ≥ V_S(I(z; **c** | ω)) for every S, and I(z; **c** | ω) ≤ H(**c** | ω) ≤ H(**c**). The remark
+  concerns sound certificates only, and a δ-valid certificate is outside it. **[proved, unrefereed]**:
+  the core referee named the case, and the remark was written after it read the text.
+- *Relation to Theorems 2.2 to 2.6.* Corollary 2.3 is the bound V_S ≥ κ_k(Π_S γᵢ)^(1/2k)e^(−H/k) of
+  Lemma 2.22, item 5. Theorem 2.5 follows from Theorem 2.24, because W ≥ W_T for every index set T and
+  item 4 of Lemma 2.22 applied to W_T gives W_T(H) ≥ Σ_T √γᵢ − √(H·Σ_T γᵢ), which is above Theorem
+  2.5's bound. Theorem 2.6 follows from Theorem 2.25 and item 6 of Lemma 2.22, with no added bit and no
+  factor 1/√e. Theorem 2.2 itself does not follow, because it covers any residual with a density on a
+  subspace and Corollary 2.4 covers shared information, while Theorems 2.24 and 2.25 are proved for
+  Gaussian residuals. Theorem 2.25 is not independent of Theorem 2.2 either, because its step 3 is
+  Theorem 2.2's step 3 applied to a fibre. **[proved, unrefereed]**: the core referee gave this
+  argument in its summary, and it was written into the text afterwards. Line 1 of
+  `program/floors/check_after_referees.log` checks the two inequalities on 400 spectra
+  (**[computed]**).
+- *What is not claimed.* Nothing for residuals that are not Gaussian, for offsets that are not Gaussian
+  or that depend on the residual, or for real data. Stored real scalars must be counted at their bit
+  width, as in Theorem 2.2.
+
+**Prior statements of the formula.** The curve of W was published as an asymptotic identification rate
+for compressed Gaussian data answering similarity queries with no false negative. Ingber, Courtade and
+Weissman (IEEE Trans. Inf. Theory 61, 2015) prove it, with its converse, for isotropic laws as n → ∞,
+for the probability of the answer "maybe". Steiner, Dempfle, Ingber and Weissman (arXiv:1404.5173)
+give a finite-n lower bound on that probability, also isotropic. Wu, Wang and Flierl
+(arXiv:2001.07941) state the anisotropic formula for Σ_Q = Σ_R and do not prove its converse.
+Theorem 2.24 is, as far as the librarian's search goes, the first proof of the converse at finite n,
+for covariances that need not commute, in the mean-width form, and it does not claim the formula. The
+nearest current work on inner products, Balasubramanian, Bhandari and Kasiviswanathan
+(arXiv:2610.24890), bounds the mean squared error of an estimate and not a sound interval. Status:
+**[cited]**. The extensions referee read the arXiv sources of Ingber, Courtade and Weissman
+(arXiv:1307.6609) and of Wu, Wang and Flierl, and the librarian read the source of Steiner, Dempfle,
+Ingber and Weissman and the text of Balasubramanian, Bhandari and Kasiviswanathan. Source:
+`program/floors/CLAIMS.md`, N.7;
+`program/library/floors-novelty.md` section 3; `program/floors/referee/referee-extensions.md`, P1 and
+P2. Section 2.11 places the result in the literature.
+
+**Numerical checks** (**[computed]**). A code's exact range is its smallest sound certificate, so a
+code whose exact mean width fell below a floor would refute it, and none did.
+
+- The author (`program/floors/check_schemes.py`, `program/floors/check_chain1d.py`): 2,500 product
+  codes against every head set, smallest ratio 1.000040; 2,800 planar partitions that are not
+  products, 1.135; head grids with shells of the dual norm on the tail, n up to 48, 1.030 against
+  max_S V_S and 1.080 against W.
+- The core referee (`program/floors/referee/core_*.py`): Lemma 2.20 in the plane with an adversary,
+  smallest gap 0.091 nats; the inequality in which head and tail meet (steps 1 to 4 of the proof of
+  Theorem 2.25 for one cell), with an adversary over densities, smallest ratio 1.0006; whole codes in
+  three dimensions against all eight head sets, 1.237; Corollary 2.26 with ties by brute force over u,
+  equal to the formula to within 5·10⁻¹⁶; product codes to n = 10⁴, E h / W = 1.00055.
+- The falsifier (`program/stage0-floor-check/RESULTS.md`): nothing refuted; a code within 1.0026 of W
+  and within 1.0005 of max_S V_S (there S is all the indices, which gives the bound of Theorem 2.2),
+  and within 1.0023 of V_S with S the head.
+- Not tested by anyone: a high-dimensional code whose cells couple the head to the tail.
+
 ## 2.10 Conjectures
 
 Each conjecture is stated in the setting of Corollary 2.3 unless it says otherwise. Source for all
 five: `proofcheck/CONSOLIDATED_PROOFS.md` section 6.
 
 **Conjecture 2.14 (full floor).** E h ≥ Σᵢ √min(γᵢ, θ), with θ the water level for B.
-**[conjecture]**. *Missing:* a single argument that gives the head term k·√θ and the tail
-Σ_{i>k} √γᵢ together, without the losses of Theorem 2.6 (the factor 1/√e, the extra bit, and the
-concentration penalty on the tail). On the two measured spectra the best proved bound is 0.70 of
-the conjectured floor at 0 bytes and 0.93 or more from 96 bytes (section 2.5; Editor's query 2).
+Settled by Theorem 2.24, **[proved, refereed]** (section 2.9a). What was missing was a single argument
+that gives the head term k·√θ and the tail Σ_{i>k} √γᵢ together, without the losses of Theorem 2.6
+(the factor 1/√e, the extra bit, and the concentration penalty on the tail). The proof supplies it by
+coupling the Gaussian with each cell's own law through a triangular map, so that one entropy
+inequality per coordinate (Lemma 2.20), averaged over cells whose laws mix back to the Gaussian, prices
+the head and the tail together as one water-filling programme (Lemma 2.21).
 
 **Conjecture 2.15 (Gaussian residuals are the worst case).** The true optimum of E h, not only the
 bound of Theorem 2.2, is no larger for a non-Gaussian residual than for a Gaussian one with the same
@@ -635,6 +1136,18 @@ quantiser cells. Okajima and Yoshida, and Xiao and Cao, address different questi
 (**[cited, unchecked]**, abstracts only). Source: `lit/REPORT.md`, item 4 and bibliography
 entries 20–24.
 
+The formula of Conjecture 2.14 and Theorem 2.24 was stated before. Wu, Wang and Flierl
+(arXiv:2001.07941) state it for Σ_Q = Σ_R, and they do not prove its converse. The converses that are
+proved are isotropic: Ingber, Courtade and Weissman (IEEE Trans. Inf. Theory 61, 2015;
+arXiv:1307.6609) prove one as n → ∞, and Steiner, Dempfle, Ingber and Weissman (arXiv:1404.5173) prove
+one at finite blocklength, both for the probability of the answer "maybe" (**[cited]**: the extensions
+referee read the first two papers' arXiv sources, the librarian the third's). As far as the program's
+search goes, Theorem 2.24 is the first proof of the converse at finite n, for covariances that need
+not commute, in the mean-width form. Tightness holds in probability by Ingber, Courtade and Weissman's
+scheme, whose mean width is infinite, and in the mean it is shown only by computed codes (section
+2.9a, "How tight"). Source: `program/library/floors-novelty.md` section 3;
+`program/floors/referee/referee-extensions.md`, P1 and P2; `program/floors/CLAIMS.md`, N.7.
+
 Theorem 2.11 is the indistinguishability argument of Seidl and Kriegel's optimal multi-step search,
 applied per item to nested prefixes, and the survey recommends presenting it as a generalisation
 (**[cited, unchecked]**, abstract only). Source: `lit/REPORT.md`, item 5.
@@ -646,15 +1159,25 @@ functions, Fano's inequality and the entropy bound on the expected length of a p
 
 ## Open
 
-- **Conjecture 2.14 (full floor):** one argument for the head and the tail together. The floors
-  track of the theory program (`notes/program/floors/`) is working on it.
 - **Conjecture 2.15 (Gaussian worst case):** achievability at low rate.
 - **Conjecture 2.16 (non-Gaussian queries):** the conditions under which Theorem 2.2 survives.
 - **Conjecture 2.17 (√k for an unknown class):** a lower bound for a given W, or a minimax form.
 - **Conjecture 2.18 (tail without the factor 2):** a proof.
 - **A floor for the real data.** None is proved: the residuals and queries are not Gaussian, the
   queries depend on the items, and the shared bases and the m·e scalar are not counted
-  (section 2.9).
+  (section 2.9). Theorem 2.24 proves the full floor for Gaussian residuals only. For residuals that
+  are not Gaussian the proved bound of Theorem 2.2 falls by exp(−J/k), with J their negentropy
+  (section 2.1), so a floor for them needs J bounded from above, while the only estimates of J on
+  these data are lower bounds (`entropy/REPORT.md`, Summary).
+- **Offsets that are not Gaussian, for the full floor.** Theorems 2.24 and 2.25 assume Δ Gaussian and
+  independent of r. Conjecture 2.16 asks the same question of Theorem 2.2.
+- **A code that attains the full floor in the mean.** Computed codes come within 1.0026 of W, and for
+  an isotropic spectrum Ingber, Courtade and Weissman's scheme attains it in probability as n → ∞, but
+  no code is proved to attain W(H)(1 + o(1)) in the mean (section 2.9a, "How tight").
+- **Cells that couple the head and the tail in high dimension.** No one has tested such a code against
+  Theorems 2.24 and 2.25. Coupled cells were tested only in two and three dimensions, where the floors
+  are loose (1.13 and above), and in high dimension only product codes were computed
+  (`program/floors/referee/referee-core.md`, stage 3).
 - **Instance-optimality across encodings.** Theorem 2.11 fixes the stream. No per-query bound across
   all encodings exists, and the scheme's weighted Cauchy–Schwarz certificate is not the exact range
   the theorem's upper half needs.
@@ -703,7 +1226,10 @@ functions, Fano's inequality and the entropy bound on the expected length of a p
    interval remains the tightest one. The source does not state the condition.
 8. **Hypotheses of Conjecture 2.14.** The consolidated proofs state the conjecture without its
    hypotheses. The chapter assumes those of Corollary 2.3 (Gaussian residuals, Gaussian offsets
-   independent of r, every stored bit in B).
+   independent of r, every stored bit in B). Theorem 2.24 now states its setting in full (section
+   2.9a, "Setting"), and that setting contains these hypotheses; the core referee reads the
+   conjecture with the same ones (`program/floors/referee/referee-core.md`, stage 1 verdicts and
+   "Summary for the PI"). This answers the query for the conjecture as the chapter states it.
 9. **Exact box ∩ ellipsoid.** Agent 3a measured a 3–14 % narrower mean half-width and the code track
    a 0.3 % reduction in bytes read, and `quant/REPORT.md` lists the second as contradicting the
    first. The two figures measure different things (width against bytes read, one global basis
@@ -739,3 +1265,11 @@ functions, Fano's inequality and the entropy bound on the expected length of a p
     says its "before" code already includes the mixture weights. `floor2.py`'s "before" variant
     weights the code by the item-offset profile Qi and charges 8-bit norms, so the two "before"
     codes differ, and the floor ratios' before → after change is not the change measured in bytes.
+18. **The least value of κ_k − k.** `program/floors/CLAIMS.md`, N.5, states after its proof of
+    Lemma 2.23 that the least value of κ_k − k is √e − 1, at k = 1, without a tag or an argument; its
+    section 1 (L5) gives the same sentence as a numerical finding of `referee/core_f2_misc.py`. The value
+    at k = 1 is exact, because κ₁ = √e. That no larger k gives less is stated by neither proof of
+    Lemma 2.23. The evidence is the core referee's computation over every k ≤ 5,000 and a logarithmic
+    grid to 10⁷ (`program/floors/referee/referee-core.md`, verdicts table, "κ_k − k ≥ 0.6487 (k = 1)", and
+    stage 3), so the chapter tags the sentence [computed] and names that range. Beyond it the statement
+    is unproved.

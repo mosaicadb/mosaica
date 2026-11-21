@@ -1,0 +1,22 @@
+== two segments, a = 1, h = 0.1 ==
+sampled cov A diag [0.3327 0.    ] exact [0.3333, 0.0]
+sampled cov B diag [0.0835 0.01  ] exact [0.0833, 0.010000000000000002]
+trace A, B: 0.3333 0.0933 ratio 3.57
+w  0.02  H*_A  3.363  H*_B  5.665 nats   B - A +2.303 (closed form +2.303)   bits +3.32   coding prefers A
+w  0.05  H*_A  2.446  H*_B  3.833 nats   B - A +1.386 (closed form +1.386)   bits +2.00   coding prefers A
+w  0.10  H*_A  1.753  H*_B  2.446 nats   B - A +0.693 (closed form +0.693)   bits +1.00   coding prefers A
+w  0.19  H*_A  1.111  H*_B  1.163 nats   B - A +0.051 (closed form +0.051)   bits +0.07   coding prefers A
+w  0.20  H*_A  1.060  H*_B  1.060 nats   B - A +0.000 (closed form +0.000)   bits +0.00   coding prefers B
+w  0.21  H*_A  1.011  H*_B  0.965 nats   B - A -0.047 (closed form -0.047)   bits -0.07   coding prefers B
+w  0.30  H*_A  0.655  H*_B  0.367 nats   B - A -0.288 (closed form -0.288)   bits -0.42   coding prefers B
+w  0.38  H*_A  0.418  H*_B  0.031 nats   B - A -0.388 (closed form -0.388)   bits -0.56   coding prefers B
+
+== duality: H*(w) = D_lambda - lambda w at lambda = theta^-1/2, and <= for other lambda ==
+largest |H* - (D - lambda w)| over 200 spectra: 4.26e-14
+
+== P1.2: concavity, monotonicity, refinement; P1.3: the three models are ordered ==
+violations of D(full) >= D(pooled) >= diagonal model >= own basis in 300 trials: 0
+mean relative gaps (centres, allocation, basis): [0.043 0.131 0.135]
+
+== P1.2 item 5: gradient of F is M^-1 / 2 (finite differences) ==
+finite difference 10.3676854  tr(M^-1 E)/2 10.36768484

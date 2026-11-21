@@ -1,0 +1,3 @@
+shape follows position (smooth): price of one basis 1.0441; random groups 1.0432; by centre direction 1.0229; Bregman from that 1.0076 (8 steps, monotone True); Bregman from random 1.0099 (8 steps)
+shape independent of position (6 kinds): price of one basis 1.4009; random groups 1.3871; by centre direction 1.3805; Bregman from that 1.1277 (1 steps, monotone True); Bregman from random 1.1047 (1 steps)
+all cells alike: price of one basis 1.0000; random groups 1.0000; by centre direction 1.0000; Bregman from that 1.0000 (0 steps, monotone True); Bregman from random 1.0000 (0 steps)
