@@ -1,0 +1,60 @@
+/home/joe/code/vexact-theory/notes/program/approximate/dial_laws.py:139: RuntimeWarning: divide by zero encountered in scalar divide
+  thr = YG + k * mg if fam != "marginL" else YG + mg / np.sqrt(fs[0])
+## yahoo: 100 queries, 9.82 of the true 10 a query in the dumped clusters; delta 0.00 (sd 0.00), rho 1.00 (sd 0.00)
+  rows' heights z, P(z > u): 1: 1.79e-01  2: 4.29e-02  3: 7.16e-03  4: 1.05e-03  5: 1.59e-04  6: 2.62e-05  7: 5.24e-06
+    rate -d ln P / du: 2-3: 1.79  3-4: 1.92  4-5: 1.88  5-6: 1.81
+    rows a cluster 2034; normal P(z > u): 3: 1.35e-03  4: 3.17e-05  5: 2.87e-07
+  neighbours a cluster by u_c (clusters; neighbours a cluster; rows a cluster times P(z > u_c + 0.25)):
+    u  3.0:    59    5.0000    9.1031
+    u  3.5:   110    2.4091    3.6355
+    u  4.0:   182    0.7967    1.3551
+    u  4.5:   296    0.1892    0.5089
+    u  5.0:   419    0.1026    0.2049
+    u  5.5:   505    0.0554    0.0854
+    u  6.0:   393    0.0483    0.0346
+    u  6.5:   342    0.0117    0.0158
+    u  7.0:   244    0.0041    0.0079
+    u  7.5:   173    0.0000    0.0038
+    ln(neighbours a cluster) on u, u >= 2.5: slope -1.71, one neighbour a cluster at u = 4.11
+  neighbours' home height u_c: quantiles 10/50/90/99 2.92 / 3.63 / 4.94 / 6.39; share above psi (of those in the dump) 3: 0.872  4: 0.301  5: 0.097  6: 0.024  7: 0.001
+  neighbours outside the sample: 954; ruled out by a certified end 0
+  miss at a uniform dial y, P(y* > y): 0: 0.2170  1: 0.0671  2: 0.0220  3: 0.0052  4: 0.0021  5: 0.0000  6: 0.0000
+    level 0 alone: 0: 0.1855  1: 0.0608  2: 0.0147  3: 0.0031  4: 0.0021  5: 0.0000  6: 0.0000
+    level 1 alone: 0: 0.1184  1: 0.0283  2: 0.0105  3: 0.0021  4: 0.0000  5: 0.0000  6: 0.0000
+    either over the larger of the two (the allowance for two levels): 1: 1.10  2: 1.50  3: 1.67  4: 1.00
+    y* quantiles 50/90/97.7/99/99.9: -1.09 / 0.66 / 1.92 / 2.63 / 4.30; mean -1.04 sd 1.40
+    by the cluster's zeta, mean y* / sd / miss at 2: 2-3: -1.10 / 1.22 / 0.017 (n 119)  3-4: -0.98 / 1.31 / 0.018 (n 549)  4-5: -1.16 / 1.55 / 0.010 (n 193)  5-99: -1.06 / 1.73 / 0.075 (n 93)
+  level 0 bulk scatter about the ray (sampled rows, 191936): mean -0.00 sd 1.12; P(g > y): 1: 0.1847  2: 0.0394  3: 0.0053  4: 0.0005  5: 0.0000
+  level 1 bulk scatter about the ray (sampled rows, 192000): mean -0.00 sd 1.13; P(g > y): 1: 0.1862  2: 0.0396  3: 0.0050  4: 0.0004  5: 0.0000
+  the stop on the dumped clusters (true t, every cluster priced): psi: neighbours read / unread, clusters read a query
+    psi 4: 6.86 / 2.96, 1.9; stop's miss of the true 10: 0.314
+    psi 5: 8.87 / 0.95, 6.7; stop's miss of the true 10: 0.113
+    psi 6: 9.58 / 0.24, 15.9; stop's miss of the true 10: 0.042
+  kept share of the neighbours in read clusters / rows past both levels a query
+    stop psi 4:
+      uniform psi_l = y:        1: 0.940/173  2: 0.983/230  3: 0.997/326  4: 1.000/469
+      margin, psi_l = psi-u_c+y: -1: 0.700/135  0: 0.894/160  1: 0.966/206  2: 0.991/283
+      margin2, 2(psi-u_c)+y:     -2: 0.615/133  -1: 0.809/153  0: 0.933/191  1: 0.983/254
+      marginL, (psi-u_c)/sqrt f+y: -1: 0.710/137  0: 0.898/162  1: 0.969/210  2: 0.991/290
+      plain, W = y tau:          3: 0.698/135  4: 0.898/161  5: 0.971/212  6: 0.994/298
+      rows to keep 0.95: uniform 183  margin1 187  margin2 203  marginL 189  plain 188
+      rows to keep 0.98: uniform 223  margin1 229  margin2 250  marginL 227  plain 226
+      rows to keep 0.99: uniform 248  margin1 273  margin2 301  marginL 262  plain 266
+    stop psi 5:
+      uniform psi_l = y:        1: 0.938/513  2: 0.984/618  3: 0.997/807  5: 1.000/1587
+      margin, psi_l = psi-u_c+y: -1: 0.855/474  0: 0.946/534  1: 0.990/644  2: 0.998/830
+      margin2, 2(psi-u_c)+y:     -2: 0.861/502  -1: 0.946/574  0: 0.984/696  1: 0.998/889
+      marginL, (psi-u_c)/sqrt f+y: -1: 0.874/501  0: 0.954/565  1: 0.991/681  2: 0.998/873
+      plain, W = y tau:          3: 0.629/443  4: 0.856/475  5: 0.954/541  6: 0.992/666
+      rows to keep 0.95: uniform 531  margin1 539  margin2 586  marginL 560  plain 536
+      rows to keep 0.98: uniform 588  margin1 594  margin2 677  marginL 619  plain 595
+      rows to keep 0.99: uniform 651  margin1 645  margin2 732  marginL 671  plain 648
+    stop psi 6:
+      uniform psi_l = y:        1: 0.936/1131  2: 0.980/1282  3: 0.996/1579  6: 1.000/4262
+      margin, psi_l = psi-u_c+y: -1: 0.931/1131  0: 0.982/1253  1: 0.992/1469  2: 0.996/1834
+      margin2, 2(psi-u_c)+y:     -2: 0.960/1291  -1: 0.987/1492  0: 0.993/1798  1: 0.994/2253
+      marginL, (psi-u_c)/sqrt f+y: -1: 0.947/1174  0: 0.985/1311  1: 0.992/1550  2: 0.996/1950
+      plain, W = y tau:          3: 0.596/1034  4: 0.825/1067  5: 0.937/1137  6: 0.984/1276
+      rows to keep 0.95: uniform 1163  margin1 1153  margin2 -  marginL 1179  plain 1155
+      rows to keep 0.98: uniform 1281  margin1 1242  margin2 1399  marginL 1268  plain 1246
+      rows to keep 0.99: uniform 1388  margin1 1417  margin2 1646  marginL 1441  plain 1463

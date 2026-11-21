@@ -1,0 +1,5 @@
+## inat: 100 queries
+  (a) stop-only recall, whole clusters, running t: psi 4: 0.959  psi 5: 0.992  psi 6: 0.997
+  (b) t_found, >=128 rows (998 neighbours): median 2.77; share above 4 / 5 / 6: 0.104 / 0.012 / 0.001
+  (b) t_found, all (998 neighbours): median 2.77; share above 4 / 5 / 6: 0.104 / 0.012 / 0.001
+  (b) complete queries, all (980 neighbours): median 2.75; share above 4 / 5 / 6: 0.106 / 0.012 / 0.001
