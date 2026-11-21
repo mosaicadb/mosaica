@@ -1,157 +1,124 @@
-# Replay specification: the statistical width of a level (A4)
+# Replay specification: the width of a level (A4), the checks still open
 
-For the PI to arrange with the session that owns the visit-order worktrees. It counts rows, bytes and recall; nothing
-is timed. Symbols are chapter 0's and those declared at the head of section A4 of `CLAIMS.md`.
+For the PI to arrange with the visit-order session, on the per-row dumps it already has
+(`/home/joe/code/vexact-data/suite/rho-dump/`: iNaturalist at 12 groups and at 1 group, yahoo at 64, LAION at 64 and
+at 8; first 30 clusters a query; k = 10). It counts rows and kept shares; nothing is timed. Symbols are those at the
+head of section A4 of `CLAIMS.md`.
 
-## 0. What it is for
+The first version of this file (`out/REPLAY-SPEC-RHO_first_version.md`) specified the dump and a comparison of the
+forms for the spread. That comparison has been run and is recorded in `CLAIMS.md` A4.0, so it is not repeated here:
+the per-cluster sample is the spread, and form 1, form 2 pooled per query and the cousin are withdrawn. What follows
+is what the measurement left open.
 
-Rule 1's derived ρ is reported about 2.3 times too narrow on iNaturalist (n = 2,048, 12 groups) and within 2 to 15%
-on yahoo, LAION and glove. This replay does three things, in this order:
+## 1. What is settled, and need not be run again
 
-1. **finds the cause** among the six of `CLAIMS.md` A4.2 (alignment with the cluster's own directions, a mean
-   error, a slope, correlated coded errors, heavy tails, the row's scale);
-2. **compares the widths** of A4 per (query, cluster): the derived ρ, A3, form 1, form 2, form 3's cap and its
-   sketch, the cousin of A4.6, against the actual rms;
-3. **replays the reader** at ψ = 4 and 5 with each width, for recall and rows.
-
-Datasets: iNaturalist, with yahoo and LAION as controls (the derived ρ is right there, and a width that costs rows
-on them is not acceptable). k = 10.
-
-Nothing in A4 has seen real data. What section 3 predicts comes from a constructed model (`out/a4_model.txt`).
-
-## 1. The dump
-
-An extension of `study_layered_dump`. For each query, the clusters in the library's own read order at ψ = ∞, the
-first 12 of them in full. Split files by dataset and query set so that none exceeds 100 MB.
-
-**Query sets** (100 each):
-
-- Q1: the dataset's queries;
-- Q2: corpus rows used as queries, each scored against its own cluster (the row itself left out) and the other
-  clusters of its group;
-- Q3: corpus rows scored against clusters of groups far from their own;
-- Q4: random unit directions.
-
-Q2 to Q4 exist only to separate the causes: an alignment effect is largest on Q2, near 1 on Q3 and below 1 on Q4.
-
-**Per (query, cluster):**
-
-| field | what |
+| question | answer, measured |
 |---|---|
-| `q`, `set`, `c`, `g`, `pos` | query, query set, cluster, group, position in the read order |
-| `mu`, `sigma16` | μ_c and the 16-direction σ_c(q), as the library computes them |
-| `sigma_exact` | the standard deviation of the cluster's rows' scores (optional; separates σ's error from form 1's) |
-| `that` | the running k-th best when the library reaches the cluster at ψ = ∞ |
-| per level ℓ in {16 B, 32 B}: `w` | ‖D_ℓΔ‖, the query's factor of the half-width (`dwa`) |
-| per level: `rho_g` | the group's derived ρ_(g,ℓ), and the per-level median the build uses |
-| per level: `a3` | √(Σ_i Δ_i²ν_i/(w²·‖a‖₁)), A3's factor, ν_i = D_i⁴·π_i from the plan |
-| per level: `cousin` | the cousin's spread √(T_U + T_C) of A4.6, and its two terms T_U and T_C |
+| is the derived ρ too narrow on iNaturalist? | by 1.29 at 12 groups and 2.04 at 1 group; about 1 on yahoo and LAION |
+| which spread works? | τ from a per-cluster sample scored exactly: actual over it 1.01 to 1.03 |
+| is the right spread enough? | no: the plain rule keeps 0.79 to 0.82 at ψ = 4 on every index |
+| how does a neighbour's error scale? | y = e/τ against x = (s − μ_c)/σ_c has slope 0.92 to 1.24 through the origin |
+| which width? | (ζ + ψ0·√f)·τ keeps 0.92 to 0.98 at ψ0 = 2, within 7% of the best in rows |
 
-**Per row of those clusters:**
+## 2. Checks on the dumps as they are
 
-| field | what |
-|---|---|
-| `s` | the exact score |
-| `vis` | visible or not, if a visible set is on |
-| per level: `a` | the midpoint the reader would use |
-| per level: `h` | the certified half-width's code term, w·u with the stored norm as the reader reads it |
-| per level: `hfull` | the whole certified half-width (with the fixed terms) |
-| `aR`, `sdR` | optional: the estimate and sd at the first randomised level where every block is coded |
+Each needs only columns the dump has (score, midpoint and half-width per level, cluster) and the 64-row sample per
+cluster. Five indexes; the 16 B and the 32 B level.
 
-**Per (cluster, level), once per index, from the rows' weighted errors ẽ = D⁻¹(r − r̂) in the group's coordinates:**
+**C1. The scatter.** For true neighbours, g = (e − m·x·τ)/(√f·τ), with m the index's fitted slope. Report its spread
+and its upper quantiles (90, 97.7, 99, 99.9%), against the normal's (1.28, 2.0, 2.33, 3.09) and the unit Laplace's
+(1.14, 2.18, 2.77, 4.39). Report the same by height (x in 0.5 to 2, 2 to 3, 3 to 4, above 4).
+*Claim tested* (A4.5 item 2): the spread is about 1 and the tail near-exponential.
+*Refuted if* the spread is outside 0.8 to 1.3, or the 99% point is under 2.4 on yahoo and LAION.
 
-| field | what |
-|---|---|
-| `cap` | √λ_max of the mean of ê·êᵀ over the cluster's rows, ê = ẽ/‖ẽ‖ (power iteration, 20 steps) |
-| `eig16` | optional: its top 17 eigenvalues and top 16 eigenvectors, for the sketch; then also per (query, cluster) the sketch's value √(Σ_(k≤16) λ_k(v_k·Δ̂)² + λ_17·(1 − Σ_(k≤16)(v_k·Δ̂)²)) |
+**C2. The bulk's correlation.** Per cluster, ρ̂_es = corr(e, s) over the 64 sampled rows. Report its median by index,
+beside √(1 − f) and the neighbours' slope m.
+*Claim tested* (A4.3 item 5): √(1 − f) < ρ_es < m, so the regression of e on s steepens into the tail.
+*Refuted if* ρ̂_es is within 0.1 of m (then a linear law is enough and ρ̂_es is the slope, free from the sample) or
+within 0.05 of √(1 − f).
 
-The study has the stored vectors and the codes, so it can form ẽ for every row; this is the only part that is not
-already in `study_layered_dump`, besides the query sets, `that`, `a3` and `cousin`.
+**C3. The slope of score on midpoint, by height.** Over all rows of the dumped clusters, the slope of s − μ_c on
+a − μ_c in bins of the midpoint's rank within its cluster: below the 90th percentile, 90 to 99, 99 to 99.9, above.
+*Claim tested* (A4.4 item 4): near 1 in the bulk (1.04 to 1.09) and rising towards 1/(1 − κ), κ = m·√(1 − f), at the top.
+*Refuted if* the slope in the top bin is within 0.1 of the bulk's on every index (then a and e are not tied
+through a common factor, and the efficient rule has no term in T beyond the bulk's 1 − 1/b).
 
-## 2. The analyses
+**C4. The kept share by cluster height.** For y = (ζ + ψ0·√f)·τ at ψ0 = 2, the share of neighbours kept in bins of
+their cluster's ζ (under 2, 2 to 3, 3 to 4, above 4).
+*Claim tested* (A4.5 item 1, A4.8): flat where the slope is 1; on iNaturalist falling with ζ, to about 0.75 to 0.87
+above 4.
+*Refuted if* it is flat on iNaturalist, or falls by more than 5 points on yahoo.
 
-All offline, in numpy, from the dump.
+**C5. The rules in rows, with the slope known.** Rows to stored vectors to keep 0.9 and 0.95 of the true ten, for
+y = (m′·ζ + ψ0·√f)·τ with m′ = 1; m′ = the index's fitted slope; m′ = ρ̂_es per cluster; and for κ = 1 − f and the plain
+rule as references. Also the kept share at ψ0 = 2 and 3 for each.
+*Claim tested* (A4.5 item 5): with the fitted slope the kept share at a given ψ0 is the same on the five indexes
+to within 2 points, at no more rows than m′ = 1.
+*Refuted if* the fitted slope does not bring iNaturalist's kept share at ψ0 = 2 to within 2 points of yahoo's, or
+costs more than 5% in rows at equal kept share.
 
-### 2.1 The cause
+**C6. The sample's size.** C5's first rule with 16, 32, 64 and 128 sampled rows, and with the statistics of all the
+cluster's rows as the reference.
+*Claim tested* (A4.7): the kept share at ψ0 = 2 loses about 2 points at 32 rows and 1 at 64 against exact
+statistics at ζ = 3, more for far clusters; ν² = (ζ²(1 − ρ_es²) + 1 + ψ0²f/2)/(m·f).
+*Refuted if* 32 rows lose under half a point or over 5.
 
-Per (query, cluster, level), over the cluster's rows:
+**C7. Visible sets.** C5's first rule under random-25, region-25 and the in-cluster top-25 and bottom-25 sets, with
+the sample drawn from the visible rows and the sample's mean of e added to the midpoint.
+*Claim tested* (A4.8): unchanged under random and region sets; over-covering under top-25; unknown under
+bottom-25.
+*Refuted if* the kept share at ψ0 = 2 under region-25 is more than 3 points under the unfiltered one.
 
-- R_all = the rms of (s − a)/h; and the same with `hfull`;
-- the mean and the standard deviation of s − a, and R_all with the mean removed;
-- the slope b of s on a, and ϑ = the squared correlation;
-- R_near = the rms of (s − a)/h over the rows with a + 4.5·R_all·h ≥ `that`;
-- the 99% and 99.9% points and the kurtosis of (s − a)/(R_all·h);
-- R_all within quintiles of the stored norm u = h/w.
+## 3. Checks that need more than the dump has
 
-Report medians and the 10th and 90th percentiles of each over (query, cluster), by dataset, query set and level,
-and R_all over `rho_g` in the same breakdown. Read the cause off the table of `CLAIMS.md` A4.2.
+**D1. κ_q.** Per (query, cluster, level), κ_q = Σ_i ρ_i·u_i·w_i/Σ_i u_i·w_i, with u = Vᵀ(q − αm_c), w = V⁻¹(q − αm_c) and ρ_i the
+share of coordinate i the level leaves out (1 if uncoded, ν_i/λ_i if coded). Then, per neighbour, r against κ_q,
+√(1 − f) and 1 − f: the three correlations, and the partial correlation of r with κ_q at a given f.
+*Claim tested* (A4.4): r follows κ_q.
+*Refuted if* the partial correlation is under 0.3 on yahoo and iNaturalist. Then the tendency r ≈ m·√(1 − f) stands
+as an empirical rule without this model, and A4.6 item 5 is dropped.
 
-### 2.2 The widths, per (query, cluster) and level
+**D2. The slope at build.** For 300 corpus rows per index used as queries, their true ten within their own group
+by brute force, and the slope of y on x fitted as for the test queries.
+*Claim tested* (A4.6 item 4): it reproduces the test queries' slope to within 0.1 on the four in-distribution
+indexes; on LAION it shows what images against images give, against 0.92 for text.
+*Refuted if* it is off by more than 0.15 on iNaturalist, where it matters.
 
-Each as a multiple of R_all, and of R_near:
+**D3. The randomised level as the sample.** For the sampled rows, the estimate a_R and sd_R at the first randomised
+level where every block is coded. Compare μ̂, σ̂², τ̂² and ρ̂_es from (a_R, v_R) by the identities of A4.7 with those
+from the exact scores, per cluster.
+*Claim tested*: the ratios have median 1 within 2%, and a spread larger than the exact sample's by the factor
+√(1 + 2v_R/τ² + v_R²/τ⁴).
+*Refuted if* τ̂² from the identity is low by more than 5% in the median (an uncoded block, or sd_R² used where v_R
+is meant), or the rows needed exceed twice the exact sample's.
 
-| width | how it is formed from the dump |
-|---|---|
-| derived | `rho_g` (the group's; and the per-level median, as built) |
-| A3 | `a3` |
-| form 1 | √max(`sigma16`² − Var(a), 0) over the rms of h, at the 16 B level; also with `sigma_exact` |
-| form 2 | in the read order of the query's clusters: ρ̂² = (m₀·ρ_g²·h̄² + Σ d²)/(m₀·h̄² + Σ h²) over the rows that would have gone on so far, d = s − a at the last deterministic level and d = a_32 − a_16 at the first; m₀ = 4 and 16; seeded by the 2k + 8 best midpoints of the first cluster; the value in force when each cluster is reached |
-| form 3 | `cap` |
-| the sketch | from `eig16` |
-| the cousin | `cousin`, and its safe version √T_U + √T_C |
+**D4. The cap.** λ_max of the second-moment matrix of the weighted errors' directions, per cluster and level, from
+the rows' weighted errors. Report the cap over the derived ρ by index.
+*Claim tested* (A4.2, A4.8): it is far above the derived ρ on iNaturalist (1.9 times or more in the constructed
+model) and within 1.4 on yahoo and LAION at 64 groups, so that it flags at build the indexes where the derived ρ
+and a slope of 1 fail.
+*Refuted if* it does not separate iNaturalist from the others.
 
-Report the median and the 10th and 90th percentiles of each ratio by dataset and query set. For form 2 report it
-by the cluster's position in the read order (1, 2, 3, 4 to 12).
+**D5. Glove.** The whole of section 2 on glove, whose scores are close to normal.
+*Claim tested* (A4.4): the neighbours' slope there is the bulk's ρ̂_es, well under 1.
+*Refuted if* the slope is near 1 on glove too. Then the slope does not come from a heavy-tailed shared component,
+and the model of A4.4 is wrong in its mechanism although the width stands.
 
-### 2.3 The reader, replayed
+## 4. How the results decide
 
-For each width, at ψ = 4 and ψ = 5, walk the query's clusters in the dumped order with the running k-th best taken
-from the rows the replay itself scores in full:
+- C1, C4 and C5 fix what ψ0 means and whether the fitted slope is worth carrying: if C5 passes, the width is
+  (m·ζ + ψ0·√f)·τ with m per index; if not, m = 1 and iNaturalist's dial is read 0.6 lower.
+- C2 and D2 decide where m comes from: the sample's correlation if C2 is refuted in the first sense, the build if D2
+  passes, otherwise a constant.
+- C6 and D3 decide what the sample costs: 64 rows at a randomised level if D3 passes, 64 stored vectors otherwise.
+- C3, D1 and D5 decide whether A4.4's model is the reason or only a description. Nothing built depends on them
+  except the per-query κ_q of A4.6.
+- C7 decides whether the width can be used under a visible set as it is.
+- D4 decides whether the build can warn.
 
-    first cluster: the 2k + 8 best midpoints at the 16 B level are scored in full (the reader's seed)
-    a row goes from the 16 B level to the 32 B level when min(a_16 + hfull_16, a_16 + ψ·ρ·h_16) ≥ t̂
-    and from the 32 B level to its stored vector when     min(a_32 + hfull_32, a_32 + ψ·ρ·h_32) ≥ t̂
-    ρ·h is replaced by the width's own spread where the width is not a multiple of h (form 1, the cousin)
+## 5. Limits
 
-Count, per query: the true neighbours found among the dumped clusters over the true neighbours that lie in them
-(the level's recall, which leaves the stop out of the question); rows at 32 B; stored vectors; bytes
-(18.5 per row at 16 B, 16.5 more at 32 B, 2n per vector). Add two references: certified widths (ρ = 1 in units of
-`hfull`), and the oracle width R_near per (query, cluster).
-
-Report, per dataset and width: level recall at ψ = 4 and 5, and bytes over the certified reader's. Then the same at
-equal level recall, by interpolating each width's own ψ from 3 to 7.
-
-## 3. What would refute each claim
-
-| claim | refuted if |
-|---|---|
-| the cause is alignment with the cluster's own directions (A4.2) | on iNaturalist R_all over the derived ρ is the same on Q2, Q3 and Q4 (within 15%); or it does not fall from the 16 B level to the 32 B level; or removing the mean of s − a brings it within 15% of 1 |
-| the cause is the slope | accepted in place of alignment if R_all is within 15% of the derived ρ while R_near is twice it and b exceeds 1.15 |
-| the cause is the tail | accepted if R_all is within 15% of the derived ρ and the 99.9% point of (s − a)/(R_all·h) exceeds 5 |
-| the derived ρ is right on the controls | R_all over the derived ρ lies outside 0.85 to 1.15 in the median on yahoo's or LAION's Q1 |
-| A3 corrects nothing of the alignment (A4.1, A4.2) | on iNaturalist's Q1 the median of A3 over R_all is above 0.8 (the model says about 1/2.3) |
-| form 1 is wide when b > 1 and ill-conditioned (A4.3) | its median over R_all is within 0.9 to 1.1 on all three datasets and under 5% of (query, cluster) pairs have σ̂² < Var(a) |
-| form 2 recovers from a wrong prior (A4.4) | on iNaturalist's Q1, from the third cluster on, its width is under 0.8 of R_near in more than 10% of (query, cluster) pairs; or its level recall at ψ = 4.5 is more than half a point under the certified reader's; or on a control it reads over 10% more bytes than the derived ρ at equal level recall |
-| form 3 bounds every query (A4.5) | any (query, cluster) has R_all above `cap` by more than 1% (that would be an error in the claim or in the dump, since the claim is an identity) |
-| form 3 is loose where the derived ρ is right | the median of `cap` over R_all is under 1.2 on the controls' Q1 (then the cap could be the width) |
-| the sketch is within 10% where the derived ρ fails | on iNaturalist's Q1 its median over R_all is above 1.2, or any pair has R_all above it by more than 1% |
-| the cousin is narrow where it is needed (A4.6) | on iNaturalist's Q1 its 10th percentile over R_all is above 0.9 |
-| a wide width is dear because the scores' tail is near-exponential (A4.7) | at ψ = 4.5 the rows at 32 B under a width F times R_near are within 20% of those under R_near for F = 1.6 |
-
-## 4. How the result decides
-
-- If the cause is not alignment, A4's forms 3, the sketch and the cousin do not apply, and form 2 still does: it
-  measures whatever the cause is. A mean error or a slope is better repaired in the estimate (subtract the mean; use
-  ā + b·(a − ā)) than in the width.
-- If form 2 passes its row of section 3 on iNaturalist and the controls, it is the width, with `cap` as its
-  ceiling.
-- If form 2 fails on the first clusters only, the sketch is the prior in place of the derived ρ.
-- If neither holds, the derived ρ stays where `cap` is within 1.4 times it, and the level keeps its certified width
-  elsewhere.
-
-## 5. Limits of this specification
-
-It replays two deterministic levels and the stored vector; the randomised levels enter only through the optional
-`aR` and `sdR`, for the identity of A4.4 item 4. It fixes the clusters to the library's read order, so it measures
-what a level loses and costs, not the stop. It uses 100 queries a set; a ratio's median is good to a few per cent
-and a level recall to about half a point.
+Everything in A4 that is called a model was computed on synthetic rows. The dumps hold the first 30 clusters and
+use the true 10th best as the threshold, so they measure what a level loses and passes, not the stop or the
+running threshold. 100 queries an index put about 1.5 points of noise on a kept share near 0.9 and half a point
+near 0.98.

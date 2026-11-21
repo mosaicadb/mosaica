@@ -319,3 +319,57 @@ Not done: the model has one covariance shape (a 1/i common spectrum, 8 own direc
 form 2 has one level and normal errors; no check of whether `det_alloc_tree` reconstructs uncoded coordinates as
 zero; nothing on the cost in rows of the drift term; iNaturalist's N, K and bits per level not looked up.
 
+## Entry 11. A4 rewritten after four rounds of measurement (the same day)
+
+The visit-order session measured the forms on its per-row dumps while I was writing, and the PI relayed the
+results in four messages, each overturning part of the one before. A4 in `CLAIMS.md` is rewritten around them; the
+first version is `out/CLAIMS_with_A4_first_version.md` and the first replay spec
+`out/REPLAY-SPEC-RHO_first_version.md`. I did not open the dump files (the limits say no real data). Numerics:
+`scripts/a4_select.py`, `a4_resemble.py`, `a4_width_noise.py`, synthetic, through `run-limited.sh 6 1 2`.
+
+**What I had wrong in the first version.**
+
+- I recommended form 2 pooled per query. It keeps 0.35 of the neighbours at one group. I had written that the
+  truth varies by cluster and then pooled over clusters anyway.
+- I treated the problem as the second moment of the error over a cluster's rows. That is the smaller half. With
+  the right spread the plain rule still loses a fifth of the neighbours at ψ = 4 on every index.
+- I had the slope of score on midpoint (1.04 to 1.09) as a side issue of form 2. It is the bulk's shadow of the
+  main effect: high in a cluster the slope is much larger.
+
+**What held.** Form 1's two faults (ill-conditioned with the rank-16 σ; wide by twice the covariance of midpoint
+and error) both showed up as predicted. The sampling error 1/√(2m) of a per-cluster spread matches the measured
+10% to 90% ranges to within a few points. The hypothesis of few groups for the dimension holds at 2,048
+dimensions.
+
+**How the main result was reached.**
+
+1. The PI's normal account (a neighbour is selected on its score, so its error carries the share (1 − f) of the
+   excess) is correct mathematics and predicts 0.98 kept where 0.81 is measured.
+2. The PI's mixture reading was refuted by the measurement before I had finished modelling it (r has one mode).
+3. The measurement that organises everything: among neighbours, e/τ against (s − μ_c)/σ_c has a slope near 1. I
+   first computed that a comonotone pair gives r = τ/(σ_a + τ) and thought the data exceeded even that; the mistake
+   was to take σ_c² = σ_a² + τ². With the session's definitions (f from the variances of e and s) the slope under a
+   linear law is simply the correlation of e with s, at most 1, equal to √(1 − f) when midpoint and error are
+   uncorrelated and to 1 when they move together. In factors it is the mean over the root mean square of the
+   shares the level leaves out. That one line says what "slope 1" means: the level leaves out about the same share
+   of everything that moves the score.
+4. A slope of 1.2, and a slope above the bulk's correlation (0.56 on yahoo from `layered.md`'s own figures), need a
+   regression that steepens: a heavy-tailed component shared by the midpoint and the error. The model of A4.4 has
+   one (the part of a neighbour's residual it shares with the query's offset), reproduces the features, and is too
+   kind by several points because its scatter is normal.
+5. The kept shares at ψ0 = 2 and 3 pin the scatter's tail: Laplace-like. With the slope, a Laplace scatter and the
+   noise of 64 sampled rows, the synthetic kept shares are 0.964 and 0.991 (slope 1) and 0.90 to 0.92 and 0.975 to
+   0.98 (slope 1.2); measured 0.964 to 0.976 and 0.981 to 0.992, and 0.918 and 0.975.
+6. Efficiency: the efficient rule is a threshold on the probability of beating t given the row. If the error is
+   independent of the midpoint that is the plain rule whatever the tails, so the measured saving from a term in T
+   on LAION rules independence out. Under a joint normal law the coefficient of T is 1 − 1/b; under A4.4 it is κ_q
+   and the efficient rule is the one with a stable dial.
+
+**Two turns that failed on the way.** I derived an "efficient slope below r" formula assuming the midpoints'
+density and the scores' density decay at one rate; in the comonotone model they do not, and the formula's
+dependence on T cancels exactly. I kept the cancelled version. And the independent-tails model cannot even reach
+f = 0.82 at the scores' tail rate, which I found only by running it.
+
+**Open, in order.** Whether r follows κ_q (D1 of the replay spec); the slope at build from corpus rows (D2); the
+randomised level as the sample (D3); visible sets (C7); glove as the control where the scores are normal (D5).
+
