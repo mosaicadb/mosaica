@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/rotonce/idx/laion-clip-512-normalized-7e6ef2c/encoded in 0.280s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.14, 0.19] (timed in 0.0s)
+[open] 0.450s in all: fit read 0.121s, key 0.011s, index opened 0.281s, repack timed 0.037s; anon 125 MB
+[approx] measured constants dir_us=0.48480319553708645 row_us_1=0.05745014980509579 row_us_4=0.06749283162745012 row_us_16=0.07110323355439109 row_us_64=0.047081448363937524 cl_us=6.707970386047815 cut_row_us_1=0.01765858273558485 cut_row_us_4=0.06152610697932318 cut_row_us_16=0.12923605147842865 cut_row_us_64=0.27773562099316124 cut_us=1.4150625 grp_us=35.379 sig_us=0.8948437499999999: read from /home/joe/code/vexact-data/rotonce/idx/laion-clip-512-normalized-7e6ef2c/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=192 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/rotonce/idx/laion-clip-512-normalized-7e6ef2c/encoded in 0.272s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.438s in all: fit read 0.118s, key 0.011s, index opened 0.272s, repack timed 0.037s; anon 249 MB
+[approx] measured constants dir_us=0.48480319553708645 row_us_1=0.05745014980509579 row_us_4=0.06749283162745012 row_us_16=0.07110323355439109 row_us_64=0.047081448363937524 cl_us=6.707970386047815 cut_row_us_1=0.01765858273558485 cut_row_us_4=0.06152610697932318 cut_row_us_16=0.12923605147842865 cut_row_us_64=0.27773562099316124 cut_us=1.4150625 grp_us=35.379 sig_us=0.8948437499999999: read from /home/joe/code/vexact-data/rotonce/idx/laion-clip-512-normalized-7e6ef2c/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=192 r_kappa=0.000

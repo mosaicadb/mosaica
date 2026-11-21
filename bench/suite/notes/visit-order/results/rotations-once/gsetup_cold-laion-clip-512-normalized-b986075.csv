@@ -1,0 +1,3 @@
+class,n,groups,ndl,cold,floor,one_total,one_basis,one_rest,post_inplace,rot_inplace,all_total,all_basis,all_post,all_rot,post_lib,post_fused,rot_own,rot_together
+item,512,64,2,1,10.762,30.281,15.863,14.342,4.650,9.636,26.940,15.475,4.598,6.486,3.936,3.552,8.320,6.905
+text,512,64,2,1,10.745,30.393,15.883,14.412,4.718,9.708,26.891,15.447,4.642,6.488,3.914,3.574,8.354,6.963

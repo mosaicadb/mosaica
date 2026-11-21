@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/rotonce/idx/arxiv-nomic-768-normalized-7e6ef2c/encoded in 0.488s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.14, 0.13, 0.06, 0.11, 0.15, 0.19] (timed in 0.0s)
+[open] 0.857s in all: fit read 0.306s, key 0.024s, index opened 0.489s, repack timed 0.037s; anon 242 MB
+[approx] measured constants dir_us=0.21693051418141354 row_us_1=0.07595372813060276 row_us_4=0.08338969180077596 row_us_16=0.09095249927326589 row_us_64=0.0847104791991734 cl_us=8.89754529288638 cut_row_us_1=0.018622478244700497 cut_row_us_4=0.05631556872192335 cut_row_us_16=0.09927819719229748 cut_row_us_64=0.1940829529247365 cut_us=1.53715625 grp_us=78.259 sig_us=1.10434375: read from /home/joe/code/vexact-data/rotonce/idx/arxiv-nomic-768-normalized-7e6ef2c/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=178 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/rotonce/idx/arxiv-nomic-768-normalized-7e6ef2c/encoded in 0.459s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.13, 0.15, 0.06, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.766s in all: fit read 0.245s, key 0.024s, index opened 0.460s, repack timed 0.037s; anon 491 MB
+[approx] measured constants dir_us=0.21693051418141354 row_us_1=0.07595372813060276 row_us_4=0.08338969180077596 row_us_16=0.09095249927326589 row_us_64=0.0847104791991734 cl_us=8.89754529288638 cut_row_us_1=0.018622478244700497 cut_row_us_4=0.05631556872192335 cut_row_us_16=0.09927819719229748 cut_row_us_64=0.1940829529247365 cut_us=1.53715625 grp_us=78.259 sig_us=1.10434375: read from /home/joe/code/vexact-data/rotonce/idx/arxiv-nomic-768-normalized-7e6ef2c/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=178 r_kappa=0.000

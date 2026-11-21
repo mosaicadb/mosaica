@@ -1,0 +1,37 @@
+inaturalist-resnet-2048-cosine: 250 clusters, 100 queries, k 10, 3 repetitions; A /home/joe/code/vexact-data/rotonce/idx/inaturalist-resnet-2048-cosine-b986075, B /home/joe/code/vexact-data/rotonce/idx/inaturalist-resnet-2048-cosine-b986075
+A: measured constants {'dir_us': 0.44546684994757973, 'row_us_1': 0.1277552273943577, 'row_us_4': 0.16185326761227245, 'row_us_16': 0.18863929232214985, 'row_us_64': 0.1646271296271023, 'cl_us': 7.845356759608564, 'cut_row_us_1': 0.0205521778550271, 'cut_row_us_4': 0.060539672769879316, 'cut_row_us_16': 0.09752355885058989, 'cut_row_us_64': 0.21509692908669434, 'cut_us': 1.7026875, 'grp_us': 840.271, 'sig_us': 2.4165312500000002, 'rule': (85, 0.0), 'plan_rule': (64, 0.186)}
+B: measured constants {'dir_us': 0.44546684994757973, 'row_us_1': 0.1277552273943577, 'row_us_4': 0.16185326761227245, 'row_us_16': 0.18863929232214985, 'row_us_64': 0.1646271296271023, 'cl_us': 7.845356759608564, 'cut_row_us_1': 0.0205521778550271, 'cut_row_us_4': 0.060539672769879316, 'cut_row_us_16': 0.09752355885058989, 'cut_row_us_64': 0.21509692908669434, 'cut_us': 1.7026875, 'grp_us': 840.271, 'sig_us': 2.4165312500000002, 'rule': (85, 0.0), 'plan_rule': (64, 0.186)}
+none       A:exact-knn          k=10: 0.999   336594 rows  11961.5 us
+none       A:exact-thr@0.0001   psi=inf: 0.997        0 rows  11275.7 us
+none       A:exact-thr@0.01     psi=inf: 1.000        0 rows  19604.7 us
+none       A:exact-thr@0.1      psi=inf: 1.000        0 rows  33215.5 us
+none       A:adaptive           psi=5: 0.966    40050 rows   3039.3 us
+none       B:exact-knn          k=10: 0.999   336594 rows  11675.8 us
+none       B:exact-thr@0.0001   psi=inf: 0.997        0 rows  11028.5 us
+none       B:exact-thr@0.01     psi=inf: 1.000        0 rows  19143.1 us
+none       B:exact-thr@0.1      psi=inf: 1.000        0 rows  32757.5 us
+none       B:adaptive           psi=5: 0.966    40050 rows   2903.8 us
+random-1   A:exact-knn        k=10: 1.000        0 rows    767.0 us
+random-1   A:exact-thr@0.01   psi=inf: 1.000        0 rows    764.9 us
+random-1   A:adaptive         psi=5: 0.993      886 rows    279.3 us
+random-1   B:exact-knn        k=10: 1.000        0 rows    756.6 us
+random-1   B:exact-thr@0.01   psi=inf: 1.000        0 rows    755.4 us
+random-1   B:adaptive         psi=5: 0.993      886 rows    270.2 us
+random-25  A:exact-knn        k=10: 0.997    92649 rows  11675.1 us
+random-25  A:exact-thr@0.01   psi=inf: 0.999        0 rows  16211.9 us
+random-25  A:adaptive         psi=5: 0.995    12532 rows   1658.6 us
+random-25  B:exact-knn        k=10: 0.997    92649 rows  11444.5 us
+random-25  B:exact-thr@0.01   psi=inf: 0.999        0 rows  16046.8 us
+random-25  B:adaptive         psi=5: 0.995    12532 rows   1636.2 us
+region-1   A:exact-knn        k=10: 0.999        0 rows    416.0 us
+region-1   A:exact-thr@0.01   psi=inf: 0.999        0 rows    417.6 us
+region-1   A:adaptive         psi=5: 0.925     2709 rows    334.7 us
+region-1   B:exact-knn        k=10: 0.999        0 rows    415.9 us
+region-1   B:exact-thr@0.01   psi=inf: 0.999        0 rows    412.4 us
+region-1   B:adaptive         psi=5: 0.925     2709 rows    328.6 us
+region-25  A:exact-knn        k=10: 1.000   105474 rows  11115.2 us
+region-25  A:exact-thr@0.01   psi=inf: 0.999        0 rows  12958.5 us
+region-25  A:adaptive         psi=5: 0.963    16012 rows   2044.7 us
+region-25  B:exact-knn        k=10: 1.000   105474 rows  10876.9 us
+region-25  B:exact-thr@0.01   psi=inf: 0.999        0 rows  12666.2 us
+region-25  B:adaptive         psi=5: 0.963    16012 rows   1987.8 us
