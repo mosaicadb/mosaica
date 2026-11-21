@@ -646,17 +646,12 @@ pub struct IntDet {
 
 impl CQ2 {
     /// The deterministic levels read at the W2 width for `psi`: min(1, psi tau / (dwa_l sqrt U)) of each upper
-    /// half-width, tau^2 = a'Ma + gamma max(0, T_l - a'Na) from cluster ci's stored forms (`wrule::WForms`), `a` its
-    /// coefficients on its order directions and `t` its group's T = D'GD per level.
-    pub fn set_w2(&mut self, ix: &Index2, ci: usize, psi: f64, a: &[f32], t: &[f64]) {
+    /// half-width (`wrule::factor`), `tau2` cluster ci's predicted spread squared per level (`w2_tau2`).
+    pub fn set_w2(&mut self, ix: &Index2, ci: usize, psi: f64, tau2: &[f64]) {
         let ndl = ix.meta.ndl();
         let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
-        let rp = wf.r * (wf.r + 1) / 2;
-        for (l, &tl) in t.iter().enumerate().take(ndl) {
-            let rec = wf.of(ndl, ci, l);
-            let (gamma, u) = (rec[2 * rp] as f64, rec[2 * rp + 1] as f64);
-            let tau2 = super::wrule::packed_quad(&rec[..rp], a) + gamma * (tl - super::wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0);
-            self.ddial[l] = super::wrule::factor(psi, tau2, self.dwa[l] as f64, u);
+        for (l, &t2) in tau2.iter().enumerate().take(ndl) {
+            self.ddial[l] = super::wrule::factor(psi, t2, self.dwa[l] as f64, wf.u(ndl, ci, l));
         }
     }
 
@@ -1181,6 +1176,26 @@ unsafe fn push_rows(v: &mut Vec<u32>, idx: *const u32, m: u16, r0: u32) {
 
 /// Blocks ahead whose codes are prefetched on the aligned path.
 const PF: usize = 8;
+
+/// Cluster ci's W2 spread squared at each deterministic level, with the centre's term taken off as the reader's
+/// estimate takes it (`wrule`): `qv` the query in its group's basis (`GQ2::qv`), `alr` the cluster's centre coefficient
+/// for the query (`CQ2::alr`), `a` the query's coefficients on the cluster's order directions; a' = a - alr P'm (P'm
+/// stored, `WForms::pm`), D' = (qv - alr mv) d_l (mv the stored `Cl2::mv32`), T' = D'GD', and tau^2 from a' and T'
+/// (`WForms::tau2`).
+pub fn w2_tau2(ix: &Index2, ci: usize, qv: &[f64], alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
+    let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
+    let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+    let pm = &wf.pm[ci * wf.r..(ci + 1) * wf.r];
+    let a: Vec<f32> = a.iter().zip(pm).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
+    let (mv, gp) = (&ix.cl[ci].mv32, &ix.groups[g]);
+    let mut tau2 = [0f64; NDL_MAX];
+    for (l, x) in tau2.iter_mut().enumerate().take(ndl) {
+        let (gd, dl) = (wf.gdiag(n, ndl, g, l), &gp.d[l]);
+        let t: f64 = (0..n).map(|j| ((qv[j] - alr * mv[j] as f64) * dl[j] as f64).powi(2) * gd[j] as f64).sum();
+        *x = wf.tau2(ndl, ci, l, &a, t);
+    }
+    tau2
+}
 
 /// Row `row`'s stored norm at deterministic level l, in cluster ci: pconst_l s ntab_l[code] (s the row's scale), or its
 /// escaped value (code 15). The row's half-width there is dwa_l times this (`CQ2::dwa`) plus the fixed terms.
@@ -3944,8 +3959,6 @@ pub struct KnnReader<'a> {
     width: Option<f64>,
     /// the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
     pub coef: Option<Vec<f32>>,
-    /// per group, T = D'GD at each deterministic level once the group is first read
-    wt: Vec<Option<[f64; NDL_MAX]>>,
     pub st: Stats,
 }
 
@@ -3953,7 +3966,7 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, wt: Vec::new(), st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, st }
     }
 
     /// The reader with each cluster's deterministic levels on the index path read at its W2 width for `psi` (at least
@@ -3964,26 +3977,13 @@ impl<'a> KnnReader<'a> {
         self
     }
 
-    /// Cluster ci's W2 width on `cq` (its group's setup `gq`): its coefficients a on its order directions (given by
-    /// the caller, else computed as its sigma computes them), and its group's T at each level (once per group).
+    /// Cluster ci's W2 width on `cq` (its group's setup `gq`), from its coefficients on its order directions (given by
+    /// the caller, else computed as its sigma computes them; `w2_tau2`).
     fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<Vec<f32>>) {
-        let (ix, pr) = (self.ix, self.pr);
-        let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
-        let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
-        let a = coef.unwrap_or_else(|| ix.order.as_ref().unwrap().coefs_of(ci, n, &pr.q32));
-        if self.wt.is_empty() {
-            self.wt = vec![None; ix.groups.len()];
-        }
-        let t = *self.wt[g].get_or_insert_with(|| {
-            let gp = &ix.groups[g];
-            let mut t = [0f64; NDL_MAX];
-            for (l, x) in t.iter_mut().enumerate().take(ndl) {
-                let gd = wf.gdiag(n, ndl, g, l);
-                *x = (0..n).map(|j| (gq.qv[j] * gp.d[l][j] as f64).powi(2) * gd[j] as f64).sum();
-            }
-            t
-        });
-        cq.set_w2(ix, ci, psi, &a, &t);
+        let ix = self.ix;
+        let a = coef.unwrap_or_else(|| ix.order.as_ref().unwrap().coefs_of(ci, ix.n(), &self.pr.q32));
+        let tau2 = w2_tau2(ix, ci, &gq.qv, cq.alr as f64, &a);
+        cq.set_w2(ix, ci, psi, &tau2);
     }
 
     /// The visible rows of [a, b), from the sorted list.

@@ -3,22 +3,24 @@
 //!
 //! Notation (the theory session's): at level l of group g a row's error vector in the group's weighted coordinates is
 //! u = (z - s sig val_l) / d_l (z the row in the group's basis, s its scale, val_l the level's decoded value), as the
-//! encoder computes it (`encode_cluster`), so a query with D = (V_q^T q) d_l has the error D.u. S_c = mean u u' over cluster c's rows
-//! (uncentred), G the group's diagonal of it over all its rows. p_j are the cluster's r order directions (int8 rows
+//! encoder computes it (`encode_cluster`). The reader's estimate takes off the cluster's centre term (alr times the
+//! centre m, `CQ2::alr`), so its error on a query is D.u with D = (V_q^T q - alr mv) d_l, mv = V_q^T m (`Cl2::mv32`).
+//! S_c = mean u u' over cluster c's rows (uncentred), G the group's diagonal of it over all its rows. p_j are the cluster's r order directions (int8 rows
 //! times their scales, as the order state holds them) and b_j = (V_q^T p_j) d_l their images; B~ = B (P'P)^-1, so that
-//! B~ a is the image of the query's part in the directions' span, a = P'q the coefficients the reader holds. Stored per
-//! cluster and level: M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed), gamma = tr(S_c outside span B) /
-//! tr(G outside span B) (the complement orthogonal in these coordinates), and U = mean over the cluster's rows of the
-//! squared stored norm (`q::det_norm`, the code term of the row's half-width per unit of `CQ2::dwa`). At query time
-//! tau^2 = a'Ma + gamma max(0, T - a'Na), T = D'GD, and the level reads at psi tau / (dwa sqrt U) of each row's
-//! half-width (at most the certified width).
+//! B~ a is the image of a vector's part in the directions' span, a = P'x its coefficients. Stored per cluster and level:
+//! M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed), gamma = tr(S_c outside span B) / tr(G outside span B)
+//! (the complement orthogonal in these coordinates), and U = mean over the cluster's rows of the squared stored norm
+//! (`q::det_norm`, the code term of the row's half-width per unit of `CQ2::dwa`); per cluster, P'm. At query time
+//! a = P'q - alr P'm (the coefficients the reader holds, less the centre's), T = D'GD, tau^2 = a'Ma + gamma max(0, T -
+//! a'Na) (`WForms::tau2`), and the level reads at psi tau / (dwa sqrt U) of each row's half-width (at most the certified
+//! width).
 
 use super::q::*;
 use super::*;
 
-/// The files of a saved index that hold the forms: per group and level G (n values), and per cluster and level the
-/// record `WForms::rec`.
-pub const FILES: [&str; 2] = ["wrule_g.bin", "wrule_c.bin"];
+/// The files of a saved index that hold the forms: per group and level G (n values), per cluster and level the record
+/// `WForms::rec`, and per cluster P'm (r values).
+pub const FILES: [&str; 3] = ["wrule_g.bin", "wrule_c.bin", "wrule_p.bin"];
 
 /// The stored forms of an index whose clusters hold `r` order directions.
 pub struct WForms {
@@ -27,6 +29,8 @@ pub struct WForms {
     pub g: Vec<f32>,
     /// per cluster and level, M and N packed (upper triangle, row by row), gamma and U (k x ndl x `rec(r)`)
     pub c: Vec<f32>,
+    /// per cluster, its centre's coefficients on its order directions, P'm (k x r, `OrderState::coefs_of`)
+    pub pm: Vec<f32>,
 }
 
 impl WForms {
@@ -41,6 +45,18 @@ impl WForms {
         &self.c[(ci * ndl + l) * w..(ci * ndl + l + 1) * w]
     }
 
+    /// Cluster ci's predicted spread squared at level l for the coefficients `a` (r values, the centre's taken off) and
+    /// T: a'Ma + gamma max(0, T - a'Na).
+    pub fn tau2(&self, ndl: usize, ci: usize, l: usize, a: &[f32], t: f64) -> f64 {
+        let (rec, rp) = (self.of(ndl, ci, l), self.r * (self.r + 1) / 2);
+        packed_quad(&rec[..rp], a) + rec[2 * rp] as f64 * (t - packed_quad(&rec[rp..2 * rp], a)).max(0.0)
+    }
+
+    /// Cluster ci's mean squared stored row norm at level l, U.
+    pub fn u(&self, ndl: usize, ci: usize, l: usize) -> f64 {
+        self.of(ndl, ci, l)[self.r * (self.r + 1) + 1] as f64
+    }
+
     /// Group g's G at level l.
     pub fn gdiag(&self, n: usize, ndl: usize, g: usize, l: usize) -> &[f32] {
         &self.g[(g * ndl + l) * n..(g * ndl + l + 1) * n]
@@ -49,10 +65,10 @@ impl WForms {
     /// Whether the forms fit an index of `ng` groups and `k` clusters at `ndl` levels of `n` dimensions, every value
     /// finite: what a build must make and an open must find.
     pub fn check(&self, ng: usize, k: usize, ndl: usize, n: usize) -> Result<(), String> {
-        if self.g.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) {
-            return Err(format!("{} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1]));
+        if self.g.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) || self.pm.len() != k * self.r {
+            return Err(format!("{}, {} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1], FILES[2]));
         }
-        match self.g.iter().chain(&self.c).position(|x| !x.is_finite()) {
+        match self.g.iter().chain(&self.c).chain(&self.pm).position(|x| !x.is_finite()) {
             Some(i) => Err(format!("the W2 forms hold a value that is not a number (at {i})")),
             None => Ok(()),
         }
@@ -248,7 +264,8 @@ pub struct Summed {
 
 /// The forms of `ix` (which holds stored vectors and the order state) from each cluster's sums (`Sums`, taken as it was
 /// encoded): M and the traces of S_c from them, G over each group's rows, then N and gamma from G (B~ and Q formed
-/// again from the order state, one product per cluster, rather than all clusters' kept), and U from the stored norms.
+/// again from the order state, one product per cluster, rather than all clusters' kept), U from the stored norms, and
+/// P'm.
 pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
     use rayon::prelude::*;
     let (n, ndl, k, ng) = (ix.n(), ix.meta.ndl(), ix.k(), ix.groups.len());
@@ -290,7 +307,9 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
         }
         out
     }).collect();
-    WForms { r, g: g.iter().map(|&x| x as f32).collect(), c: recs.concat() }
+    let st = ix.order.as_ref().unwrap();
+    let pm = (0..k).flat_map(|c| st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])).collect();
+    WForms { r, g: g.iter().map(|&x| x as f32).collect(), c: recs.concat(), pm }
 }
 
 #[cfg(test)]
