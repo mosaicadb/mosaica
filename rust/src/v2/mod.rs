@@ -1884,7 +1884,6 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], kx: f64, x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
     assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
-    assert!(mn <= crate::index::CENTRE_NORM_MAX, "a cluster centre has norm {mn}, above {}: the vectors are not normalised; refit from normalised vectors", crate::index::CENTRE_NORM_MAX);
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
     // mv = V_q^T m
     let mut mv = vec![0f64; n];
@@ -2402,6 +2401,10 @@ fn prepare_with(dir: &str, o: &BuildOptions, anchors: Option<&Option<Vec<f64>>>)
         p.cstart.truncate(kk + 1);
         p.grp.truncate(kk);
         p.centres.truncate(kk * n);
+    }
+    let cmax = crate::index::CENTRE_NORM_MAX;
+    if let Some((c, mn)) = p.centres.chunks(p.meta.n).map(|m| m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt()).enumerate().find(|x| !(x.1 <= cmax)) {
+        return Err(format!("cluster {c}'s centre has norm {mn}, above the {cmax} the key's error bound covers: the mean of normalised vectors stays near 1, and only the centre's int8 quantisation carries it past; normalise the vectors and refit"));
     }
     let ppath = o.profile.clone().unwrap_or(format!("{dir}/profile.npy"));
     let prof = crate::util::try_read_npy(&ppath)?.f64s();

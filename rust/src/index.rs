@@ -4,8 +4,9 @@ use crate::util::*;
 /// The stored key's error bound: half its step, plus the f32 evaluation of m . r from it (q::cluster_q2w's fixed
 /// term), within 4 u (1 + |m|) |m| for u = 2^-24, which 5e-7 covers while |m| <= CENTRE_NORM_MAX.
 pub const DA: f64 = 0.5 / 32767.0 + 5e-7;
-/// The largest centre norm DA covers; the build refuses a larger one (a fit of normalised vectors has |m| <= 1 up to
-/// their f16 rounding).
+/// The largest centre norm DA covers; the build refuses a larger one. The mean of normalised vectors has norm at most
+/// 1, and the fit's int8 quantisation of it (one scale per centre) can carry it past 1, by more as n grows (about
+/// 1.02 at n = 768 and 1.09 at n = 4096 at worst; real fits stay below 1).
 pub const CENTRE_NORM_MAX: f64 = 1.09;
 
 /// The stored key of a row whose x . mhat the build computes as `a`, and how far `a` lies outside [-1, 1], where the
