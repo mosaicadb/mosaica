@@ -2004,6 +2004,25 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
     [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
 }
 
+/// Each deterministic level's rho is a participation ratio of its n weighted coordinates, so between 1 / sqrt(n) (the
+/// terms equal) and 1 (one term); the approximate k-NN reads a level at min(1, psi rho) of its half-width, and at
+/// the certified width when psi is infinite.
+#[test]
+fn the_levels_statistical_width_is_a_participation_ratio() {
+    let ix = &fixture().ix;
+    let n = ix.n() as f32;
+    for gp in ix.groups.iter().filter(|gp| gp.cal.is_some()) {
+        for &r in &gp.rho[..ix.meta.ndl()] {
+            assert!(r >= (1.0 - 1e-5) / n.sqrt() && r <= 1.0 + 1e-6, "rho {r} at n {n}");
+        }
+    }
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    assert!(ad.dial(f64::INFINITY).iter().all(|&d| d == 1.0));
+    let (lo, hi) = (ad.dial(1.0), ad.dial(4.0));
+    assert_eq!(lo.len(), ix.meta.nl());
+    assert!(lo.iter().zip(&hi).all(|(&a, &b)| a > 0.0 && a <= b && b <= 1.0), "{lo:?} {hi:?}");
+}
+
 /// The approximate k-NN returns k visible items (each once, with its own score) whenever k are visible, under the
 /// default plan (every query the exact one: the planner scans synth4k first) and under the probe plan; the exact
 /// query's answer when psi is infinite and on every path but a probe, and the exact query's rows touched.

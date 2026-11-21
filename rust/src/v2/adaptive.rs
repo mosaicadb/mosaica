@@ -549,6 +549,10 @@ pub struct Adaptive {
     low: Vec<f64>,
     /// the pooled within-cluster covariance, whose share of its trace along the query scales the stream's radii
     pooled: super::order::Pooled,
+    /// per level, the spread of a row's error as a share of its certified half-width: each deterministic level's median
+    /// over the groups of `GroupPlan2::rho`, and the randomised levels the last deterministic level's; k-NN at psi
+    /// reads each level at psi rho of its half-width (at most the certified width)
+    rho: Vec<f64>,
 }
 
 /// Per cluster, the path a threshold query reads it on and its cost, as k-NN prices it: the index path at the rows
@@ -605,7 +609,20 @@ impl Adaptive {
         let low = (0..ix.k()).map(|c| st.lam[c * r..(c + 1) * r].iter().fold(rest[c], |a, &l| a.min(l as f64)) * (1.0 - 1e-9)).collect();
         let sizes: Vec<usize> = ix.cl.iter().map(|c| c.r1 - c.r0).collect();
         let pooled = super::order::Pooled::new(&st, &sizes, ix.n());
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled })
+        let (nl, ndl) = (ix.meta.nl(), ix.meta.ndl());
+        let mut rho: Vec<f64> = (0..ndl).map(|l| {
+            let mut r: Vec<f64> = ix.groups.iter().filter(|gp| gp.cal.is_some()).map(|gp| gp.rho[l] as f64).collect();
+            r.sort_by(f64::total_cmp);
+            r.get(r.len() / 2).copied().unwrap_or(1.0)
+        }).collect();
+        rho.resize(nl, rho.last().copied().unwrap_or(1.0));
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, rho })
+    }
+
+    /// Each level's factor on its half-width for a query at psi (`Prep2::dial`): min(1, psi rho_l); 1 (certified) at
+    /// psi infinite.
+    pub fn dial(&self, psi: f64) -> Vec<f32> {
+        self.rho.iter().map(|&r| if psi.is_finite() { (psi * r).min(1.0) as f32 } else { 1.0 }).collect()
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -710,7 +727,8 @@ impl Adaptive {
             o.st.touched = o.st.touched.max(o.st.full_reads);
             return (o, info);
         }
-        let pr = prep2(ix, q);
+        let mut pr = prep2(ix, q);
+        pr.dial = self.dial(psi);
         let mut st = Stats::new(nl);
         if nvis <= kk {
             info.path = "scan";
