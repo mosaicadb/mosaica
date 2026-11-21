@@ -3732,7 +3732,9 @@ fn study_count_model() {
 /// prefix: `.clu` (per query, K records of 4 f32: mu, sigma, order key, stream key), `.idx` (per query, M records of 2
 /// u32: cluster, visible rows; a cluster of u32::MAX pads a query with fewer live clusters), `.rows` (per row, 5 + 2
 /// levels words: entity u32, then f32 exact score, key, key interval lo and hi, each level's lo and hi), `.kst` (per
-/// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text).
+/// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text; with each group's derived rho per
+/// deterministic level, `GroupPlan2::rho`, and per randomised level its certified constant `csgl` and its blocks'
+/// `rates`).
 #[test]
 #[ignore]
 fn study_layered_dump() {
@@ -3757,7 +3759,7 @@ fn study_layered_dump() {
     let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
     let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
-    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows)).unwrap();
+    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\nrho {:?}\ncsgl {:?}\nrates {:?}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows, ix.groups.iter().map(|gp| gp.rho[..ix.meta.ndl()].to_vec()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.csgl.clone()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.rates.iter().map(|r| r.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>())).unwrap();
     let kst: Vec<f32> = (0..k).flat_map(|c| {
         let cl = &ix.cl[c];
         let nr = (cl.r1 - cl.r0).max(1) as f64;
