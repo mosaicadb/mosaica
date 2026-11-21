@@ -2516,6 +2516,73 @@ fn the_constants_change_the_answer_only_through_a_sigma_and_the_moments() {
     assert!(both > 0 && index > 0, "{both} probes compared, {index} clusters on the index path");
 }
 
+/// A group's rotations wait until one of its clusters first reaches a randomised level, and are then done for every
+/// group set up and not yet rotated: every query answers (scores to the bit) and works (counters, reads, paths,
+/// modelled costs) exactly as when each group is rotated at its setup and each cluster takes its randomised levels'
+/// inputs when opened. On synth4k under every visible set of the fixture: approximate k-NN at every psi with the index
+/// path at its fixed cost and cheap; exact k-NN (seed, threshold sweep on worker threads, the refiner) at k 1, 10 and
+/// 100 and exact threshold queries, under the default plan and the index path's. A read of a randomised level's inputs
+/// before they are in meets NaN bounds or a short weight vector, so it shows here as different work or a panic. Some
+/// approximate queries set up groups whose clusters reach no randomised level and some reach one, so both the rotation
+/// skipped and the rotation done late are compared.
+#[test]
+fn rotations_when_first_read_change_nothing() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let f = fixture();
+    let ix = &f.ix;
+    let ndl = ix.meta.ndl();
+    let counts = |st: &crate::kernel::Stats| format!("t{} f{} ri{} ro{} co{} ci{} cout{} cnv{} g{} ef{} enter{:?} in{:?} out{:?} b{:?} c{:?} {:?}",
+        st.touched, st.full_reads, st.range_in, st.range_out, st.clusters_open, st.clusters_in, st.clusters_out, st.clusters_novis,
+        st.groups, st.exact_fallbacks, st.enter, st.dec_in, st.dec_out, st.blocks, &st.cyc[C_TABLES..=C_TSMALL], &st.cyc[C_SPREADS..=C_VISITED]);
+    let ents = |e: &[(f64, u32)]| e.iter().map(|x| format!("{}:{:016x}", x.1, x.0.to_bits())).collect::<Vec<_>>().join(",");
+    // each query run with rotations at setup, then when first read
+    let both = |run: &dyn Fn() -> (String, crate::kernel::Stats)| {
+        ROTATE_AT_SETUP.store(true, Relaxed);
+        let a = run();
+        ROTATE_AT_SETUP.store(false, Relaxed);
+        (a, run())
+    };
+    let (mut skipped, mut reached) = (0, 0);
+    let ads = [fixed_costs(), cheap_index(fixed_costs())].map(|m| adaptive::Adaptive::new(ix, m).unwrap());
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            for (ai, ad) in ads.iter().enumerate() {
+                for psi in PSIS {
+                    let ((a, _), (b, st)) = both(&|| {
+                        let (out, info) = ad.knn(ix, q, 10, vis.as_ref(), psi, probe_plan());
+                        (format!("{} | {} | {info:?}", ents(&out.ents), counts(&out.st)), out.st)
+                    });
+                    assert_eq!(a, b, "approximate k-NN, costs {ai}, query {qi}, set {sname}, psi {psi}");
+                    if st.groups > 0 {
+                        if st.enter[ndl] > 0 { reached += 1 } else { skipped += 1 }
+                    }
+                }
+            }
+            for (pi, plan) in [Plan::default(), probe_plan()].into_iter().enumerate() {
+                for kk in [1, 10, 100] {
+                    let ((a, _), (b, _)) = both(&|| {
+                        let o = knn2(ix, q, kk, vis.as_ref(), plan);
+                        (format!("{} | {}", ents(&o.ents), counts(&o.st)), o.st)
+                    });
+                    assert_eq!(a, b, "exact k-NN, plan {pi}, query {qi}, set {sname}, k {kk}");
+                }
+                for th in thresholds(&truth(ix, q, bm.as_ref())) {
+                    let ((a, _), (b, _)) = both(&|| {
+                        let pr = prep2(ix, q);
+                        let o = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+                        let mut rows = o.rows.clone();
+                        rows.sort_unstable();
+                        (format!("{rows:?} | {}", counts(&o.st)), o.st)
+                    });
+                    assert_eq!(a, b, "exact threshold, plan {pi}, query {qi}, set {sname}, t {th}");
+                }
+            }
+        }
+    }
+    assert!(skipped > 0 && reached > 0, "{skipped} queries set up groups and reached no randomised level, {reached} reached one");
+}
+
 /// `m` with the index path and its groups cheap.
 fn cheap_index(m: adaptive::Measured) -> adaptive::Measured {
     adaptive::Measured { cl_us: 0.01, cut_row_us: [1e-4; 4], cut_us: 1e-4, grp_us: 0.01, ..m }

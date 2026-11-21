@@ -999,6 +999,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             for g in 0..ix.groups.len() {
                 get_gq2(ix, &pr, g, &mut st);
             }
+            get_rot(ix, &pr, pr.gq[0].get().unwrap(), &mut st);
             tg.push(t.ms());
             let t = Timer::new();
             let mut qv = vec![0f64; ix.n()];
@@ -1026,7 +1027,12 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             }
             trot.push(t.ms());
             let t = Timer::new();
-            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, pr.qm(ix, ci))).collect();
+            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| {
+                let gq = pr.gq[ix.cl[ci].g].get().unwrap();
+                let mut cq = cluster_q2(ix, ci, gq, &pr, pr.qm(ix, ci));
+                cq.enter_rand(ix, ci, gq, &pr, &mut st);
+                cq
+            }).collect();
             tc.push(t.ms());
             let t = Timer::new();
             for (ci, cq) in cqs.iter_mut().enumerate() {
@@ -1051,7 +1057,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             }
             tw.push(t.ms() * 1e6 / nu as f64);
         }
-        out!("setup2 {cls} (1 thread, {} groups, {} clusters): group setup {:.2} ms (int8 basis products alone, warm {:.2} ms; rotations alone {:.2} ms), cluster setup {:.2} ms ({:.2} us each), all tables of every cluster and level {:.2} ms ({:.2} us per cluster; warm {:.1} ns per unit)",
+        out!("setup2 {cls} (1 thread, {} groups, {} clusters): group setup with every group's rotations in one pass {:.2} ms (int8 basis products alone, warm {:.2} ms; rotations alone {:.2} ms), cluster setup {:.2} ms ({:.2} us each), all tables of every cluster and level {:.2} ms ({:.2} us per cluster; warm {:.1} ns per unit)",
             ix.groups.len(), ix.k(), median(&tg), median(&tq), median(&trot), median(&tc), median(&tc) * 1e3 / ix.k() as f64, median(&tl), median(&tl) * 1e3 / ix.k() as f64, median(&tw));
     }
 }
@@ -1163,85 +1169,6 @@ fn post_fused_any(gp: &GroupPlan2, n: usize, ndl: usize, qv: &[f64]) -> Post {
     }
 }
 
-/// One output of `matvec64` (the AVX-512 one: two 8-lane sums over 16 columns at a time, one more 8-column step into
-/// the first, their reduction, then the remaining columns in order).
-#[cfg(target_feature = "avx512f")]
-#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
-unsafe fn row64(row: &[f64], x: &[f64]) -> f64 {
-    use core::arch::x86_64::*;
-    let n = x.len();
-    let row = row.as_ptr();
-    let (mut s0, mut s1) = (_mm512_setzero_pd(), _mm512_setzero_pd());
-    let mut i = 0;
-    while i + 16 <= n {
-        s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
-        s1 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i + 8)), _mm512_loadu_pd(x.as_ptr().add(i + 8)), s1);
-        i += 16;
-    }
-    while i + 8 <= n {
-        s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
-        i += 8;
-    }
-    let mut v = _mm512_reduce_add_pd(_mm512_add_pd(s0, s1));
-    while i < n {
-        v += *row.add(i) * x[i];
-        i += 1;
-    }
-    v
-}
-
-/// One output of `matvec64` (the AVX2 one is `dot64v` per row).
-#[cfg(not(target_feature = "avx512f"))]
-unsafe fn row64(row: &[f64], x: &[f64]) -> f64 {
-    dot64v(row, x)
-}
-
-/// Each group's rotated weights and their |.| sums as `group_q2r` computes them, one group after another (each group
-/// reads every rotation): wq[n..] and l1j per group.
-fn rot_own(ix: &Index2, xs: &[&[f64]]) -> Vec<(Vec<f32>, [f64; J])> {
-    let n = ix.n();
-    xs.iter().enumerate().map(|(g, qvt_pos)| {
-        let gp = &ix.groups[g];
-        let mut w = vec![0f32; n];
-        let mut l1j = [0f64; J];
-        for j in 0..J {
-            let nbj = gp.nb[j];
-            let mut y = vec![0f64; nbj];
-            unsafe { matvec64(&ix.rots[j], &qvt_pos[gp.boff[j]..gp.boff[j + 1]], &mut y) };
-            for a in 0..nbj {
-                w[gp.boff[j] + a] = y[a] as f32;
-                l1j[j] += y[a].abs();
-            }
-        }
-        (w, l1j)
-    }).collect()
-}
-
-/// The same outputs with each row of a rotation read once for `ch` groups at a time, every product computed as
-/// `matvec64` computes it (`row64`), so each value is the one-group path's bit for bit.
-fn rot_together(ix: &Index2, xs: &[&[f64]], ch: usize) -> Vec<(Vec<f32>, [f64; J])> {
-    let n = ix.n();
-    let mut out: Vec<(Vec<f32>, [f64; J])> = xs.iter().map(|_| (vec![0f32; n], [0f64; J])).collect();
-    // the blocks are the index's, the same in every group
-    let gp0 = &ix.groups[0];
-    for j in 0..J {
-        let (b0, nbj) = (gp0.boff[j], gp0.nb[j]);
-        let r = &ix.rots[j];
-        for c0 in (0..xs.len()).step_by(ch) {
-            let c1 = (c0 + ch).min(xs.len());
-            for a in 0..nbj {
-                let row = &r[a * nbj..(a + 1) * nbj];
-                for i in c0..c1 {
-                    let y = unsafe { row64(row, &xs[i][b0..b0 + nbj]) };
-                    out[i].0[b0 + a] = y as f32;
-                    out[i].1[j] += y.abs();
-                }
-            }
-        }
-    }
-    out
-}
-
 fn f32b(v: &[f32]) -> Vec<u32> {
     v.iter().map(|x| x.to_bits()).collect()
 }
@@ -1255,18 +1182,19 @@ fn same_post(p: &Post, gq: &GQ2, n: usize, ndl: usize) -> bool {
         && f64b(&p.qvt_pos) == f64b(&gq.qvt_pos) && f64b(&p.a2) == f64b(&gq.a2) && p.l1det.to_bits() == gq.l1det.to_bits()
 }
 
-/// Whether `r` holds `gq`'s rotated weights and their |.| sums (group_q2r with rotations), bit for bit.
-fn same_rot(r: &(Vec<f32>, [f64; J]), gq: &GQ2, n: usize) -> bool {
-    f32b(&r.0) == f32b(&gq.wq[n..]) && f64b(&r.1) == f64b(&gq.l1j)
+/// Whether `r` holds `gq`'s weights and rotated |.| sums (group_q2r with rotations), bit for bit.
+fn same_rot(r: &Rot2, gq: &GQ2) -> bool {
+    let o = gq.rot.get().unwrap();
+    f32b(&r.wq) == f32b(&o.wq) && f64b(&r.l1j) == f64b(&o.l1j)
 }
 
 /// Per-group setup as the queries pay it, on one thread (`--pin C` pins it), per group in microseconds (median over
 /// `nq` queries of each class): the plain read of every int8 basis (the floor of any exact basis product); every group
-/// set up one at a time (`get_gq2`'s path: basis product, then the rest with the group's own rotations), and again
-/// without rotations (the post-processing in place); all groups together (`setup_groups`: rotations batched); the
-/// post-processing alone, as the library writes it and fused (`post_fused`); the rotations alone, group by group and
-/// all at once with `matvec64`'s arithmetic (`rot_together`). Each candidate is checked bit for bit against the
-/// library's values before its time is kept. With `--cold`, a 64 MB buffer is read before each part, so every part
+/// set up one at a time with its own rotations (a group read alone: `get_gq2`, then `get_rot`), and again without
+/// rotations (the post-processing in place, `get_gq2` alone); all groups together (`setup_groups`: rotations batched);
+/// the post-processing alone, as the library writes it and fused (`post_fused`); the rotations alone, group by group
+/// and all at once (`rotate`). Each candidate is checked bit for bit against the library's values before its time is
+/// kept. With `--cold`, a 64 MB buffer is read before each part, so every part
 /// starts with its bases out of the private caches. Written to gsetup.csv in the results directory.
 pub fn gsetup_cost(c: &Ctx2, nq: usize) {
     pool(1).install(|| gsetup_cost1(c, nq));
@@ -1336,18 +1264,18 @@ fn gsetup_cost1(c: &Ctx2, nq: usize) {
                 }
             }
             // the rotations alone, group by group and together, checked against the one-group path's
-            let xs: Vec<&[f64]> = norot.iter().map(|gq| &gq.qvt_pos[..]).collect();
+            let xs: Vec<&GQ2> = norot.iter().collect();
             evict();
             let t = tick();
-            let ro = rot_own(ix, &xs);
+            let ro: Vec<Rot2> = xs.iter().map(|&gq| rotate(ix, &[gq]).pop().unwrap()).collect();
             row[12] = us(tick() - t);
             evict();
             let t = tick();
-            let rt = rot_together(ix, &xs, 8);
+            let rt = rotate(ix, &xs);
             row[13] = us(tick() - t);
             for g in 0..gn {
                 for (what, r) in [("group by group", &ro[g]), ("together", &rt[g])] {
-                    assert!(same_rot(r, &one[g], n), "the rotations {what} differ from group_q2r's for group {g}; their timing would not be of the same values");
+                    assert!(same_rot(r, &one[g]), "the rotations {what} differ from group_q2r's for group {g}; their timing would not be of the same values");
                 }
             }
             std::hint::black_box((&one, &pl, &pf, &ro, &rt));
@@ -1570,8 +1498,10 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     for k in 0..13 {
                         parts[k] += ms(cy[k]);
                     }
+                    // the rotations done at setup and those done when first read (inside run_cluster) shown together
+                    parts[P_ROT] += ms(cy[P_ROTLATE]);
                     let inner = |ks: &[usize]| ks.iter().map(|&k| cy[k] as i64).sum::<i64>();
-                    let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP]);
+                    let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP, P_ROTLATE]);
                     let clo = cy[P_CLUSTER] as i64 - cy[P_RUNCL] as i64 - inner(&[P_CLSETUP, P_FULL]);
                     let qo = cy[P_QUERY] as i64 - cy[P_CLUSTER] as i64 - cy[P_MERGE] as i64 - inner(&[P_ANCHOR, P_CUT, P_BASIS, P_ROT, P_PLAN, P_GPOST]);
                     for (k, v) in [(13, cy[P_COMPACT] as i64), (14, cy[P_LVSETUP] as i64), (15, cy[P_GPOST] as i64), (16, lv), (17, clo), (18, cy[P_MERGE] as i64), (19, qo)] {
@@ -2469,8 +2399,8 @@ mod tests {
     use super::*;
 
     /// The candidates `gsetup` times hold group_q2r's values bit for bit: the post-processing as written and fused, and
-    /// the rotations group by group and together, on synth4k with two and with six deterministic levels, for stored
-    /// items, a near-item and a random direction.
+    /// the rotations group by group, together and when first read (`get_rot`), on synth4k with two and with six
+    /// deterministic levels, for stored items, a near-item and a random direction.
     #[test]
     fn gsetup_candidates_give_the_librarys_values() {
         use rand::{Rng, SeedableRng};
@@ -2490,10 +2420,16 @@ mod tests {
                     assert!(same_post(&post_lib(&ix.groups[g], n, ndl, &norot[g].qv), &norot[g], n, ndl), "post as written, {ndl} levels, query {qi}, group {g}");
                     assert!(same_post(&post_fused_any(&ix.groups[g], n, ndl, &norot[g].qv), &norot[g], n, ndl), "post fused, {ndl} levels, query {qi}, group {g}");
                 }
-                let xs: Vec<&[f64]> = norot.iter().map(|gq| &gq.qvt_pos[..]).collect();
-                for (what, r) in [("group by group", rot_own(&ix, &xs)), ("together, 1", rot_together(&ix, &xs, 1)), ("together, 2", rot_together(&ix, &xs, 2)), ("together, 8", rot_together(&ix, &xs, 8))] {
+                let xs: Vec<&GQ2> = norot.iter().collect();
+                // a query's groups rotated when first read: every group set up and not yet rotated, in one pass
+                let pr2 = prep2(&ix, q);
+                let mut st = Stats::new(ix.meta.nl());
+                let gqs: Vec<&GQ2> = (0..gn).map(|g| get_gq2(&ix, &pr2, g, &mut st)).collect();
+                get_rot(&ix, &pr2, gqs[gn / 2], &mut st);
+                let deferred: Vec<Rot2> = pr2.gq.iter().map(|x| { let r = x.get().unwrap().rot.get().expect("rotated with the group first read"); Rot2 { wq: r.wq.clone(), l1j: r.l1j } }).collect();
+                for (what, r) in [("group by group", xs.iter().map(|&gq| rotate(&ix, &[gq]).pop().unwrap()).collect()), ("together", rotate(&ix, &xs)), ("when first read", deferred)] {
                     for g in 0..gn {
-                        assert!(same_rot(&r[g], &one[g], n), "rotations {what}, {ndl} levels, query {qi}, group {g}");
+                        assert!(same_rot(&r[g], &one[g]), "rotations {what}, {ndl} levels, query {qi}, group {g}");
                     }
                 }
             }
@@ -2659,7 +2595,7 @@ pub fn qbench(c: &Ctx2, nq: usize) {
         while t.ms() < 50.0 {}
         (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.ms()
     };
-    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
+    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_ROTLATE, "rotlate"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
     let med = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
         let qs: Vec<&Vec<f32>> = qs.iter().take(nq).collect();

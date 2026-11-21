@@ -1,5 +1,11 @@
 # A group's setup: where it goes and what an exact cheaper one could save
 
+**Since written** (research/rotations-once): `get_gq2` no longer rotates; a group's rotations are computed when one of
+its clusters first reaches a randomised level (`get_rot`, `CQ2::enter_rand`), with every group of the query waiting
+for them, each rotation row read once for up to 8 (`rotate`). `matvec64` became `row64` (one row's product, same
+arithmetic), `rot_own` and `rot_together` became `rotate` in `q.rs`, and `group_q2` is gone (`group_q2r`). The timing
+of section 7 was run at n = 2,048, 768 and 512: `results/rotations-once/gsetup*-b986075.csv`.
+
 Question: can opening a group cost less while every value the index reads stays the same, bit for bit? Analysis from
 the code (`rust/src/v2/q.rs` at `c6374f0`: `group_q2r`, `setup_groups`, `get_gq2`, `cluster_q2w`, `NuCut`,
 `run_cluster`; `rust/src/v2/setup.rs`) and from operation and byte counts. Nothing was timed here: the cycle figures
