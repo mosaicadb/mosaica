@@ -257,3 +257,30 @@ rows); `rust/src/v2/q.rs` line 2032 (the planner's per-candidate cost).
   three blocks at menu rates, so the model overstates the gain as well as omitting the cost.
 
 Next: `c5b.py`, the one-shot programme with a charge per coded block and the constant by number of blocks.
+
+## 2026-11-21, entry 12: C5 written (scalar costs, the programme with scalars, w*, the tables redone, the native test)
+
+- `c5b.py` (one-shot programme, s bytes per coded block, constant by number of blocks; 22 solves, 6 minutes). First
+  randomised level, budget 56 B + s: best layout has four blocks at s = 0, three at 1.5 B, one at 2.5 to 11 B, none
+  from 14 B-equivalents. Flips at about 0.7 B, 2.3 B and 12.7 B-equivalents (1.7 ns). So with the scalars charged
+  at 2.5 B the optimum codes one block, as the index does. The block it picks is 256 positions at 1 bit after 188
+  prefix bits (0.1755·F against the built 0.2405).
+- `c5e.py`: keeping the 256-bit prefix and 24 B, one block of 192 positions at 1 bit is −19% (−14% with dump-like
+  norms), same scalars and one block-rise. This is the candidate that survives.
+- A message from the PI brought the lower-bounds agent's shrunk-centre interval (CLAIMS.md A4, unrefereed):
+  w* = A·√(k/(1 + k)). Consequences worked out: B₀ vanishes; a flat block with d > c² beats the same bits spent
+  deterministically at every rate. Several blocks unproved: S1 (per term, optimistic) and S2 (my construction with
+  linear biases). `c5c.py`: three blocks at 1, ½, ⅛: −14.9% plain built, −38.8% plain ideal, −43% S1, −30% S2;
+  pays in time below 0.3 to 0.8, 1.4 to 2.4, 1.4 to 3.9, 0.7 to 2.1 ns. Four blocks never pay in time.
+- `c5d.py`: C3 (c) built column 1.68 / 1.71 / 1.40 / 1.81 becomes 1.56 / 1.59 / 1.36 / 1.68 with the log's stored
+  sizes, 2.5 B per coded block and the constant by block count. C4.3's bytes split moves by under 2%. In time the
+  scalars are 8 to 52% of the per-item work by cell and by τ.
+- Corrections made after writing C5.1: the share entering 96 B at item 50% is between 0.62 and 0.91 (not 0.44: no
+  more can enter 160 B than 96 B), so the decode is 1.8 to 2.0 ns per rise there; entry 11's range 1.4 to 2.8 ns
+  over both cells and both attributions stands. Also corrected: the model's fall in entrants for the trial's layout
+  is 6 to 26% over the four cells, not 13 to 26%; w* at the built angle is 14 and 25% below Cauchy–Schwarz at ¼ bit.
+- Not believed, and said so in C5: the time-equivalent comparisons at 160 and 256 B with 45 B per block-rise (they
+  need 1.19·W at thousands of bits), and the model's width gains in general, since the one native figure (2% fewer
+  entering 96 B) is several times below it.
+- Nothing of mine is running. Same limits kept: core 4, nice 10, one thread, small arrays, no large file, no git, no
+  builds. The sources read for C5 were markdown reports, one 3.7 kB result file and two source lines.

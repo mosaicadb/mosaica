@@ -19,3 +19,5 @@ time-equivalent, s = 14 | budget  258.0 | s 14.0 | J0 0.0214 J1 0.0133 J2 0.0148
 time-equivalent, s = 14 | budget  407.0 | s 14.0 | J0 0.0058 J1 0.0033 J2 0.0035 J3 0.0040 J4 0.0045 | best J=1 cuts [0, 672] prefix [0, 2351] rates [1.17] (279 s)
 time-equivalent, s = 45 | budget  272.0 | s 45.0 | J0 0.0188 J1 0.0159 J2 0.0248 J3 0.0411 J4 0.0777 | best J=1 cuts [0, 576] prefix [0, 1172] rates [1.11] (307 s)
 time-equivalent, s = 45 | budget  475.0 | s 45.0 | J0 0.0034 J1 0.0024 J2 0.0033 J3 0.0051 J4 0.0075 | best J=1 cuts [0, 768] prefix [0, 2672] rates [1.0] (328 s)
+time-equivalent, s = 45 | budget  748.0 | s 45.0 | J0 0.0005 J1 0.0003 J2 0.0004 J3 0.0005 J4 0.0007 | best J=1 cuts [0, 768] prefix [0, 4455] rates [1.52] (346 s)
+DONE

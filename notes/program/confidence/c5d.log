@@ -1,0 +1,26 @@
+built schedule, h/F: ideal curves [0.695, 0.5659, 0.4822, 0.4212, 0.3365, 0.2792, 0.1936, 0.0688, 0.024, 0.0094]
+                    built curves [0.8271, 0.6734, 0.5738, 0.5013, 0.4005, 0.3322, 0.2405, 0.1155, 0.0384, 0.0169]
+--- C3 (c) redone, randomised levels: cost measure | level | budget | schedule h/F | optimum h/F (J) | ratio
+  stored bytes, 2.5 B per coded block | 56 B | 64.5 | 0.2405 | 0.1541 (J=3) | 1.56
+  stored bytes, 2.5 B per coded block | 96 B | 104.9 | 0.1155 | 0.0726 (J=3) | 1.59
+  stored bytes, 2.5 B per coded block | 160 B | 174.8 | 0.0384 | 0.0282 (J=4) | 1.36
+  stored bytes, 2.5 B per coded block | 256 B | 274.3 | 0.0169 | 0.0100 (J=2) | 1.68
+  time-equivalent bytes, s = 14 per block-rise | 56 B | 70 | 0.2405 | 0.1722 (J=0) | 1.40
+  time-equivalent bytes, s = 14 per block-rise | 96 B | 148 | 0.1155 | 0.0477 (J=1) | 2.42
+  time-equivalent bytes, s = 14 per block-rise | 160 B | 258 | 0.0384 | 0.0133 (J=1) | 2.88
+  time-equivalent bytes, s = 14 per block-rise | 256 B | 407 | 0.0169 | 0.0033 (J=1) | 5.15
+  time-equivalent bytes, s = 45 per block-rise | 56 B | 101 | 0.2405 | 0.1130 (J=0) | 2.13
+  time-equivalent bytes, s = 45 per block-rise | 96 B | 272 | 0.1155 | 0.0159 (J=1) | 7.25
+  time-equivalent bytes, s = 45 per block-rise | 160 B | 475 | 0.0384 | 0.0024 (J=1) | 16.25
+  time-equivalent bytes, s = 45 per block-rise | 256 B | 748 | 0.0169 | 0.0003 (J=1) | 62.28
+--- C4.3 redone (bytes per item of N): cell | floor | + levels | + layout | + code | + scalars and key | measured || shares of the last
+  item 0.01% |    0.6 |    1.0 |    1.1 |    1.5 |    2.0 | 2.9 || 28% / 23% / 4% / 20% / 25%
+             entering 56/96/160/256 B, full: [0.003, 0.001, 0.0, 0.0, 0.0]; scalars 0.2 B = 9% of bytes; time per item of N: tau 1.8: 1.2 ns = levels 83%, decode 16%, scalars 2%, full 0% | tau 3.0: 1.2 ns = levels 82%, decode 15%, scalars 2%, full 0% | tau 10.0: 1.3 ns = levels 79%, decode 15%, scalars 6%, full 0%
+  item 1%    |    5.5 |    8.6 |   10.8 |   15.0 |   17.4 | 18.6 || 32% / 18% / 13% / 24% / 14%
+             entering 56/96/160/256 B, full: [0.068, 0.04, 0.015, 0.005, 0.002]; scalars 1.4 B = 8% of bytes; time per item of N: tau 1.8: 7.8 ns = levels 69%, decode 20%, scalars 8%, full 3% | tau 3.0: 8.1 ns = levels 66%, decode 19%, scalars 12%, full 3% | tau 10.0: 9.9 ns = levels 54%, decode 16%, scalars 27%, full 2% | measured scalar decode 4.5% of the profiled wall
+  item 50%   |   37.7 |   64.9 |   85.9 |  120.5 |  130.3 | 276.2 || 29% / 21% / 16% / 27% / 8%
+             entering 56/96/160/256 B, full: [0.536, 0.413, 0.21, 0.071, 0.031]; scalars 8.0 B = 6% of bytes; time per item of N: tau 1.8: 38.3 ns = levels 49%, decode 25%, scalars 17%, full 9% | tau 3.0: 41.5 ns = levels 45%, decode 23%, scalars 23%, full 8% | tau 10.0: 60.3 ns = levels 31%, decode 16%, scalars 47%, full 6% | measured scalar decode 12.3% of the profiled wall
+  text 1%    |   23.4 |   33.2 |   46.8 |   62.2 |   70.7 | 67.0 || 33% / 14% / 19% / 22% / 12%
+             entering 56/96/160/256 B, full: [0.48, 0.289, 0.072, 0.015, 0.006]; scalars 6.5 B = 9% of bytes; time per item of N: tau 1.8: 30.0 ns = levels 60%, decode 23%, scalars 14%, full 2% | tau 3.0: 32.0 ns = levels 57%, decode 22%, scalars 19%, full 2% | tau 10.0: 43.3 ns = levels 42%, decode 16%, scalars 41%, full 2% | measured scalar decode 8.8% of the profiled wall
+  text 50%   |   79.5 |  150.9 |  195.9 |  280.7 |  296.7 | 322.8 || 27% / 24% / 15% / 29% / 5%
+             entering 56/96/160/256 B, full: [0.91, 0.828, 0.548, 0.207, 0.092]; scalars 14.0 B = 5% of bytes; time per item of N: tau 1.8: 68.6 ns = levels 39%, decode 27%, scalars 19%, full 15% | tau 3.0: 75.6 ns = levels 35%, decode 25%, scalars 27%, full 13% | tau 10.0: 116.7 ns = levels 23%, decode 16%, scalars 52%, full 9% | measured scalar decode 12.4% of the profiled wall

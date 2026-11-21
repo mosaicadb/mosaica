@@ -565,12 +565,12 @@ at every level. `rust/REPORT_SETUP.md` has no per-item constant for the scalars.
 
 To turn the phase into a cost per rise I need the number of rises decoded, and the breakdown file does not print
 entrants per level. At item 50%: 91% of items enter 56 B and 20% enter 256 B (SYSTEM.md 4.1); the table counts give
-8.17 item-levels per item over the ten levels; with the bytes these leave the share entering 96 B anywhere between
-0.44 and 0.91. So the rises decoded are 4.0 to 5.9 per item of N, and
+8.17 item-levels per item over the ten levels; with the bytes, and since no more can enter 160 B than 96 B, these
+leave the share entering 96 B between 0.62 and 0.91. So the rises decoded are 5.4 to 6.0 per item of N, and
 
-- **scalar decode: 1.8 to 2.7 ns per (item, coded block, rise) at item 50%** [estimate from a measured phase and
-  inferred counts]. If the four |y| of the first level are counted as scalars of equal cost, 1.4 ns per rise and
-  0.7 ns per |y|. Text 1%, with rougher counts: 1.75 to 2.8 ns. I use **1.4 to 2.8 ns**.
+- **scalar decode: 1.8 to 2.0 ns per (item, coded block, rise) at item 50%** [estimate from a measured phase and
+  inferred counts]. If the four |y| of the first level are counted as scalars of equal cost, 1.4 to 1.5 ns per rise
+  and 0.7 ns per |y|. Text 1%, with rougher counts: 1.75 to 2.8 ns. I use **1.4 to 2.8 ns**.
 - **All-in, from the trial**: `--design-exact` "codes three blocks at 56 B instead of one, and items entering 96 B
   fall 2%. But it is 8–24% slower at 1M, because the first level decodes more scalars" (`rust/REPORT_BOUNDS.md`,
   Part 2). At item 50% (71.3 ms; 0.91 of items enter 56 B; two extra block-rises each) 8% is 3.1 ns and 24% is
@@ -635,10 +635,10 @@ Reading.
    fraction that is then decided is saved, at about 8 ns plus its own three rises each.
 2. Two blocks at free rates is the one alternative near the margin: it pays below 1.5 to 3.3 ns at 1% answers and
    below 0.7 to 1.5 ns at 50%. With menu rates it gains 3% of width and pays nowhere.
-3. **In bytes, the alternatives gain a little: 0.1 to 2.9 B per item at free rates, between −1.6 and +0.6 B at menu
-   rates.** That is the case for a disk-resident store only.
+3. **In bytes, the alternatives gain a little: two or three blocks at free rates save 0.2 to 2.9 B per item; at menu
+   rates the change is between −1.6 and +3.9 B.** That is the case for a disk-resident store only.
 4. **The model overstates the gain itself.** The trial measured 2% fewer items entering 96 B with three blocks; the
-   model gives 13 to 26% at 1% and 50% answers of item queries and 6 to 26% for text. With the trial's 2% the
+   model gives 13 to 21% for item queries and 6 to 26% for text queries. With the trial's 2% the
    formula gives +3.3, +5.5 and +18 ns per item at item 50% for τ = 1.8, 3 and 10, that is +5%, +8% and +25% of
    71.3 ms: the trial's 8 to 24% is what the cost model returns for τ between 3 and 10 ns. So the cost side of this
    section agrees with the trial, and the width side of my model does not. The likely reason is the one in C3 (c)
@@ -650,6 +650,214 @@ recommendation that went with it, to code every block at that level, is **withdr
 time it loses at every scalar cost consistent with the sources, and the native trial already showed it. It stands
 only as a statement about bytes read, and even there the measured gain (2% of the entrants to 96 B, against 3 B more
 per entrant to 56 B) is a loss of about 2 B per entrant on the trial's figures.
+
+### C5.3 The layout programme with the scalars charged [model; `c5b.py`, `c5b.log`]
+
+The programme of C3b.1 with two changes. A coded block costs s on top of its code, and D costs 0.5 B for its norm
+code: code + s·J + 0.5·[D not empty] ≤ B. The constant follows the number of coded blocks: c1(d), the exact one-block
+quantile (6.43, 6.93, 7.20, 7.64, 7.95 at d = 63, 95, 127, 255, 767), for J = 1 and 7.963 for J ≥ 2 (certified for the
+built layout; used for every other layout as an estimate). In bytes s = 2.5 B (1 B of |y|, 1.5 B of κ and tan φ). The
+time objective is τ_0 + τ_byte·code + τ·J per item entering the level, so with τ_byte = 0.133 ns the same programme
+with s = τ/τ_byte is the time objective in bytes of decode: s = 11 to 21 for the decode alone (1.4 to 2.8 ns) and 23
+to 75 for the trial's all-in 3 to 10 ns. Group 12, built curves.
+
+The first randomised level: the budget is the built level's own cost, 56 B of code and s for its one block.
+
+| s | 0 | 1.5 | 2.5 | 5 | 8 | 11 | 14 | 23 | 45 |
+|---|---|---|---|---|---|---|---|---|---|
+| No block (deterministic) | 0.214 | 0.209 | 0.206 | 0.198 | 0.189 | 0.180 | 0.172 | 0.151 | 0.113 |
+| One block | 0.1755 | 0.1755 | 0.1755 | 0.1755 | 0.1755 | 0.1755 | 0.1755 | 0.1755 | 0.1755 |
+| Two blocks | 0.168 | 0.174 | 0.178 | 0.189 | 0.203 | 0.218 | 0.235 | 0.299 | 0.632 |
+| Three blocks | 0.158 | 0.169 | 0.177 | 0.201 | 0.236 | 0.283 | 0.343 | 0.716 | |
+| Four blocks | 0.155 | 0.172 | 0.185 | 0.226 | 0.295 | 0.411 | 0.645 | | |
+| Best | four | three | one | one | one | one | none | none | none |
+
+1. **With the scalars charged at what the sources say, the optimum codes one block at the first randomised level, as
+   the index does.** Every block is best only below about 0.7 B per coded block; three blocks up to about 2.3 B; one
+   block from there to about 12.7 B-equivalents (1.7 ns); above that, no block. At 2.5 B the three options are
+   within 1.5% of each other. Half of this is the constant: with c fixed, as in C3, three blocks still won at 2 B.
+2. The one block the programme chooses is not the built one. It is 256 positions at 1 bit after a prefix of 188 bits,
+   0.1755·F, where the built level (96 positions at 2 bits after 256 bits) is 0.2405·F in the same model.
+   `c5e.py` keeps the built 256-bit prefix and the 24 B of code and only widens the block: 192 positions at 1 bit give
+   0.194 (−19%), 224 at 0.86 bit 0.192 (−20%), 256 at ¾ bit 0.192. With the norms rescaled so that block 0 holds 48%
+   of the sum after the prefix, as the dump's level-0 means suggest (the model has 38%), the same three give −14%,
+   −14% and −13%. **This is the candidate that survives the scalars: it has one block-rise, the same code bytes and
+   the same scalars as the built level.** See the caution in C5.2 item 4: the model overstated the trial's gain by
+   several times, so I expect a few percent, not 14.
+3. **In time the first rotated block is itself at the margin.** At the decode-alone cost (s = 11 to 21) coding no
+   block is between 3% wider and 11% narrower than coding one; at the all-in cost the programme prefers to spend the level's time on more
+   deterministic bytes (0.151 against 0.1755 at s = 23). I do not put this forward as a design [estimate]: it uses
+   1.19·W at 556 to 1,044 bits, beyond the 296 at which it was measured, and assumes a byte of deterministic code
+   costs the mean decode cost and no further level. What it does establish is the scale: a block-rise costs 1.4 to
+   10 ns against 3.2 ns for decoding the whole 24 B of the level's code.
+4. Later levels in stored bytes (2.5 B per coded block; budgets 104.9, 174.8, 274.3 B): three, four and two blocks,
+   0.0726, 0.0282 and 0.0100 of F. Charging scalars in bytes does not reduce the number of blocks there.
+
+### C5.4 A third curve: the shrunk-centre interval w* [carried from `CLAIMS.md` claim A4, proved there and unrefereed; I did not check its proof]
+
+For one block with A = ‖y‖‖Δ‖ and k = c²·tan²φ/d, the plain rule's half-width is A·√k and the shrunk-centre
+interval's is w* = A·√(k/(1 + k)), with the same stored message and no second event. It changes nothing from 2 bits
+up and about 30% at a quarter of a bit.
+
+**What it does to the hand-over (C3 (a)).** w* < A at every rate, so a coded block is never wider than its own
+Cauchy–Schwarz bound: **B₀ of C3a.1 is a property of the plain rule and disappears under w*.** For a flat block at
+the sphere bound, w*/(F·2^(−R)) = q·2^R/√(4^R − 1 + q²) with q² = c²/d, which is below 1 at every R > 0 exactly when
+d > c². So under w* a flat block of more than c² degrees of freedom beats the same bits spent deterministically
+from the first bit (B* = 0 in C3a.2 item 1), and one of fewer never does. The ratio at ⅛, ¼, ½, 1 and 2 bits: 0.93,
+0.88, 0.82, 0.76, 0.72 at d = 95; 0.81, 0.71, 0.61, 0.53, 0.49 at d = 255; 0.60, 0.49, 0.39, 0.33, 0.30 at d = 767
+[computed, `c5c.log`, with c1(d)]. The condition d·(GM/AM)² > c² at high rate is unchanged. **Changes C3a.1 and
+C3a.2 item 1**: the threshold in bits belongs to the plain rule; what remains under w* is the condition on d, the
+flatness of the block, and the scalars.
+
+**Several blocks: not proved.** Two readings, to bracket it.
+- S1, per term, as the PI asked: each coded block contributes its own w*_j² and the terms add, h² = Σ_j A_j²·k_j/(1 +
+  k_j). [approximation, unproved.] It is optimistic at low rate: as R_j → 0 it puts a block's whole Cauchy–Schwarz
+  term in quadrature, which no interval can do, because nothing random is left in that block.
+- S2, a construction: shrink block j's centre by m_j, add the biases linearly and the random parts in quadrature
+  under the several-block constant, take the worst case over each block's s_j ∈ [0, 1] and the best m. For one block
+  it is w*. [sketch: gap named. It rests on A4's decomposition block by block and on the several-block constant
+  holding for every vector of scales (R1); I did not simulate it.] A joint treatment of the blocks' biases could lie
+  between S2 and S1.
+
+**The first randomised level under the three curves** (`c5c.py`, `c5c.log`; built prefix and cuts, 192 code bits,
+constant by number of blocks; "pays below" is the cost of a block-rise under which the alternative saves time, over
+the four cells of C5.2; bytes are per item of N at item 1%, item 50%, text 1%, text 50%):
+
+| Curve | Built level h/F | Three blocks at 1, ½, ⅛ | pays below | bytes | Four blocks at ½, ½, ⅛, ⅛ | pays below |
+|---|---|---|---|---|---|---|
+| Plain rule, built code | 0.2405 | −14.9% | 0.3 to 0.8 ns | −0.1, −0.6, −1.6, +0.6 | −1.4% | 0.04 ns |
+| Plain rule, ideal code | 0.1936 | −38.8% | 1.4 to 2.4 ns | −0.4, −3.7, −3.6, −5.3 | −30.7% | 0.5 to 0.9 ns |
+| w* at the built angle, S1 | 0.2394 | −43.0% | 1.4 to 3.9 ns | −0.7, −5.1, −6.2, −5.8 | −37.9% | 0.6 to 1.5 ns |
+| w* at the built angle, S2 | 0.2394 | −30.0% | 0.7 to 2.1 ns | −0.4, −3.0, −4.3, −2.4 | −20.0% | 0.2 to 0.7 ns |
+
+Two blocks under w*: at 0.96 and 0.78 bit, −26.5% (S1) and −22.6% (S2), paying below 1.5 to 10.3 ns and 1.1 to
+5.9 ns; at menu rates (½ and 1 bit) −21.6% and −15.8%, paying below 1.0 to 5.2 ns and 0.6 to 2.6 ns. One wide block
+(C5.3 item 2) under w*: 192 positions at 1 bit −22%, 256 at ¾ bit −26%; −17% and −19% with the dump-like norms.
+
+**Does a first level that codes every block at a fraction of a bit become worth its scalars under w*?**
+
+- **In bytes, yes, on the model's widths**: three blocks save 0.4 to 6 B per item where the plain rule with the built
+  code saved at most 1.6 B, because w* removes the penalty of the built code below one bit (at ¼ bit and
+  the built code's angle the plain rule is wider than Cauchy–Schwarz, and w* is 14% below it at d = 95 and 25% at
+  d = 255).
+- **In time, no for every block, and only at the edge for three.** Four blocks pay below 0.2 to 1.5 ns, under the
+  decode-alone cost in every cell. Three blocks pay below 0.7 to 2.1 ns (S2) or 1.4 to 3.9 ns (S1). On S2
+  that is the lower end of the decode-alone range (1.4 to 2.8 ns) at 1% answers (1.4 and 2.1 ns) and under it at 50%
+  (1.2 and 0.7 ns); on S1 it is inside the range in three cells. Both are below the trial's all-in 3 to 10 ns
+  everywhere except text 1% under the optimistic reading.
+- Two blocks at about 1 and ¾ bit is the first multi-block layout that could pay in time under w* (below 1.1 to
+  5.9 ns on the conservative reading), at 1% answers more than at 50%.
+- The cheapest use of w* is the one that adds no scalar: one wide block at ¾ to 1 bit.
+- All of it carries C5.2 item 4: the same model gave 6 to 26% where the trial measured 2%.
+
+### C5.5 C3 (c)'s table and C4.3's split with the scalars counted [model; `c5d.py`, `c5d.log`]
+
+**C3 (c), randomised levels, c = 8 built column.** Schedule over the optimum at equal cost, with the stored bytes of
+the build log, 2.5 B per coded block for the optimum, and the constant by number of coded blocks. The schedule's
+widths in the model become 0.2405, 0.1155, 0.0384, 0.0169 (the first was 0.2456 with c = 8).
+
+| Level | As C3 (c) | Stored bytes, source scalars | Time-equivalent, 14 B per block-rise (1.9 ns) | 45 B (6 ns) |
+|---|---|---|---|---|
+| 56 B | 1.68 | 1.56 | 1.40 | 2.13 |
+| 96 B | 1.71 | 1.59 | 2.42 | 7.3 |
+| 160 B | 1.40 | 1.36 | 2.88 | not credible |
+| 256 B | 1.81 | 1.68 | 5.15 | not credible |
+
+- In bytes the table moves by 3 to 8%: the scalars were already charged there, and the correction is the stored
+  sizes and the constant.
+- The time-equivalent columns charge the schedule the block-rises an item has paid by each level (1, 4, 7, 11) and
+  compare with a layout read in one piece, which pays one or none. They are not a comparison of schedules: nesting
+  is what lets an item stop early, and the one-piece optimum would make every item pay everything. They also use
+  1.19·W far beyond its measured range (prefixes of 588 to 4,455 bits). **What they show is where the time goes: by
+  256 B an item has paid 11 block-rises, 15 to 110 ns, against 34 ns to decode its 253 B of code.** The direction is
+  fewer rises per item, not more blocks per level; the codes report's rule that a block whose last rise is its only
+  rise can use a one-rate code points the same way.
+
+**C4.3's split in bytes**, same five cells, corrected stored sizes and constant:
+
+| Cell | Total (was) | Floor | Level spacing | Layout | Code distance | Scalars and key |
+|---|---|---|---|---|---|---|
+| Item 0.01% | 2.0 (2.0) | 28% | 23% | 4% | 20% | 25% |
+| Item 1% | 17.4 (17.6) | 32% | 18% | 13% | 24% | 14% |
+| Item 50% | 130.3 (131.7) | 29% | 21% | 16% | 27% | 8% |
+| Text 1% | 70.7 (72.2) | 33% | 14% | 19% | 22% | 12% |
+| Text 50% | 296.7 (299.0) | 27% | 24% | 15% | 29% | 5% |
+
+Norm codes and scalars alone are 5 to 9% of the bytes (1.4, 8.0, 6.5, 14.0 B in the last four cells). The bytes split
+stands.
+
+**The same cells in time.** Per item of N, the work the breakdown calls decode, bounds, re-pack and full vectors,
+as entrants × (3.2 ns per level + 0.133 ns per code byte + τ per block-rise + 0.7 ns per |y|) + 110 ns per full
+vector, at τ = 1.8 / 3 / 10 ns:
+
+| Cell | ns per item | Levels | Decode | Scalars | Full vectors | Measured: scalar decode, share of the profiled wall |
+|---|---|---|---|---|---|---|
+| Item 1% | 7.8 / 8.1 / 9.9 | 69 / 66 / 54% | 20 / 19 / 16% | 8 / 12 / 27% | 3% | 4.5% |
+| Item 50% | 38 / 42 / 60 | 49 / 45 / 31% | 25 / 23 / 16% | 17 / 23 / 47% | 9 / 8 / 6% | 12.3% |
+| Text 1% | 30 / 32 / 43 | 60 / 57 / 42% | 23 / 22 / 16% | 14 / 19 / 41% | 2% | 8.8% |
+| Text 50% | 69 / 76 / 117 | 39 / 35 / 23% | 27 / 25 / 16% | 19 / 27 / 52% | 15 / 13 / 9% | 12.4% |
+
+At text 50% the model's 13 ns of scalars at τ = 1.8 stands beside 11.6 ms measured for a million items, and its 69 ns
+beside about 81 ms of measured per-item phases; the other cells inherit C4.2's errors in the entrant counts.
+
+**Changes C4.3.** "Scalars and key 5 to 25%" is a statement about bytes. In time the scalars are 14 to 19% of the
+per-item work at large answers at the decode-alone cost, and a quarter to a half at the all-in cost. And "level
+spacing" changes sign: in bytes more levels read less; in time each level entered costs about 3.2 ns and its
+rises, the largest component in every cell. `rust/REPORT_RAND.md` measured exactly this: 14 levels down to 4 was
+faster at every cell for 3 to 11% more bytes. C4.3's remark that more levels would lower the spacing loss "at the
+cost of their scalars" understated it.
+
+### C5.6 What changes in C3 and C4, in one place
+
+| Where | As written | Now |
+|---|---|---|
+| C3a.1, C3a.2 item 1 | a block needs B₀ bits to beat its Cauchy–Schwarz bound, B* to beat the same bits spent deterministically | true of the plain rule; under w* (unrefereed) both are zero for a flat block with d > c² |
+| C3 model, section 0 | c fixed | 6.931 with one block coded, 7.963 with several: a second block costs 15% of the random term |
+| C3b.3 item 3 | the optimum codes every coordinate from the first rotated bit | only if scalars are free; at 2.5 B per coded block the optimum codes one block at the first level, in time one or none |
+| C3 (c) item 1 | the 56 B level should code everything; a sub-bit code would pay most there | withdrawn for the in-memory index; in bytes only, and the trial's own figures show a loss there too. The surviving candidate is one wider block at the same cost |
+| C3 (c) table | 1.68, 1.71, 1.40, 1.81 at 56 to 256 B | 1.56, 1.59, 1.36, 1.68 in stored bytes; in time the gap is the rises of a nested schedule |
+| C4.2, C4.3 stored bytes | 27, 36, 65.5, 107.5 B at four levels | 26.5, 35, 64.5, 104.9 B; totals move by under 2% |
+| C4.3 | scalars 5 to 25% of the cost | of the bytes; 8 to 52% of the per-item time depending on the cell and the cost of a block-rise |
+| C4.3 | more levels lower the spacing loss | in bytes; in time each level costs 3.2 ns per entrant and its rises |
+
+Unchanged: C3a.2 items 2 and 3 and C3a.3, the hand-over at 32 to 40 B with built curves at c = 8 (C5.3 item 3 moves
+it later, if anywhere), the identity (b.1), the independence of the layout from c once D is empty, C4.1 and C4.4.
+
+### C5.7 What a native test of the 56-byte level must measure
+
+The earlier trial lost on time and reported one count. For the model to be believed, or dropped, a test needs the
+following, on one index, the same queries and one binary that differs only in the first level's layout.
+
+**Variants.** V0 as built (block 0 at 2 bits). V1 one wider block at the same 24 B (first cut at 192 positions,
+1 bit): the cost-neutral candidate. V2 two blocks (about 1 and ½ to ¾ bit). V3 the `--design-exact` layout, to
+reproduce the earlier loss with the phases recorded. If the one-block shrunk-centre interval is implemented, each
+with and without it; it must be refereed before it decides anything.
+
+**Per variant and cell** (item and text, answers 0.01%, 1%, 10%, 50%):
+1. **Items entering each of the ten levels, and full vectors.** These are exact. The model says only the count
+   entering 96 B moves; the counts entering 160 B and 256 B and the full vectors must stay within the effect of the
+   changed later rates. This is the test of C5.2's formula.
+2. **The level's half-width and its parts**, from a verify dump: the random term, the Cauchy–Schwarz term of the
+   uncoded blocks, and each block's own Cauchy–Schwarz term (R_j) for the items entering 56 B. The last gives the
+   index's block norms, which is what the model lacks; the predicted width change must be recomputed from them
+   before it is compared.
+3. **Bytes per item, split into code, scalars and full vectors.**
+4. **Time by phase**, profiled and unprofiled: level decode; bounds and decisions with the scalar decode apart;
+   re-pack and compaction; tables; full vectors. **And the number of block-rises decoded per query**, which the
+   breakdown does not print today. Then the cost of a block-rise is measured, not inferred: the difference in
+   scalars, bounds, compaction and tables between V3 and V0 over the difference in block-rises. The model needs it
+   between 1.4 and 10 ns; the test fixes it.
+5. The time of the 96 B level per entrant, from the same phases, to value an item that no longer enters it.
+
+**What would make the model believed.** (a) Only the 96 B count moves. (b) Its change is within a factor 1.5 of the
+prediction recomputed from the measured block norms; the earlier trial's 2% against my 6 to 26% fails this, so the
+model is not believed today. (c) The measured time difference equals e_56·ΔJ·τ − Δe_96·T_96 with the measured τ and
+T_96, to within the run-to-run noise.
+
+**What the test cannot do on a shared machine.** For V1 the predicted time gain is Δe_96·T_96, about 1 ns per item at
+item 50% in the model, 1.3% of the query, against ±5% noise. An end-to-end timing will not resolve it. The verdict on
+V1 has to come from the counts, which are exact, multiplied by per-unit costs taken from the phases; V3 against V0
+is large enough (8 to 24%) to time directly.
 
 ---
 
@@ -669,6 +877,10 @@ per entrant to 56 B) is a loss of about 2 B per entrant on the trial's figures.
   be calibrated on the candidate share. Text queries fit only with one fitted scale.
 - c is taken as fixed. Its dependence on the block layout (6.93 for one block of 96, 7.96 for four, at N = 2²⁰) was
   not optimised over; it favours the first level by 13%.
+- C5: the cost of a block-rise is inferred, 1.4 to 2.8 ns for the decode and 3 to 10 ns all-in; the entrant counts it
+  rests on are not printed by the breakdown. The several-block form of w* is unproved (S1 an approximation, S2 a
+  sketch). The model's fall in entrants for the trial's layout is 6 to 26% where 2% was measured.
+- C5.3 item 3 and the time-equivalent columns of C5.5 extrapolate 1.19·W to thousands of prefix bits.
 - Only groups 12 and 6 of one set of spectra (a 200k subset, PCA basis) were solved. `spec2_v2.json` has the same
   values for the groups I read; `spec2_n128.json` (n = 128) was not used.
 
@@ -687,3 +899,8 @@ All in `notes/program/confidence/`.
 | `c4.py`, `c4_g12_c8`, `c4_g6_c8` `.json` and `.log` | C4: Gaussian scores |
 | `c4b.py`, `c4b_g12_c8.log` | C4: text queries with the measured shells |
 | `c4_dump_test.py` | C4.4: the test, not run on the dump |
+| `c5a.py`, `c5a.log`, `c5a.json` | C5.2: the constant by block count; first-level alternatives in bytes and time |
+| `c5b.py`, `c5b.log`, `c5b.json` | C5.3: the layout programme with a charge per coded block |
+| `c5c.py`, `c5c.log`, `c5c.json` | C5.4: the three curves, with the shrunk-centre interval |
+| `c5d.py`, `c5d.log` | C5.5: C3 (c)'s table and C4.3's split redone, in bytes and in time |
+| `c5e.py`, `c5e.log` | C5.3 item 2: one wider block at the built level's cost |

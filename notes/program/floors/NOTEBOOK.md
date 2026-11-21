@@ -274,3 +274,56 @@ State at the end of the session.
   the block-norm set-up with the fit at text share 0.2, to test B4d's prediction; (3) a typical-query version of
   F1 by concentration of the support function on the cells of a code with bounded cells; (4) the anisotropic
   low-rate problem behind F4; (5) search the literature for L1 and B2b before calling either new.
+
+## 2026-11-21, entry 11: the referees' round
+
+The PI sent the two referee reports, the librarian's second report and the falsifier's results, with instructions:
+one round of revision, the pre-referee text kept, no tag raised, a section "For the notes" at the top of
+`CLAIMS.md`, and a closing section "Changes after the referees". Limits for this round: core 5, one thread, under
+100 MB resident, no pass over large files, `mixture_price.py` not to be rerun.
+
+Read in full: `referee/referee-core.md`, `referee/referee-extensions.md`, `../library/floors-novelty.md`,
+`../stage0-floor-check/RESULTS.md`.
+
+- Core referee: no error found in any claim of sections 0 to 4 (setting, L1 to L5, A, F1, F2, F2a), after its own
+  numerics, which went further than mine (L2 in the plane with an adversary; the inequality in which F2's head and
+  tail meet, attacked directly; whole codes in three dimensions; product codes to 10⁴ dimensions). Its points were
+  hypotheses left unstated and wording, plus one real addition: the sum bound V_S ≥ head + W_T (now L4.6), which is
+  what makes Theorem 3 a consequence of F2. L4.5 as I had it did not give that.
+- Extensions referee: no fatal error. What was wrong in my text: the closing remark of B4b (the mean width is
+  convex along geodesics, so my "cannot be solved exactly" was false); the closing sentence of B5 (one factor, not
+  two, and the measured ρ is a mean of per-pair ratios); a share in B4a.4 (two fifths to three quarters, not two
+  thirds to three quarters); the attainment condition in B4b.3; and three overstatements of wording (tightness
+  from Ingber–Courtade–Weissman, "agrees in form" for F3, "a bit is better spent on a coordinate" in D1). A gap:
+  B4b.6's first-order half was asserted. Statements that were weaker than their proofs: F3 (I(z; c) + J), F4 (no
+  need for a deterministic encoder), F5 (the certificate may read every message).
+- Librarian: L1 is published (Bolley–Gentil–Guillin 2018, Theorem 2.1 at n = 1, same proof). B2b is the classical
+  M·M* ≥ 1 after the change of variables that makes the two Gaussians one. F1's formula is published; the theorem
+  (finite n, non-commuting covariances, mean width, with a proved converse) was not found.
+- Falsifier: nothing refuted. Closest codes 1.0026 from W and 1.0005 from the best V_S.
+
+What I did, in order, saving after each step.
+1. `CLAIMS_before_referees.md`: a copy of the text the referees saw (71,986 bytes, made before any edit).
+2. `check_after_referees.py`: ten small checks of the repairs. First version of check 6 gave 1.999, 1.976, 1.733
+   where the referee reports 2.000: I had not scaled the second family to the same F, so the last inequality of
+   B4b.3 was strict. With the scaling it is 2.000. The repaired statement keeps both conditions (orthogonal in the
+   Σ_R inner product, equal w_aF_a²). Peak memory 89 MB, 2 seconds, core 5.
+3. "For the notes" written as its own draft, then spliced in at the top. While writing it I found a clash I had
+   carried through the whole file: γ with a subscript for the Gaussian law, when γᵢ are the eigenvalues. The notes
+   section and the body now write N_d for the law.
+4. Sections 0 to 13 revised claim by claim; sections 14 and 15 rewritten; "Changes after the referees" appended.
+5. One patch failed on a line break and was redone; nothing was lost.
+
+Nothing of substance is disputed. Three clarifications are in the changes section (the scaling in the referee's
+counter-example for B4b.3; the point about offsets that the referee left unchecked in B4c, settled from the
+experiment's `prep.py`; and that L1's [cited] tag rests on the librarian's reading, since I did not open the
+paper).
+
+Not done in this round: the Bolley–Gentil–Guillin paper was not opened by me; `mixture_price.py` was not rerun, so
+B4c and B4d stand on the earlier log; no new search over cell shapes.
+
+Still open after the round: a floor for real data (J unknown from above); offsets that are not Gaussian scale
+mixtures or that depend on the residual; a typical-query statement at finite n; the anisotropic low-rate problem
+behind F4; a proof that some code attains W or V in the mean (only computed codes so far); any test of a
+high-dimensional code whose cells couple head and tail; earlier statements of L1 in papers nobody here opened;
+the cheaper move of B4d, unmeasured.

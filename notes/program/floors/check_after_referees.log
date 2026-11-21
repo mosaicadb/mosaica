@@ -1,0 +1,21 @@
+1. 400 spectra (ties included), every top-k head: min [V_S(H) - (head(H) + W_T(H))] = 0.00e+00 (>= 0, L4.6); min [W - Theorem 2] = 2.243e-01 (>= 0); min [max_k (head + W_T) - Theorem 3] = 1.872e-01 (>= 0)
+2. gamma = (4,1,1), H = ln 2: theta = 1.0000, water-filling head k = 1, W = 3.0000, F2a = kappa_1 sqrt(theta) + 2 = 3.6487, F2 with S = all = kappa_3 GM e^(-H/3) = 4.0911; V over top-k: k=0: 3.0000, k=1: 3.6487, k=2: 3.9223, k=3: 4.0911
+3. cell |z| >= 1: P = 0.3173, C = 1.4851 > 1, k(C) = 0.2072, k(min(C,1)) = 0.0000 <= k(C) <= KL = ln(1/P) = 1.1479
+3. cell |z| >= 2: P = 0.0455, C = 2.0958 > 1, k(C) = 0.9562, k(min(C,1)) = 0.0000 <= k(C) <= KL = ln(1/P) = 3.0900
+3. cell |z| >= 3: P = 0.0027, C = 2.7778 > 1, k(C) = 2.3364, k(min(C,1)) = 0.0000 <= k(C) <= KL = ln(1/P) = 5.9146
+4. uniform law,  1 cells: E h = E|g| sqrt3/m = 1.381977; kappa_1 e^-(ln m + J) = 1.381977 (J = 0.1765 nats); Gaussian floor without J = 1.648721
+4. uniform law,  4 cells: E h = E|g| sqrt3/m = 0.345494; kappa_1 e^-(ln m + J) = 0.345494 (J = 0.1765 nats); Gaussian floor without J = 0.412180
+4. uniform law, 64 cells: E h = E|g| sqrt3/m = 0.021593; kappa_1 e^-(ln m + J) = 0.021593 (J = 0.1765 nats); Gaussian floor without J = 0.025761
+5. sigma^2 = 0.28: comonotone bound C_1(X,Y)/F = 0.9328 (sample of 40000); Hoelder bound |X|_4 e^(-sigma^2/3) |Y_0|_(4/3) / F = 0.9314; so the gain is at least 0.0686 F
+5. sigma^2 = 1.00: comonotone bound C_1(X,Y)/F = 0.7086 (sample of 40000); Hoelder bound |X|_4 e^(-sigma^2/3) |Y_0|_(4/3) / F = 0.7326; so the gain is at least 0.2914 F
+5. sigma^2 = 4.00: comonotone bound C_1(X,Y)/F = 0.1870 (sample of 40000); Hoelder bound |X|_4 e^(-sigma^2/3) |Y_0|_(4/3) / F = 0.2695; so the gain is at least 0.8130 F
+5. sigma^2 = 9.00: comonotone bound C_1(X,Y)/F = 0.0168 (sample of 40000); Hoelder bound |X|_4 e^(-sigma^2/3) |Y_0|_(4/3) / F = 0.0509; so the gain is at least 0.9832 F
+6. price of one basis, two rank-one families, Sigma_R = [[1,c],[c,1]]: c=0.0: Euclidean-orthogonal 2.000, Sigma_R-orthogonal 2.000 (u.v = 0.00); c=0.3: Euclidean-orthogonal 1.954, Sigma_R-orthogonal 2.000 (u.v = -0.29); c=0.6: Euclidean-orthogonal 1.800, Sigma_R-orthogonal 2.000 (u.v = -0.51); c=0.9: Euclidean-orthogonal 1.436, Sigma_R-orthogonal 2.000 (u.v = -0.67)
+7. halving the share eps of family b in the fit (ratios tend to 4 and 2): eps 0.1000: cost ratio 2.59, gain ratio 1.41; eps 0.0500: cost ratio 2.97, gain ratio 1.58; eps 0.0250: cost ratio 3.33, gain ratio 1.73; eps 0.0125: cost ratio 3.61, gain ratio 1.84
+8. 600 random pairs of metrics: mean width at the geodesic midpoint / chord - 1 at most -2.98e-04 (<= 0: convex along geodesics); at the straight midpoint / chord - 1 up to 0.542 (> 0: not convex along lines)
+   diagonal instance: least mean width 1.301717 at d = 0.2722; at the mean-square metric M_w (d = 0.2322) 1.301927; sum_a w_a F_a = 1.132015
+9. n = 3, Gaussian, independent: rule 1's rho^2 = 0.334; E(D.e)^2 / E h^2 = 0.254 (exact 0.254); 1/n_eff = 0.348; mean over pairs of (D.e)^2/h^2 = 0.299
+10. lognormal offset scale t, sigma^2 = 0.05: E t / sqrt(E t^2) = 0.9753
+10. lognormal offset scale t, sigma^2 = 0.28: E t / sqrt(E t^2) = 0.8694
+10. lognormal offset scale t, sigma^2 = 1.00: E t / sqrt(E t^2) = 0.6065
+peak resident memory of this run: 89 MB

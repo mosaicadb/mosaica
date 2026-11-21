@@ -12,6 +12,8 @@ Nothing under `program/` has entered the chapters; a result enters only after a 
 | Confidence, design | Done, unrefereed, all [model] or [computed]: the hand-over, the hybrid optimum, the rate–margin law (fails for in-distribution queries at large answers). | `confidence/DESIGN-CLAIMS.md` |
 | Codes | Closed as a drop-in (8.2% of the last level's width against a 10% bar). Kept: 24 encoder scales (free), the nesting loss as a result, one-rate codes for a redesigned schedule. | `codes/REPORT.md` |
 | Approximate | The tree model is a generalised random energy model with a step profile; a leaf floor at a fixed level and a complete floor for the k best; claims revised after referee 1, not re-refereed. The stop on expected misses is dropped. The per-query spread is correct and nearly neutral. | `approximate/CLAIMS.md`, `approximate/referee/referee-1.md` |
+| Partition (new, 21 November 08:00) | The owner's question: is k-means the right thing to group by? A theorist is deriving the objective each use of a cluster implies (the floor makes coding cost a log-determinant quantity, where k-means minimises a trace), the scaling of cluster size and group count, assignment of clusters to bases by coding cost, and the alternatives; a librarian is checking prior art. An experiment spec for the 200k sample follows. No earlier clustering-mathematics work was found saved on any branch. | `partition/`, `library/partition.md` |
+| Confidence, lower bounds: referee | Report in. No displayed inequality wrong; several overstatements. A4 is R8 widened, not a new interval, and is not better than the plain rule one-sidedly; the converse holds in a restricted class (one block, linear estimate, half-width proportional to the offset's norm); R9 as worded is false and should be restated in quantile form; the "50 bits" is slack (30 to 41). The theorist is revising. | `confidence/referee/referee-lower-bounds.md` |
 | Stage 0: floor attack | Numerics cut off by the shutdown; report owed from the logs. | `stage0-floor-check/` |
 | Stage 0: block norms | Dropped. | `stage0-block-norms/REPORT.md` |
 | Library | Three reports. | `library/` |
@@ -42,8 +44,11 @@ then free for this program's native and timing work.
   cost applies to κ and tan φ, and is being added to the confidence design model (C5).
 - The rate–margin test on the 50k verify dump (`confidence/c4_dump_test.py`).
 - A fit at text share 0.2 against the shipped mixed fit (floors B4d).
-- The 56-byte level coded over every block at a fraction of a bit, timed (confidence C3c with the codes track's
-  sub-bit codebook).
+- The 56-byte level. Coding every block there is withdrawn: with the stored scalars charged (confidence C5) the optimum
+  codes one block, as the index does. What is left to test natively (C5.7): one wider block at the same 24 B, two
+  blocks, and the `--design-exact` layout again with phases recorded and the number of block-rises decoded per query
+  printed, so that the cost of a block-rise is measured and not inferred. The model over-predicts gains (6 to 26%
+  fewer entrants where the earlier trial measured 2%), so expect a few percent at most.
 - The replay of the built stop against a fixed cluster count: the visit-order session will put it to the owner.
 
 ## Decisions that are the owner's

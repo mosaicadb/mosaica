@@ -82,3 +82,23 @@ Failed or not done.
 
 State: C1 and C2 are written. Open gaps are G1 (general decoder), G2 (fixed δ), G3 (built code), and the two
 sketches in C2.3. Nothing is running.
+
+## 2026-11-21, entry 4: revision after the referee
+
+The referee's report is `referee/referee-lower-bounds.md`. CLAIMS.md was revised in one round; the text the referee
+saw is `CLAIMS_before_referee.md`; the last section of CLAIMS.md lists every change, and a new opening section
+says what the track establishes. New files: `c1_revision.py`, `c1_revision.log` (exact mean of the random code, B6
+as a left sum, the tax at finite w, B5's two tails, the Monte Carlo table redone), `c2_revision.py`,
+`c2_revision.log` (the referee's refined step (c′): thresholds and a Monte Carlo check).
+
+What moved.
+- A4 is R8 with its half-width frozen at Ê = 0, not a new interval; it does not dominate the plain end; one event
+  serves plain, A4 and capped R8 in one block (A5); A4′ puts it inside the bit budget.
+- w* is the least mean half-width in 𝓛, one block. 𝓛 leaves out R8, intersections, the radial slack and several
+  blocks, so it is not a statement about the index's certificate beyond one block with the plain rule.
+- R9 "for any per-item rule" is refuted by the referee's counter-example; Corollary Q is the true form.
+- Theorem D's code-size condition is only sufficient: 50 bits by my step (c), 30 to 41 by the referee's (c′),
+  which I checked. The two "necessary condition" statements are withdrawn.
+
+Still open: G1, G2, G3; the factor L; Theorem D for other rules and for several blocks; where the union starts to
+be attained for small codes; k-NN. Nothing is running.
