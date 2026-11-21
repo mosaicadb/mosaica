@@ -600,10 +600,6 @@ pub struct GroupPlan2 {
     pub lamsum: f32,
     pub d: Vec<Vec<f32>>,
     pub pconst: [f32; NDL_MAX],
-    /// per deterministic level, the spread of a row's coding error along a query as a share of its certified half-width,
-    /// sqrt(sum a_c^2) / sum a_c with a_c = d_c^2 pi_c (pi the query profile): Cauchy-Schwarz over the level's weighted
-    /// coordinates against a random alignment (hierarchy/layered.md 4.2)
-    pub rho: [f32; NDL_MAX],
     pub kmin: [i32; NDL_MAX],
     pub ntab: [[f32; 16]; NDL_MAX],
     pub dt: Vec<f32>,
@@ -870,21 +866,12 @@ impl GroupPlan2 {
             let units = parts.iter().map(|p| p.units()).sum();
             levels.push(LevelPlan { parts, units, srows: 0 });
         }
-        let mut rho = [1f32; NDL_MAX];
-        for (l, r) in rho.iter_mut().enumerate().take(ndl) {
-            let a: Vec<f64> = (0..n).map(|c| (d[l][c] as f64).powi(2) * (pq[c] + 1e-10)).collect();
-            let sum: f64 = a.iter().sum();
-            if sum > 0.0 {
-                *r = (a.iter().map(|x| x * x).sum::<f64>().sqrt() / sum) as f32;
-            }
-        }
         let (v8t, vsc, vinv, vq, e_inv) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0.0);
         let mut gp = GroupPlan2 {
             sig,
             lamsum,
             d,
             pconst,
-            rho,
             kmin: [0; NDL_MAX],
             ntab: [[0.0; 16]; NDL_MAX],
             dt,

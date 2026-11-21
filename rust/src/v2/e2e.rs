@@ -2324,19 +2324,11 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
     [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
 }
 
-/// Each deterministic level's rho is a participation ratio of its n weighted coordinates, so between 1 / sqrt(n) (the
-/// terms equal) and 1 (one term). The query's dial leaves the deterministic levels certified (k-NN sets them cluster
-/// by cluster) and reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi
-/// is infinite.
+/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at the W2 width) and
+/// reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi is infinite.
 #[test]
-fn the_levels_statistical_width_is_a_participation_ratio() {
+fn the_query_dial_leaves_the_deterministic_levels_to_the_reader() {
     let ix = &fixture().ix;
-    let n = ix.n() as f32;
-    for gp in ix.groups.iter().filter(|gp| gp.cal.is_some()) {
-        for &r in &gp.rho[..ix.meta.ndl()] {
-            assert!(r >= (1.0 - 1e-5) / n.sqrt() && r <= 1.0 + 1e-6, "rho {r} at n {n}");
-        }
-    }
     let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
     assert!(ad.dial(f64::INFINITY).iter().all(|&d| d == 1.0));
     let (lo, hi) = (ad.dial(1.0), ad.dial(4.0));
@@ -4352,6 +4344,20 @@ fn study_count_model() {
     eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
 }
 
+/// Each group's derived rho per deterministic level, the studies' unit of a level's error spread: rho derived from the
+/// build's design, whose level weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual variance at the level,
+/// pi_c the query profile of the fit in `dir`), so both sides of Cauchy-Schwarz carry a_c = D_c^2 pi_c per coordinate
+/// and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2.
+fn derived_rho(ix: &Index2, dir: &str) -> Vec<Vec<f32>> {
+    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
+    let n = ix.n();
+    ix.groups.iter().enumerate().map(|(g, gp)| (0..ix.meta.ndl()).map(|l| {
+        let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
+        let sum: f64 = a.iter().sum();
+        if sum > 0.0 { (a.iter().map(|x| x * x).sum::<f64>().sqrt() / sum) as f32 } else { 1.0 }
+    }).collect()).collect()
+}
+
 /// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: per query,
 /// every cluster's centre score, sigma, order key and stream key, and for the DIAG_M clusters first in the k-NN order
 /// (among those holding a visible row) every visible row's entity, exact score, key, certified interval from the key
@@ -4361,7 +4367,7 @@ fn study_count_model() {
 /// u32: cluster, visible rows; a cluster of u32::MAX pads a query with fewer live clusters), `.rows` (per row, 5 + 2
 /// levels words: entity u32, then f32 exact score, key, key interval lo and hi, each level's lo and hi), `.kst` (per
 /// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text; with each group's derived rho per
-/// deterministic level, `GroupPlan2::rho`, and per randomised level its certified constant `csgl` and its blocks'
+/// deterministic level, `derived_rho`, and per randomised level its certified constant `csgl` and its blocks'
 /// `rates`).
 #[test]
 #[ignore]
@@ -4387,7 +4393,7 @@ fn study_layered_dump() {
     let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
     let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
-    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\nrho {:?}\ncsgl {:?}\nrates {:?}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows, ix.groups.iter().map(|gp| gp.rho[..ix.meta.ndl()].to_vec()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.csgl.clone()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.rates.iter().map(|r| r.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>())).unwrap();
+    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\nrho {:?}\ncsgl {:?}\nrates {:?}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows, derived_rho(&ix, &dir), ix.groups.iter().map(|gp| gp.csgl.clone()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.rates.iter().map(|r| r.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>())).unwrap();
     let kst: Vec<f32> = (0..k).flat_map(|c| {
         let cl = &ix.cl[c];
         let nr = (cl.r1 - cl.r0).max(1) as f64;
@@ -4480,16 +4486,10 @@ fn study_layered_kernel() {
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
     let plan = Plan::default();
     eprintln!("{dir} {set}: k {kk}, groups {}, levels end at {:?} B, rho {rho_arg}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
-    // rho derived from the build's own design: a level's weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual
-    // variance at the level, pi_c the query profile), so both sides of Cauchy-Schwarz carry a_c = sqrt(v_c pi_c) =
-    // D_c^2 pi_c per coordinate, and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2
-    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
     let n = ix.n();
+    let derived = derived_rho(&ix, &dir);
     for l in 0..ix.meta.ndl() {
-        let mut r: Vec<f64> = ix.groups.iter().enumerate().map(|(g, gp)| {
-            let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
-            a.iter().map(|x| x * x).sum::<f64>().sqrt() / a.iter().sum::<f64>()
-        }).collect();
+        let mut r: Vec<f64> = derived.iter().map(|x| x[l] as f64).collect();
         r.sort_by(|a, b| a.total_cmp(b));
         if rho_arg == "derived" {
             rho.push(r[r.len() / 2]);
