@@ -22,7 +22,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 10;
+pub const STORE_FORMAT: u64 = 11;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -225,7 +225,7 @@ fn put_cluster(w: &mut Wr, c: &Cl2, ctab: &[kern::CTab], ndl: usize) {
     for x in [c.g, c.r0, c.r1, c.nblk] {
         w.put(x as u64);
     }
-    for x in [c.mn, c.btot, c.mvn, c.rmax, c.numax, c.bmin, c.bmax] {
+    for x in [c.mn, c.btot, c.mvn, c.rmax, c.kx, c.numax, c.bmin, c.bmax] {
         w.put(x);
     }
     w.put(c.mn32);
@@ -251,11 +251,11 @@ fn get_cluster(r: &mut Rd, ndl: usize) -> Result<(Cl2, Vec<kern::CTab>), String>
         *x = r.get::<u64>()? as usize;
     }
     let [g, r0, r1, nblk] = u;
-    let mut f = [0f64; 7];
+    let mut f = [0f64; 8];
     for x in f.iter_mut() {
         *x = r.get::<f64>()?;
     }
-    let [mn, btot, mvn, rmax, numax, bmin, bmax] = f;
+    let [mn, btot, mvn, rmax, kx, numax, bmin, bmax] = f;
     let mn32 = r.get::<f32>()?;
     let bmv = r.arr::<f64>()?;
     if bmv.len() != ndl {
@@ -268,7 +268,7 @@ fn get_cluster(r: &mut Rd, ndl: usize) -> Result<(Cl2, Vec<kern::CTab>), String>
     let (mhat, mv32, wmr) = (r.arr()?, r.arr()?, r.arr()?);
     let nt = r.get::<u64>()? as usize;
     let ctab = (0..nt).map(|_| Ok(kern::CTab { th: r.arr()?, tmax: r.arr()?, step: r.arr()?, off: r.arr()?, err: r.arr()? })).collect::<Result<_, String>>()?;
-    Ok((Cl2 { g, r0, r1, nblk, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot, mvn, rmax, numax, bmin, bmax }, ctab))
+    Ok((Cl2 { g, r0, r1, nblk, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot, mvn, rmax, kx, numax, bmin, bmax }, ctab))
 }
 
 fn cal_json(c: &CalIn, ndl: usize) -> serde_json::Value {

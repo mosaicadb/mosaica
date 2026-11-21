@@ -645,7 +645,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     }
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
-    let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
+    let fixed = a.abs() * c.mn * (DA + c.kx) + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
     // ewj is NaN until the randomised levels' inputs are in, so that an interval read before them is no interval
     let mut cq = CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [f32::NAN; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None };
     if let Some(rot) = gq.rot.get() {
@@ -788,13 +788,13 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let pm = if ix.apm.is_empty() { dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat) } else { ix.apm[a * k + ci] };
     let rm = cm - b * pm;
     let rp = (rho * rho - rm * rm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
-    Cut { cm, s1, bh, bl, rm, rp }
+    Cut { cm, s1, bh, bl, rm, rp, da: DA + c.kx }
 }
 
 pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize, usize, usize) {
     let c = &ix.cl[ci];
     let rr = ix.x2.sqrt();
-    let eps = 1e-9 + DA;
+    let eps = 1e-9 + cu.da;
     let uset = isect(sup_set(cu.cm, cu.s1, rr, t - 1e-9), sup_set(cu.rm, cu.rp, rr, t - cu.bh - 1e-9));
     let lset = isect(inf_set(cu.cm, cu.s1, rr, t + 1e-9), inf_set(cu.rm, cu.rp, rr, t - cu.bl + 1e-9));
     let ah = &ix.ahat[c.r0..c.r1];
@@ -824,7 +824,7 @@ pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize,
 pub fn key_interval2(ix: &Index2, cu: &Cut, row: usize) -> (f64, f64) {
     let rr = ix.x2.sqrt();
     let a = ix.ahat[row] as f64 / 32767.0;
-    let (lo, hi) = ((a - DA).max(-rr), (a + DA).min(rr));
+    let (lo, hi) = ((a - cu.da).max(-rr), (a + cu.da).min(rr));
     let f = |p: f64, r: f64, off: f64, sgn: f64| -> f64 {
         let qn = (p * p + r * r).sqrt().max(1e-300);
         let astar = sgn * p * rr / qn;
@@ -4083,7 +4083,7 @@ pub struct Synth2 {
     pub vq: Vec<Vec<f64>>, // per group, row-major V_q (for item queries)
 }
 impl Synth2 {
-    pub fn gen(&self, c: usize, sid: u32, z: &mut [f64]) -> (i16, f64) {
+    pub fn gen(&self, c: usize, sid: u32, z: &mut [f64]) -> (i16, f64, f64) {
         use rand::{Rng, SeedableRng};
         use rand_distr::StandardNormal;
         let g = self.grp[c];
@@ -4108,7 +4108,8 @@ impl Synth2 {
             mz2 += mv[k] * z[k];
         }
         let a = (mn * mn + mz2) / mn;
-        ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, self.eg[g] * zz * t * t)
+        let (ah, ex) = crate::index::key_of(a);
+        (ah, ex, self.eg[g] * zz * t * t)
     }
     pub fn exact_score(&self, ix: &Index2, pr: &Prep2, row: usize) -> f64 {
         let c = self.row_cl[row] as usize;
@@ -4146,12 +4147,13 @@ impl<'a> Source2 for SynthSrc<'a> {
         let nc = self.sy.sizes[c];
         let mut z = vec![0f64; nc * n];
         let mut key: Vec<(i16, u32, usize)> = Vec::with_capacity(nc);
-        let mut x2max = 0f64;
+        let (mut x2max, mut kx) = (0f64, 0f64);
         let mut tmp = vec![0f64; n];
         for i in 0..nc {
             let sid = (self.sy.coff[c] + i) as u32;
-            let (ah, dev) = self.sy.gen(c, sid, &mut tmp);
+            let (ah, ex, dev) = self.sy.gen(c, sid, &mut tmp);
             x2max = x2max.max(dev + 1e-12);
+            kx = kx.max(ex);
             z[i * n..(i + 1) * n].copy_from_slice(&tmp);
             key.push((ah, sid, i));
         }
@@ -4160,6 +4162,6 @@ impl<'a> Source2 for SynthSrc<'a> {
         for (j, k) in key.iter().enumerate() {
             zs[j * n..(j + 1) * n].copy_from_slice(&z[k.2 * n..(k.2 + 1) * n]);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new(), x16: Vec::new() }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, kx, nu: Vec::new(), x16: Vec::new() }
     }
 }

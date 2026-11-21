@@ -799,7 +799,7 @@ fn same_index(a: &Index2, b: &Index2) {
     assert_eq!((a.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&a.etab.lo), f32b(&a.etab.hi)), (b.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&b.etab.lo), f32b(&b.etab.hi)));
     for (x, y) in a.cl.iter().zip(&b.cl) {
         assert_eq!((x.g, x.r0, x.r1, x.nblk, x.mn32.to_bits()), (y.g, y.r0, y.r1, y.nblk, y.mn32.to_bits()));
-        assert_eq!(f64b(&[x.mn, x.btot, x.mvn, x.rmax, x.numax, x.bmin, x.bmax]), f64b(&[y.mn, y.btot, y.mvn, y.rmax, y.numax, y.bmin, y.bmax]));
+        assert_eq!(f64b(&[x.mn, x.btot, x.mvn, x.rmax, x.kx, x.numax, x.bmin, x.bmax]), f64b(&[y.mn, y.btot, y.mvn, y.rmax, y.kx, y.numax, y.bmin, y.bmax]));
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
@@ -1249,6 +1249,96 @@ fn support_bounds_equal_brute_force_in_f64() {
             if mx.abs() < 255.0 && mi.abs() < 255.0 {
                 // where 2^-15 multiples are f32 values, the plain rounding of UP's build_table2
                 assert_eq!((hi[a], lo[a]), ((((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32, (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32), "n {n}, anchor {a}");
+            }
+        }
+    }
+}
+
+/// The fit's rows from its Xs.npy, with the rows of `rows` replaced.
+struct Planted {
+    xs: crate::index::RealSource,
+    rows: std::collections::HashMap<usize, Vec<u16>>,
+}
+impl crate::bucket::FitRows for Planted {
+    fn n(&self) -> usize {
+        self.xs.n
+    }
+    fn row(&self, r: usize) -> &[u16] {
+        self.rows.get(&r).map_or_else(|| self.xs.row(r), |v| &v[..])
+    }
+}
+
+/// synth4k's fit and its index built in memory under `o`, with the rows `plant` gives from the fit's parameters
+/// (row, f16 vector) in place of the fit's.
+fn build_planted(o: &BuildOptions, plant: impl Fn(&crate::index::Params) -> Vec<(usize, Vec<u16>)>) -> (crate::index::Params, Index2) {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (mut p, prof) = prepare(dir, o).unwrap();
+    p.load_perm().unwrap();
+    let rows = plant(&p).into_iter().collect();
+    let src = Real2 { src: Planted { xs: crate::index::RealSource::open(&p.xs_path), rows } };
+    let ix = build2(&p, &prof, &src, Full2::Real { rows: Default::default() }, o, None, None, &mut |_| {});
+    (p, ix)
+}
+
+/// Cluster c's centre direction as the build computes it (`mhat`, also its anchor).
+fn mhat_of(p: &crate::index::Params, c: usize) -> Vec<f64> {
+    let n = p.meta.n;
+    let m = &p.centres[c * n..(c + 1) * n];
+    let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+    m.iter().map(|&x| x as f64 / mn).collect()
+}
+
+/// Rows longer than 1 along their cluster's centre direction have x . mhat past 1 + DA, where the key is clamped to 1.
+/// The cluster's keys then allow that excess (the sorted range, the norm sort's bounds of m.r, rmax and the levels'
+/// fixed term), so threshold answers at those rows' own scores, the intervals of the rows taken in and k-NN answers
+/// equal brute force, with the support table and with the norm sort.
+#[test]
+fn keys_clamped_past_da_are_allowed_for() {
+    use crate::util::{f16_to_f32, f32_to_f16};
+    let c = 2;
+    let lens = [1.0003, 1.0002, 1.00025];
+    for o in [BuildOptions::default(), BuildOptions { nusort: true, ..BuildOptions::default() }] {
+        let (p, ix) = build_planted(&o, |p| {
+            let mh = mhat_of(p, c);
+            lens.iter().enumerate().map(|(i, &len)| (p.cstart[c] + i, mh.iter().map(|&v| f32_to_f16((len * v) as f32)).collect())).collect()
+        });
+        let mh = mhat_of(&p, c);
+        let cl = &ix.cl[c];
+        let mut most = 0f64;
+        for i in 0..lens.len() {
+            let row = ix.row_of_ent(p.perm[p.cstart[c] + i] as u32);
+            let a: f64 = ix.full_row_f16(row).iter().zip(&mh).map(|(&h, &m)| f16_to_f32(h) as f64 * m).sum();
+            assert!(a > 1.0 + crate::index::DA + 1e-4 && ix.ahat[row] == 32767, "planted row {i}: x . mhat {a}, key {}", ix.ahat[row]);
+            most = most.max(a - 1.0);
+        }
+        assert!(cl.kx >= most && cl.kx <= most * (1.0 + 1e-12), "the cluster's clamp excess {} for a largest x . mhat - 1 of {most}", cl.kx);
+        assert!(ix.cl.iter().enumerate().all(|(ci, x)| ci == c || x.kx == 0.0), "a cluster without a clamped key pays an excess");
+        let q: Vec<f32> = mh.iter().map(|&v| v as f32).collect();
+        let pr = prep2(&ix, &q);
+        let t = truth(&ix, &q, None);
+        let mut ths: Vec<f64> = t[..lens.len() + 1].iter().map(|x| x.0).collect();
+        ths.extend(thresholds(&t));
+        for th in ths {
+            for (pname, plan) in plans() {
+                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "nusort {}, plan {pname}, t {th}", o.nusort);
+            }
+        }
+        // the bounds each row's key gives hold its score
+        let qm = pr.qm(&ix, c);
+        for row in cl.r0..cl.r1 {
+            let v = exact_value2(&ix, &pr, row);
+            let (lb, ub) = if o.nusort {
+                let nc = NuCut::new(&ix, c, &pr, get_gq2(&ix, &pr, cl.g, &mut crate::kernel::Stats::new(ix.meta.nl())), qm);
+                nc.bounds(nc.nu_of(ix.nukey[row]))
+            } else {
+                key_interval2(&ix, &cut_params2(&ix, c, &pr, qm), row)
+            };
+            assert!(lb <= v && v <= ub, "row {row}: {v} outside [{lb}, {ub}], nusort {}", o.nusort);
+        }
+        for k in [1, 2, 3, 10] {
+            for (pname, plan) in plans() {
+                assert_eq!(sub_values(&ix, &knn2(&ix, &q, k, None, plan).ents, &q), top_values(&t, k), "nusort {}, plan {pname}, k {k}", o.nusort);
             }
         }
     }

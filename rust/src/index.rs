@@ -2,6 +2,13 @@
 use crate::util::*;
 
 pub const DA: f64 = 0.5 / 32767.0 + 1e-7;
+
+/// The stored key of a row whose x . mhat the build computes as `a`, and how far `a` lies outside [-1, 1], where the
+/// key is clamped (rounded up; 0 inside). The key is within DA plus that excess of x . mhat.
+#[inline]
+pub fn key_of(a: f64) -> (i16, f64) {
+    ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, (a.abs() - 1.0).max(0.0) * (1.0 + 2.0 * f64::EPSILON))
+}
 pub const SEED: u64 = 20261112;
 /// The format of a fitted index directory (meta.json "format") that this build reads.
 pub const FIT_FORMAT: u64 = 2;
