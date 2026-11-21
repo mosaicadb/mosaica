@@ -6,7 +6,7 @@
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
 //! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
-//! state, `order::OrderState`), `wrule_g.bin`, `wrule_c.bin` and `wrule_p.bin` (the approximate k-NN's W2 width's stored
+//! state, `order::OrderState`), `wrule_h.bin`, `wrule_c.bin` and `wrule_p.bin` (the approximate k-NN's W2 width's stored
 //! forms, `wrule::WForms`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
 //! number of directions the order state holds per cluster, the build options that decide the encoding, and the key
 //! of the fit and those options it was built from).
@@ -23,7 +23,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 15;
+pub const STORE_FORMAT: u64 = 16;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -533,7 +533,7 @@ pub fn save_rest(ix: &Index2, dir: &str) {
     }
     write_file(&f("clusters.bin"), &w.0);
     if let Some(w) = &ix.wforms {
-        write_file(&f(super::wrule::FILES[0]), &w.g);
+        write_file(&f(super::wrule::FILES[0]), &w.h);
         write_file(&f(super::wrule::FILES[1]), &w.c);
         write_file(&f(super::wrule::FILES[2]), &w.pm);
     }
@@ -869,7 +869,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
-    let wforms = super::wrule::WForms { r, g: wg.to_vec(), c: wc.to_vec(), pm: wp.to_vec() };
+    let wforms = super::wrule::WForms { r, h: wg.to_vec(), c: wc.to_vec(), pm: wp.to_vec() };
     wforms.check(groups.len(), k, meta.ndl(), n).map_err(|e| damaged(&e))?;
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
@@ -1192,7 +1192,7 @@ impl Index2 {
             None => h.u64(0),
             Some(w) => {
                 h.usizes(&[1, w.r]);
-                h.pod(&w.g[..]);
+                h.pod(&w.h[..]);
                 h.pod(&w.c[..]);
                 h.pod(&w.pm[..]);
             }

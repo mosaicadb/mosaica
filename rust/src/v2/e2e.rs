@@ -925,7 +925,7 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
-    assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.g), f32b(&w.c), f32b(&w.pm))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.g), f32b(&w.c), f32b(&w.pm))));
+    assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c), f32b(&w.pm))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c), f32b(&w.pm))));
     for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
         assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
     }
@@ -2349,7 +2349,7 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
     let w = built.wforms.as_ref().unwrap();
     let (ndl, wr) = (built.meta.ndl(), w.r);
-    assert_eq!((w.g.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * ndl * wrule::WForms::rec(wr)));
+    assert_eq!((w.h.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * ndl * wrule::WForms::rec(wr)));
     // every M and N a second moment (a'Ma >= 0), gamma at least 0 and U above 0 for every cluster with rows
     let a: Vec<f32> = (0..wr).map(|j| 1.0 - j as f32 / wr as f32).collect();
     for c in (0..built.k()).filter(|&c| built.cl[c].r1 > built.cl[c].r0) {
@@ -2362,9 +2362,9 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     let ow = opened.wforms.as_ref().unwrap();
-    assert_eq!((wr, bits(&w.g), bits(&w.c), bits(&w.pm)), (ow.r, bits(&ow.g), bits(&ow.c), bits(&ow.pm)));
+    assert_eq!((wr, bits(&w.h), bits(&w.c), bits(&w.pm)), (ow.r, bits(&ow.h), bits(&ow.c), bits(&ow.pm)));
     let fw = fixture().ix.wforms.as_ref().unwrap();
-    assert_eq!((bits(&w.g), bits(&w.c), bits(&w.pm)), (bits(&fw.g), bits(&fw.c), bits(&fw.pm)), "a saved build stores the forms the build in memory does");
+    assert_eq!((bits(&w.h), bits(&w.c), bits(&w.pm)), (bits(&fw.h), bits(&fw.c), bits(&fw.pm)), "a saved build stores the forms the build in memory does");
     opened.wforms = None;
     let e = adaptive::Adaptive::new(&opened, fixed_costs()).map(|_| ()).unwrap_err();
     assert!(e.contains("W2 forms") && e.contains("rebuild"), "{e}");
@@ -2396,7 +2396,7 @@ fn an_index_with_a_zero_row_builds_and_opens() {
     let zero: Vec<usize> = (0..built.nrows).filter(|&r| built.full_row_f16(r).iter().all(|&h| crate::util::f16_to_f32(h) == 0.0)).collect();
     assert_eq!(zero.len(), 1);
     let w = built.wforms.as_ref().unwrap();
-    assert!(w.g.iter().chain(&w.c).all(|x| x.is_finite()));
+    assert!(w.h.iter().chain(&w.c).all(|x| x.is_finite()));
     let (_, opened) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(opened.store_hash(), built.store_hash());
 }
@@ -2412,7 +2412,7 @@ fn the_w2_forms_do_not_depend_on_the_threads() {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
         let (_, ix) = pool.install(|| build(dir, &BuildOptions::default(), &mut |_| {})).unwrap();
         let x = ix.wforms.as_ref().unwrap();
-        assert_eq!((bits(&x.g), bits(&x.c), bits(&x.pm)), (bits(&w.g), bits(&w.c), bits(&w.pm)), "{threads} threads");
+        assert_eq!((bits(&x.h), bits(&x.c), bits(&x.pm)), (bits(&w.h), bits(&w.c), bits(&w.pm)), "{threads} threads");
     }
 }
 
@@ -2433,7 +2433,7 @@ fn the_w2_spread_takes_the_centre_term_off() {
             let g = ix.cl[ci].g;
             let gq = group_q2r(ix, g, &pr, false);
             let alr = cluster_q2(ix, ci, &gq, &pr, pr.qm(ix, ci)).alr as f64;
-            let got = w2_tau2(ix, ci, &gq.qv, alr, &st.coefs_of(ci, n, &pr.q32));
+            let got = w2_tau2(ix, ci, &gq, alr, &st.coefs_of(ci, n, &pr.q32));
             let m = &ix.centres32[ci * n..(ci + 1) * n];
             let a: Vec<f32> = (0..st.r).map(|j| {
                 let p = &st.dirs(ci, st.r, n)[j * n..(j + 1) * n];
@@ -2441,8 +2441,8 @@ fn the_w2_spread_takes_the_centre_term_off() {
             }).collect();
             let a0 = st.coefs_of(ci, n, &pr.q32);
             for (l, &gl) in got.iter().enumerate().take(ndl) {
-                let (gd, dl, mv) = (wf.gdiag(n, ndl, g, l), &ix.groups[g].d[l], &ix.cl[ci].mv32);
-                let t = |off: f64| -> f64 { (0..n).map(|j| ((gq.qv[j] - off * mv[j] as f64) * dl[j] as f64).powi(2) * gd[j] as f64).sum() };
+                let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[ci].mv32);
+                let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
                 let want = wf.tau2(ndl, ci, l, &a, t(alr));
                 assert!((gl - want).abs() <= 1e-4 * want.abs() + 1e-12, "cluster {ci}, level {l}: {gl} against {want}");
                 checked += 1;
@@ -2613,7 +2613,7 @@ fn study_w2_cost() {
     let (mut sink, t) = (0f64, Timer::new());
     for _ in 0..reps {
         for (c, gq, alr, a, _) in &cases {
-            sink += std::hint::black_box(w2_tau2(&ix, *c, &gq.qv, *alr, a))[0];
+            sink += std::hint::black_box(w2_tau2(&ix, *c, gq, *alr, a))[0];
         }
     }
     let tw = t.s();
@@ -2672,14 +2672,14 @@ fn study_w2_alr() {
         let g = ix.cl[c].g;
         let gq = group_q2r(&ix, g, &pr, false);
         let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
-        let (gd, dl, mv) = (wf.gdiag(n, ndl, g, l), &ix.groups[g].d[l], &ix.cl[c].mv32);
-        let t = |off: f64| -> f64 { (0..n).map(|j| ((gq.qv[j] - off * mv[j] as f64) * dl[j] as f64).powi(2) * gd[j] as f64).sum() };
+        let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[c].mv32);
+        let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
         let a = st.coefs_of(c, n, &q);
         let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n]);
         let a2: Vec<f32> = a.iter().zip(&am).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
         let (w, wv) = (tau2(c, l, &a, t(0.0)), tau2(c, l, &a2, t(alr)));
         let tm = Timer::new();
-        let reader = std::hint::black_box(w2_tau2(&ix, c, &gq.qv, alr, &a))[l];
+        let reader = std::hint::black_box(w2_tau2(&ix, c, &gq, alr, &a))[l];
         (secs, calls) = (secs + tm.s(), calls + 1);
         let rel = (reader - wv).abs() / wv.abs().max(1e-300);
         (worst, over) = (worst.max(rel), over + (rel > 1e-4) as usize);
@@ -2732,11 +2732,11 @@ fn study_w2_forms() {
         let pr = prep2(&ix, &q);
         let g = ix.cl[c].g;
         let qv = group_q2r(&ix, g, &pr, false).qv;
-        let gd = wf.gdiag(n, ndl, g, l);
-        let t: f64 = (0..n).map(|j| (qv[j] * ix.groups[g].d[l][j] as f64).powi(2) * gd[j] as f64).sum();
+        let h = wf.h(n, ndl, g, l);
+        let t: f64 = (0..n).map(|j| qv[j].powi(2) * h[j] as f64).sum();
         let a = st.coefs_of(c, n, &q);
         let rec = wf.of(ndl, c, l);
-        let tau2 = wrule::packed_quad(&rec[..rp], &a) + rec[2 * rp] as f64 * (t - wrule::packed_quad(&rec[rp..2 * rp], &a)).max(0.0);
+        let tau2 = wf.tau2(ndl, c, l, &a, t);
         rt.push(tau2 / f[12]);
         rg.push(rec[2 * rp] as f64 / f[16]);
     }

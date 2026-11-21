@@ -75,6 +75,7 @@ pub struct GQ2 {
     // two products and their sum round, within about u (2 |q| + 2 sqrt n) of the exact value, far inside the
     // 1e-12 |qv| the bounds allow
     pub qv: Vec<f64>,
+    pub qv32: Vec<f32>, // qv in f32 (the W2 width's T, `w2_tau2`)
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
@@ -486,7 +487,8 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
         }
     }
     let l1det = wq.iter().map(|x| x.abs() as f64).sum();
-    let gq = GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, rot: OnceLock::new(), cyc: (0, 0), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() };
+    let qv32 = qv.iter().map(|&x| x as f32).collect();
+    let gq = GQ2 { qv, qv32, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, rot: OnceLock::new(), cyc: (0, 0), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() };
     if rot {
         let _ = gq.rot.set(rotate(ix, &[&gq]).pop().unwrap());
     }
@@ -1180,21 +1182,60 @@ const PF: usize = 8;
 /// Cluster ci's W2 spread squared at each deterministic level, with the centre's term taken off as the reader's
 /// estimate takes it (`wrule`): `qv` the query in its group's basis (`GQ2::qv`), `alr` the cluster's centre coefficient
 /// for the query (`CQ2::alr`), `a` the query's coefficients on the cluster's order directions; a' = a - alr P'm (P'm
-/// stored, `WForms::pm`), D' = (qv - alr mv) d_l (mv the stored `Cl2::mv32`), T' = D'GD', and tau^2 from a' and T'
-/// (`WForms::tau2`).
-pub fn w2_tau2(ix: &Index2, ci: usize, qv: &[f64], alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
+/// stored, `WForms::pm`), D' = (qv - alr mv) d_l (mv the stored `Cl2::mv32`, qv the group setup's `GQ2::qv32`),
+/// T' = D'GD' = sum_j (qv_j - alr mv_j)^2 h_lj (h_l = d_l^2 G_l, stored; two levels a pass, `centred_sq2`), and tau^2
+/// from a' and T' (`WForms::tau2`).
+pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
     let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
     let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
     let pm = &wf.pm[ci * wf.r..(ci + 1) * wf.r];
     let a: Vec<f32> = a.iter().zip(pm).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
-    let (mv, gp) = (&ix.cl[ci].mv32, &ix.groups[g]);
+    let mv = &ix.cl[ci].mv32;
+    let mut t = [0f64; NDL_MAX];
+    for l in (0..ndl).step_by(2) {
+        let h1 = wf.h(n, ndl, g, (l + 1).min(ndl - 1));
+        (t[l], t[(l + 1).min(NDL_MAX - 1)]) = unsafe { centred_sq2(&gq.qv32, mv, alr as f32, wf.h(n, ndl, g, l), h1) };
+    }
     let mut tau2 = [0f64; NDL_MAX];
     for (l, x) in tau2.iter_mut().enumerate().take(ndl) {
-        let (gd, dl) = (wf.gdiag(n, ndl, g, l), &gp.d[l]);
-        let t: f64 = (0..n).map(|j| ((qv[j] - alr * mv[j] as f64) * dl[j] as f64).powi(2) * gd[j] as f64).sum();
-        *x = wf.tau2(ndl, ci, l, &a, t);
+        *x = wf.tau2(ndl, ci, l, &a, t[l]);
     }
     tau2
+}
+
+/// sum_j (qv_j - alr mv_j)^2 h0_j and the same with h1, in one pass: f32 lanes (two 8-lane accumulators each), summed
+/// in f64.
+#[target_feature(enable = "avx2,fma")]
+unsafe fn centred_sq2(qv: &[f32], mv: &[f32], alr: f32, h0: &[f32], h1: &[f32]) -> (f64, f64) {
+    use std::arch::x86_64::*;
+    let n = qv.len();
+    let al = _mm256_set1_ps(alr);
+    let (mut s0, mut s1) = ([_mm256_setzero_ps(); 2], [_mm256_setzero_ps(); 2]);
+    let mut i = 0;
+    while i + 16 <= n {
+        for k in 0..2 {
+            let o = i + 8 * k;
+            let e = _mm256_fnmadd_ps(al, _mm256_loadu_ps(mv.as_ptr().add(o)), _mm256_loadu_ps(qv.as_ptr().add(o)));
+            let e2 = _mm256_mul_ps(e, e);
+            s0[k] = _mm256_fmadd_ps(e2, _mm256_loadu_ps(h0.as_ptr().add(o)), s0[k]);
+            s1[k] = _mm256_fmadd_ps(e2, _mm256_loadu_ps(h1.as_ptr().add(o)), s1[k]);
+        }
+        i += 16;
+    }
+    let sum = |v: [__m256; 2]| -> f64 {
+        let (mut a, mut b) = ([0f32; 8], [0f32; 8]);
+        _mm256_storeu_ps(a.as_mut_ptr(), v[0]);
+        _mm256_storeu_ps(b.as_mut_ptr(), v[1]);
+        a.iter().chain(&b).map(|&x| x as f64).sum()
+    };
+    let (mut r0, mut r1) = (sum(s0), sum(s1));
+    while i < n {
+        let e = qv[i] as f64 - alr as f64 * mv[i] as f64;
+        r0 += e * e * h0[i] as f64;
+        r1 += e * e * h1[i] as f64;
+        i += 1;
+    }
+    (r0, r1)
 }
 
 /// Row `row`'s stored norm at deterministic level l, in cluster ci: pconst_l s ntab_l[code] (s the row's scale), or its
@@ -3982,7 +4023,7 @@ impl<'a> KnnReader<'a> {
     fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<Vec<f32>>) {
         let ix = self.ix;
         let a = coef.unwrap_or_else(|| ix.order.as_ref().unwrap().coefs_of(ci, ix.n(), &self.pr.q32));
-        let tau2 = w2_tau2(ix, ci, &gq.qv, cq.alr as f64, &a);
+        let tau2 = w2_tau2(ix, ci, gq, cq.alr as f64, &a);
         cq.set_w2(ix, ci, psi, &tau2);
     }
 

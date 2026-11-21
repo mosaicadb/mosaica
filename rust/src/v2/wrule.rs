@@ -18,15 +18,15 @@
 use super::q::*;
 use super::*;
 
-/// The files of a saved index that hold the forms: per group and level G (n values), per cluster and level the record
-/// `WForms::rec`, and per cluster P'm (r values).
-pub const FILES: [&str; 3] = ["wrule_g.bin", "wrule_c.bin", "wrule_p.bin"];
+/// The files of a saved index that hold the forms: per group and level h = d_l^2 G (n values), per cluster and level the
+/// record `WForms::rec`, and per cluster P'm (r values).
+pub const FILES: [&str; 3] = ["wrule_h.bin", "wrule_c.bin", "wrule_p.bin"];
 
 /// The stored forms of an index whose clusters hold `r` order directions.
 pub struct WForms {
     pub r: usize,
-    /// per group and level, G (ng x ndl x n)
-    pub g: Vec<f32>,
+    /// per group and level, h = d_l^2 G (ng x ndl x n): T = D'GD' is sum_j (qv_j - alr mv_j)^2 h_j
+    pub h: Vec<f32>,
     /// per cluster and level, M and N packed (upper triangle, row by row), gamma and U (k x ndl x `rec(r)`)
     pub c: Vec<f32>,
     /// per cluster, its centre's coefficients on its order directions, P'm (k x r, `OrderState::coefs_of`)
@@ -57,18 +57,18 @@ impl WForms {
         self.of(ndl, ci, l)[self.r * (self.r + 1) + 1] as f64
     }
 
-    /// Group g's G at level l.
-    pub fn gdiag(&self, n: usize, ndl: usize, g: usize, l: usize) -> &[f32] {
-        &self.g[(g * ndl + l) * n..(g * ndl + l + 1) * n]
+    /// Group g's h = d_l^2 G at level l.
+    pub fn h(&self, n: usize, ndl: usize, g: usize, l: usize) -> &[f32] {
+        &self.h[(g * ndl + l) * n..(g * ndl + l + 1) * n]
     }
 
     /// Whether the forms fit an index of `ng` groups and `k` clusters at `ndl` levels of `n` dimensions, every value
     /// finite: what a build must make and an open must find.
     pub fn check(&self, ng: usize, k: usize, ndl: usize, n: usize) -> Result<(), String> {
-        if self.g.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) || self.pm.len() != k * self.r {
+        if self.h.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) || self.pm.len() != k * self.r {
             return Err(format!("{}, {} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1], FILES[2]));
         }
-        match self.g.iter().chain(&self.c).chain(&self.pm).position(|x| !x.is_finite()) {
+        match self.h.iter().chain(&self.c).chain(&self.pm).position(|x| !x.is_finite()) {
             Some(i) => Err(format!("the W2 forms hold a value that is not a number (at {i})")),
             None => Ok(()),
         }
@@ -309,7 +309,11 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
     }).collect();
     let st = ix.order.as_ref().unwrap();
     let pm = (0..k).flat_map(|c| st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])).collect();
-    WForms { r, g: g.iter().map(|&x| x as f32).collect(), c: recs.concat(), pm }
+    let h = (0..ng * ndl * n).map(|i| {
+        let (gl, t) = (i / n, i % n);
+        ((ix.groups[gl / ndl].d[gl % ndl][t] as f64).powi(2) * g[i]) as f32
+    }).collect();
+    WForms { r, h, c: recs.concat(), pm }
 }
 
 #[cfg(test)]
