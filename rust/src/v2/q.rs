@@ -1146,7 +1146,7 @@ struct RandLv<'a> {
     nd: [f32; J],
     inb: [f32; J],   // 1 / (block size - 1)
     dk: [f32; J],    // kappa rounding bound and the estimate's 16 u
-    ekw: [f32; J],   // table and weight error per unit kappa
+    ekw: [f32; J],   // table and weight error per unit decoded kappa
     csgl: f32,
     dial: f32,
     alr: f32,
@@ -1607,7 +1607,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 nd: cq.nd,
                 inb: std::array::from_fn(|j| 1.0 / (gp.nb[j] - 1) as f32),
                 dk: std::array::from_fn(|j| dmxj[j] + (16.0 * U) as f32),
-                ekw: std::array::from_fn(|j| ej[j] + cq.ewj[j]),
+                // ej and ewj bound the error per unit of the true kappa, which is at most the decoded one times 1 + dmxj
+                ekw: std::array::from_fn(|j| (ej[j] + cq.ewj[j]) * (1.0 + dmxj[j])),
                 csgl: gp.csgl[lr],
                 dial: pr.dial[l],
                 alr: cq.alr,
