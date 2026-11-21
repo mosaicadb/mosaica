@@ -199,6 +199,19 @@ pub fn sigma_of(st: &super::order::OrderState, rest: f64, n: usize, ci: usize, q
     (v + rest * (qq - pp).max(0.0)).max(0.0).sqrt()
 }
 
+/// The probe's window key of every cluster, mu_c + z(1, v) sigma_c(q), z(1, v) = Phi^-1(v / (v + 1)) of its v rows
+/// (`nv`; 0 for none), from the clusters' centre scores `qm`, the order state `st` and the query's f32 values `q32`:
+/// the level ratios' ranking of the clusters, and the studies' (`Adaptive::z_keys`).
+pub fn window_keys(ix: &Index2, st: &super::order::OrderState, qm: &[f64], q32: &[f32], nv: impl Fn(usize) -> usize) -> Vec<f64> {
+    let qq: f64 = q32.iter().map(|&x| x as f64 * x as f64).sum();
+    let mut p = vec![0f32; st.r];
+    (0..ix.k()).map(|c| {
+        let v = nv(c) as f64;
+        let z = if v == 0.0 { 0.0 } else { inv_norm(v / (v + 1.0)) };
+        qm[c] + z * sigma_of(st, st.rest(c), ix.n(), c, q32, qq, &mut p)
+    }).collect()
+}
+
 /// The file of a saved index that holds its level ratios (`level_ratios`).
 pub const RATIO_FILE: &str = "level_ratio.bin";
 /// The level ratios' training queries: this many rows of the index (all of them on a smaller one), each against the
@@ -222,10 +235,9 @@ pub const RATIO_MIN_PAIRS: usize = 3;
 /// of queries used.
 pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<f32>, usize) {
     use rayon::prelude::*;
-    let (k, ndl, n, nl) = (ix.k(), ix.meta.ndl(), ix.n(), ix.meta.nl());
+    let (k, ndl, nl) = (ix.k(), ix.meta.ndl(), ix.meta.nl());
     let st = ix.order.as_ref().expect("the level ratios rank the clusters by the order state, which this index lacks");
     let centres = Approx::centres(ix);
-    let rest: Vec<f64> = (0..k).map(|c| st.rest(c)).collect();
     let rows_of = |c: usize| ix.cl[c].r1 - ix.cl[c].r0;
     // per query, each cluster it reads with its rows and sum of z^2 per level; added in query order, so that the sums
     // do not depend on how the queries were split over threads
@@ -234,13 +246,8 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<
     let per: Vec<Sums> = used.par_iter().map(|&(q, own)| {
         // scaled as k-NN scales the query (`Prep2::unit`), since the intervals carry an absolute margin
         let pr = prep2(ix, q).unit();
-        let qm = centres.centre_scores(ix, &pr.q32);
-        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        let mut p = vec![0f32; st.r];
-        let mut by: Vec<(f64, usize)> = (0..k).filter(|&c| rows_of(c) > 0).map(|c| {
-            let v = rows_of(c) as f64;
-            (qm[c] + inv_norm(v / (v + 1.0)) * sigma_of(st, rest[c], n, c, &pr.q32, qq, &mut p), c)
-        }).collect();
+        let keys = window_keys(ix, st, &centres.centre_scores(ix, &pr.q32), &pr.q32, rows_of);
+        let mut by: Vec<(f64, usize)> = (0..k).filter(|&c| rows_of(c) > 0).map(|c| (keys[c], c)).collect();
         by.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut rf = Refiner::new(ix, &pr);
         let mut sts = Stats::new(nl);
@@ -793,13 +800,15 @@ impl Adaptive {
     pub(crate) fn z_keys(&self, ix: &Index2, q: &[f32], vis: Option<&Vis2>, sigma: bool) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
-        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        let mut p = vec![0f32; self.st.r];
-        let s = self.stream_scale(&pr.q32, &mut p);
+        let nv = |ci: usize| vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+        if sigma {
+            return window_keys(ix, &self.st, &qm, &pr.q32, nv);
+        }
+        let s = self.stream_scale(&pr.q32, &mut vec![0f32; self.st.r]);
         (0..ix.k()).map(|ci| {
-            let v = vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize) as f64;
+            let v = nv(ci) as f64;
             let z = if v == 0.0 { 0.0 } else { inv_norm(v / (v + 1.0)) };
-            qm[ci] + z * if sigma { self.sigma(ix, ci, &pr.q32, qq, &mut p) } else { self.st.rad[ci] * s }
+            qm[ci] + z * self.st.rad[ci] * s
         }).collect()
     }
 
