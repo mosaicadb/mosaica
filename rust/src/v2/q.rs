@@ -1187,7 +1187,7 @@ const PF: usize = 8;
 pub fn det_norm(ix: &Index2, ci: usize, l: usize, row: usize) -> f64 {
     let (c, gp) = (&ix.cl[ci], &ix.groups[ix.cl[ci].g]);
     let ri = row - c.r0;
-    let byte = ix.lscal[l][ix.soff[l][ci] + (ri / BLK) * gp.levels[l].srows * 16 + (ri % BLK & 15)];
+    let byte = ix.lscal[l][ix.soff[l][ci] + (ri / BLK) * gp.levels[l].srows * 16 + ((ri % BLK) & 15)];
     let code = (if ri % BLK < 16 { byte & 15 } else { byte >> 4 }) as usize;
     if code == 15 {
         ix.esc.get(l as u8, 0, row as u32) as f64
@@ -3959,7 +3959,7 @@ impl<'a> KnnReader<'a> {
     /// The reader with each cluster's deterministic levels on the index path read at its W2 width for `psi` (at least
     /// 0; infinity is the certified width; `CQ2::set_w2`), not at the query's dial.
     pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
-        assert!(psi >= 0.0, "the statistical width needs a psi of at least 0, not {psi}");
+        assert!(psi >= 0.0, "the W2 width needs a psi of at least 0, not {psi}");
         self.width = Some(psi);
         self
     }
@@ -3970,12 +3970,7 @@ impl<'a> KnnReader<'a> {
         let (ix, pr) = (self.ix, self.pr);
         let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
         let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
-        let a = coef.unwrap_or_else(|| {
-            let st = ix.order.as_ref().unwrap();
-            let mut p = vec![0f32; st.r];
-            unsafe { crate::kernel::gemv_i8(&pr.q32, st.dirs(ci, st.r, n), n, &mut p) };
-            p.iter().zip(&st.dsc[ci * st.r..(ci + 1) * st.r]).map(|(&x, &d)| x * d).collect()
-        });
+        let a = coef.unwrap_or_else(|| ix.order.as_ref().unwrap().coefs_of(ci, n, &pr.q32));
         if self.wt.is_empty() {
             self.wt = vec![None; ix.groups.len()];
         }

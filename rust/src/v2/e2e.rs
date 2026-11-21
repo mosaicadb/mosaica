@@ -2569,7 +2569,7 @@ fn study_w2_forms() {
         let qv = group_q2r(&ix, g, &pr, false).qv;
         let gd = wf.gdiag(n, ndl, g, l);
         let t: f64 = (0..n).map(|j| (qv[j] * ix.groups[g].d[l][j] as f64).powi(2) * gd[j] as f64).sum();
-        let a: Vec<f32> = (0..st.r).map(|j| (st.dirs(c, st.r, n)[j * n..(j + 1) * n].iter().zip(&q).map(|(&x, &y)| x as f64 * y as f64).sum::<f64>() * st.dsc[c * st.r + j] as f64) as f32).collect();
+        let a = st.coefs_of(c, n, &q);
         let rec = wf.of(ndl, c, l);
         let tau2 = wrule::packed_quad(&rec[..rp], &a) + rec[2 * rp] as f64 * (t - wrule::packed_quad(&rec[rp..2 * rp], &a)).max(0.0);
         rt.push(tau2 / f[12]);

@@ -633,21 +633,12 @@ impl Adaptive {
     /// it cluster by cluster, `KnnReader::with_width`), min(1, psi / c) at a randomised one; 1 (certified) at psi
     /// infinite.
     pub fn dial(&self, psi: f64) -> Vec<f32> {
-        let det = (0..self.ndl).map(|_| 1.0);
-        det.chain(self.inv_c.iter().map(|&r| if psi.is_finite() { (psi * r).min(1.0) as f32 } else { 1.0 })).collect()
+        (0..self.ndl).map(|_| 1.0).chain(self.inv_c.iter().map(|&r| if psi.is_finite() { (psi * r).min(1.0) as f32 } else { 1.0 })).collect()
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
     fn sigma(&self, ix: &Index2, ci: usize, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
-        let (st, r, n) = (&self.st, self.st.r, ix.n());
-        unsafe { crate::kernel::gemv_i8(q32, st.dirs(ci, r, n), n, &mut p[..r]) };
-        let (mut v, mut pp) = (0f64, 0f64);
-        for ((&pj, &sc), &l) in p[..r].iter().zip(&st.dsc[ci * r..(ci + 1) * r]).zip(&st.lam[ci * r..(ci + 1) * r]) {
-            let x = pj as f64 * sc as f64;
-            v += l as f64 * x * x;
-            pp += x * x;
-        }
-        (v + self.rest[ci] * (qq - pp).max(0.0)).max(0.0).sqrt()
+        sigma_of(&self.st, self.rest[ci], ix.n(), ci, q32, qq, p)
     }
 
     /// The upper bound of cluster ci's key (sigma <= sqrt(top |q|^2)).
@@ -827,7 +818,7 @@ impl Adaptive {
                     info.sigma_cost += m.sig_us;
                     info.priced.push(ci as u32);
                     info.lam_priced.push(lam_stream);
-                    wcoef.push(Some(p.iter().zip(&self.st.dsc[ci * self.st.r..(ci + 1) * self.st.r]).map(|(&x, &d)| x * d).collect()));
+                    wcoef.push(Some(self.st.coefs(ci, &p[..self.st.r])));
                     sg
                 } else {
                     wcoef.push(None);

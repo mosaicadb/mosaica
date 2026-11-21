@@ -295,6 +295,19 @@ impl OrderState {
         OrderState::from_clusters(parts, r, spanned(&ix.centres32, n))
     }
 
+    /// Cluster ci's coefficients on its directions, a_j = p_j . q, from the products `p` of its int8 rows with the query
+    /// (`kernel::gemv_i8`): each times its direction's scale.
+    pub fn coefs(&self, ci: usize, p: &[f32]) -> Vec<f32> {
+        p.iter().zip(&self.dsc[ci * self.r..(ci + 1) * self.r]).map(|(&x, &d)| x * d).collect()
+    }
+
+    /// `coefs` for the query's f32 values `q32` (n of them).
+    pub fn coefs_of(&self, ci: usize, n: usize, q32: &[f32]) -> Vec<f32> {
+        let mut p = vec![0f32; self.r];
+        unsafe { crate::kernel::gemv_i8(q32, self.dirs(ci, self.r, n), n, &mut p) };
+        self.coefs(ci, &p)
+    }
+
     /// Cluster ci's first `r` directions as int8 rows (r x n).
     pub fn dirs(&self, ci: usize, r: usize, n: usize) -> &[i8] {
         &self.dirs8[ci * self.r * n..(ci * self.r + r) * n]

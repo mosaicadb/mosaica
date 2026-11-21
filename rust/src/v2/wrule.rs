@@ -1,9 +1,9 @@
 //! The W2 width's stored forms: what the approximate k-NN needs at build time to predict, per query, the spread of a
 //! row's error at each deterministic level of a cluster (`KnnReader::with_width`).
 //!
-//! Notation (the theory session's, as `study_w_rule` replayed it): at level l of group g a row's error vector in the
-//! group's weighted coordinates is u = (z - s sig val_l) / d_l (z the row in the group's basis, s its scale, val_l the
-//! level's decoded value), so a query with D = (V_q^T q) d_l has the error D.u. S_c = mean u u' over cluster c's rows
+//! Notation (the theory session's): at level l of group g a row's error vector in the group's weighted coordinates is
+//! u = (z - s sig val_l) / d_l (z the row in the group's basis, s its scale, val_l the level's decoded value), as the
+//! encoder computes it (`encode_cluster`), so a query with D = (V_q^T q) d_l has the error D.u. S_c = mean u u' over cluster c's rows
 //! (uncentred), G the group's diagonal of it over all its rows. p_j are the cluster's r order directions (int8 rows
 //! times their scales, as the order state holds them) and b_j = (V_q^T p_j) d_l their images; B~ = B (P'P)^-1, so that
 //! B~ a is the image of the query's part in the directions' span, a = P'q the coefficients the reader holds. Stored per
@@ -89,6 +89,9 @@ fn pack(m: &[f64], r: usize) -> impl Iterator<Item = f32> + '_ {
     (0..r).flat_map(move |i| (i..r).map(move |j| m[i * r + j] as f32))
 }
 
+/// One level's B~ (r vectors of n) and orthonormal basis of span B (`dual_dirs`).
+type Dual = (Vec<Vec<f64>>, Vec<Vec<f64>>);
+
 /// Per level of a cluster with order directions `dirs8` (r rows of n int8) and scales `dsc` (p_j = dirs8_j dsc_j, as
 /// the order state holds them) in group `gp`: B~ = B (P'P)^-1 (r vectors of n), b_j = (V_q^T p_j) d_l, and an
 /// orthonormal basis of span B. V_q^T P is one product per cluster (the int8 basis taken to f64 a block of its rows
@@ -96,7 +99,7 @@ fn pack(m: &[f64], r: usize) -> impl Iterator<Item = f32> + '_ {
 /// (`order::orthonormal64`): a direction left with under 1e-6 of the largest one's norm once the others are taken out
 /// is in their span. Such a p_j (the order state leaves zero directions where a cluster is too small to span r) has a
 /// zero column in B~, and P'P is inverted over the others; such a b_j adds no column to Q.
-fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Vec<Dual> {
     const ROWS: usize = 256;
     let r = dsc.len();
     let p: Vec<f64> = (0..r * n).map(|i| dirs8[i] as f64 * dsc[i / n] as f64).collect();
@@ -144,7 +147,7 @@ fn basis(cols: &[&[f64]], n: usize) -> (Vec<usize>, Vec<Vec<f64>>) {
 }
 
 /// `dual_dirs` of cluster c of `ix`, from its order state.
-fn dual_of(ix: &Index2, c: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+fn dual_of(ix: &Index2, c: usize) -> Vec<Dual> {
     let st = ix.order.as_ref().unwrap();
     dual_dirs(&ix.groups[ix.cl[c].g], st.dirs(c, st.r, ix.n()), &st.dsc[c * st.r..(c + 1) * st.r], ix.n(), ix.meta.ndl())
 }
@@ -161,10 +164,10 @@ pub struct Sums {
     wait: Vec<Vec<f64>>,
     n: usize,
     r: usize,
-    pub yy: Vec<Vec<f64>>,
-    pub qq: Vec<f64>,
-    pub usq: Vec<Vec<f64>>,
-    pub rows: usize,
+    yy: Vec<Vec<f64>>,
+    qq: Vec<f64>,
+    usq: Vec<Vec<f64>>,
+    rows: usize,
     /// seconds spent in `new` and taking rows in
     secs: f64,
 }
@@ -236,10 +239,10 @@ impl Sums {
 
 /// A cluster's `Sums`, every row in, and the seconds they took.
 pub struct Summed {
-    pub yy: Vec<Vec<f64>>,
-    pub qq: Vec<f64>,
-    pub usq: Vec<Vec<f64>>,
-    pub rows: usize,
+    yy: Vec<Vec<f64>>,
+    qq: Vec<f64>,
+    usq: Vec<Vec<f64>>,
+    rows: usize,
     pub secs: f64,
 }
 
