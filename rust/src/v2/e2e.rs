@@ -2389,6 +2389,20 @@ fn a_zero_row_is_left_out_of_the_level_ratios() {
     assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-6 * x), "{a:?} {b:?}");
 }
 
+/// The level ratios measure each training query as k-NN reads it, at unit scale: queries scaled by 2^-10 give the
+/// ratios the queries give, to within the f16 rounding of their smallest values (unscaled, they were percents low).
+#[test]
+fn the_level_ratios_do_not_depend_on_the_queries_scale() {
+    let ix = &fixture().ix;
+    let qs: Vec<(Vec<f32>, Option<usize>)> = (0..40).map(|i| {
+        let r = i * 97 % ix.nrows;
+        (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r))
+    }).collect();
+    let small: Vec<_> = qs.iter().map(|(q, r)| (q.iter().map(|&x| x * 2f32.powi(-10)).collect(), *r)).collect();
+    let (a, b) = (adaptive::level_ratios(ix, &qs).0, adaptive::level_ratios(ix, &small).0);
+    assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-3 * x), "{a:?} {b:?}");
+}
+
 /// A cluster read on the index path at the statistical width (each deterministic level at min(1, psi rho r) of its
 /// half-width, r the cluster's stored ratio) sends on from each level no row the certified width would drop: against
 /// the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and the items

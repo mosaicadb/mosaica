@@ -217,8 +217,9 @@ pub const RATIO_MIN_PAIRS: usize = 3;
 /// each, of a cluster with at least two, gives z = (s - m) / (rho_g,l h) at each level (s its score, m and h its
 /// certified interval's midpoint and half-width there). A cluster's ratio is the root mean square of its rows' z over
 /// its pairs; with fewer than `RATIO_MIN_PAIRS` pairs it is its group's (over the group's rows), else the whole
-/// index's, else 1. A query the index cannot answer (`query_ok`: a zero row) is left out. Needs the order state and
-/// stored vectors. Returns the ratios and the number of queries used.
+/// index's, else 1. Each query is scaled as k-NN scales it (`Prep2::unit`). A query the index cannot answer
+/// (`query_ok`: a zero row) is left out. Needs the order state and stored vectors. Returns the ratios and the number
+/// of queries used.
 pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<f32>, usize) {
     use rayon::prelude::*;
     let (k, ndl, n, nl) = (ix.k(), ix.meta.ndl(), ix.n(), ix.meta.nl());
@@ -230,7 +231,8 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<
     let empty = || (vec![0usize; k], vec![(0f64, 0f64); k * ndl]);
     let used: Vec<&(Vec<f32>, Option<usize>)> = queries.iter().filter(|(q, _)| query_ok(q).is_ok()).collect();
     let (pairs, acc) = used.par_iter().map(|&x| x).fold(empty, |(mut pairs, mut acc), (q, own)| {
-        let pr = prep2(ix, q);
+        // scaled as k-NN scales the query (`Prep2::unit`), since the intervals carry an absolute margin
+        let pr = prep2(ix, q).unit();
         let qm = centres.centre_scores(ix, &pr.q32);
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let mut p = vec![0f32; st.r];
