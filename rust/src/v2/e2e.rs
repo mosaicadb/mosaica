@@ -2581,7 +2581,8 @@ fn study_w_unit() {
 /// level): tau^2 under both, from this index's forms. Writes DIAG_OUT, the table with column 11 (W1's) replaced by W2 as
 /// built and column 12 (W2's) by the variant, for replay.py --w; prints, per level, the actual spread (the interval
 /// midpoints' error, the table's a_ref) over each prediction, p10 / median / p90, over all pairs and over those holding a
-/// true neighbour. DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
+/// true neighbour; and the reader's tau^2 (`w2_tau2`, which the reader now uses) against the variant computed here, with
+/// the time of one `w2_tau2` call (one cluster, every level). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
 #[test]
 #[ignore]
 fn study_w2_alr() {
@@ -2596,13 +2597,10 @@ fn study_w2_alr() {
     };
     let (n, ndl) = (ix.n(), ix.meta.ndl());
     let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
-    let rp = wf.r * (wf.r + 1) / 2;
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
     let (qs, d) = qn.rows_f32("queries").unwrap();
-    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| {
-        let rec = wf.of(ndl, c, l);
-        wrule::packed_quad(&rec[..rp], a) + rec[2 * rp] as f64 * (t - wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0)
-    };
+    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| wf.tau2(ndl, c, l, a, t);
+    let (mut worst, mut over, mut calls, mut secs) = (0f64, 0usize, 0usize, 0f64);
     let mut f = std::fs::File::create(&out).unwrap();
     // per level and (all, hit): actual over predicted, as built and the variant
     let mut r: Vec<[Vec<f64>; 4]> = (0..ndl).map(|_| Default::default()).collect();
@@ -2626,6 +2624,11 @@ fn study_w2_alr() {
         let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n]);
         let a2: Vec<f32> = a.iter().zip(&am).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
         let (w, wv) = (tau2(c, l, &a, t(0.0)), tau2(c, l, &a2, t(alr)));
+        let tm = Timer::new();
+        let reader = std::hint::black_box(w2_tau2(&ix, c, &gq.qv, alr, &a))[l];
+        (secs, calls) = (secs + tm.s(), calls + 1);
+        let rel = (reader - wv).abs() / wv.abs().max(1e-300);
+        (worst, over) = (worst.max(rel), over + (rel > 1e-4) as usize);
         v[11] = format!("{w:.6e}");
         v[12] = format!("{wv:.6e}");
         writeln!(f, "{}", v.join(" ")).unwrap();
@@ -2642,6 +2645,7 @@ fn study_w2_alr() {
         let [a, b, c, d2] = x;
         eprintln!("{dir}: level {l}, actual over predicted, p10 / median / p90 (pairs): all pairs: as built {}, centre off {}; true-neighbour pairs: as built {}, centre off {}", q3(a), q3(c), q3(b), q3(d2));
     }
+    eprintln!("{dir}: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference {worst:.2e}, {over} of {calls} lines past 1e-4; one call (a cluster, {ndl} levels) {:.2} us on average", secs / calls as f64 * 1e6);
 }
 
 /// Study (ignored; run by hand on a fit, rebuilt when stale): the stored W2 forms against the replay that chose the
