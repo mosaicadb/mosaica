@@ -925,7 +925,7 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
-    assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c), f32b(&w.pm))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c), f32b(&w.pm))));
+    assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c))));
     for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
         assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
     }
@@ -2349,7 +2349,7 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
     let w = built.wforms.as_ref().unwrap();
     let (ndl, wr) = (built.meta.ndl(), w.r);
-    assert_eq!((w.h.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * ndl * wrule::WForms::rec(wr)));
+    assert_eq!((w.h.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * wrule::WForms::stride(wr, ndl)));
     // every M and N a second moment (a'Ma >= 0), gamma at least 0 and U above 0 for every cluster with rows
     let a: Vec<f32> = (0..wr).map(|j| 1.0 - j as f32 / wr as f32).collect();
     for c in (0..built.k()).filter(|&c| built.cl[c].r1 > built.cl[c].r0) {
@@ -2363,9 +2363,9 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     let ow = opened.wforms.as_ref().unwrap();
-    assert_eq!((wr, bits(&w.h), bits(&w.c), bits(&w.pm)), (ow.r, bits(&ow.h), bits(&ow.c), bits(&ow.pm)));
+    assert_eq!((wr, bits(&w.h), bits(&w.c)), (ow.r, bits(&ow.h), bits(&ow.c)));
     let fw = fixture().ix.wforms.as_ref().unwrap();
-    assert_eq!((bits(&w.h), bits(&w.c), bits(&w.pm)), (bits(&fw.h), bits(&fw.c), bits(&fw.pm)), "a saved build stores the forms the build in memory does");
+    assert_eq!((bits(&w.h), bits(&w.c)), (bits(&fw.h), bits(&fw.c)), "a saved build stores the forms the build in memory does");
     opened.wforms = None;
     let e = adaptive::Adaptive::new(&opened, fixed_costs()).map(|_| ()).unwrap_err();
     assert!(e.contains("W2 forms") && e.contains("rebuild"), "{e}");
@@ -2413,7 +2413,7 @@ fn the_w2_forms_do_not_depend_on_the_threads() {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
         let (_, ix) = pool.install(|| build(dir, &BuildOptions::default(), &mut |_| {})).unwrap();
         let x = ix.wforms.as_ref().unwrap();
-        assert_eq!((bits(&x.h), bits(&x.c), bits(&x.pm)), (bits(&w.h), bits(&w.c), bits(&w.pm)), "{threads} threads");
+        assert_eq!((bits(&x.h), bits(&x.c)), (bits(&w.h), bits(&w.c)), "{threads} threads");
     }
 }
 
@@ -2743,7 +2743,7 @@ fn study_w2_forms() {
     }
     let q3 = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); format!("{:.4} / {:.4} / {:.4} / {:.4} / {:.4}", v[0], v[v.len() / 10], v[v.len() / 2], v[v.len() * 9 / 10], v[v.len() - 1]) };
     eprintln!("{dir}: {} lines of {refp}; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) {}; gamma {}", rt.len(), q3(&mut rt), q3(&mut rg));
-    eprintln!("storage: per cluster and level {} f32 ({} B), per cluster {} B; per group and level {} f32", wrule::WForms::rec(wf.r), 4 * wrule::WForms::rec(wf.r), 4 * ndl * wrule::WForms::rec(wf.r), n);
+    eprintln!("storage: per cluster and level {} f32, per cluster {} B (with P'm); per group and level {} f32", wrule::WForms::rec(wf.r), 4 * wrule::WForms::stride(wf.r, ndl), n);
 }
 
 /// The approximate k-NN returns k visible items (each once, with its own score) whenever k are visible, under the

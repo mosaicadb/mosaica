@@ -18,19 +18,19 @@
 use super::q::*;
 use super::*;
 
-/// The files of a saved index that hold the forms: per group and level h = d_l^2 G (n values), per cluster and level the
-/// record `WForms::rec`, and per cluster P'm (r values).
-pub const FILES: [&str; 3] = ["wrule_h.bin", "wrule_c.bin", "wrule_p.bin"];
+/// The files of a saved index that hold the forms: per group and level h = d_l^2 G (n values), and per cluster its
+/// record (`WForms::stride` values: each level's `WForms::rec`, then P'm).
+pub const FILES: [&str; 2] = ["wrule_h.bin", "wrule_c.bin"];
 
 /// The stored forms of an index whose clusters hold `r` order directions.
 pub struct WForms {
     pub r: usize,
     /// per group and level, h = d_l^2 G (ng x ndl x n): T = D'GD' is sum_j (qv_j - alr mv_j)^2 h_j
     pub h: Vec<f32>,
-    /// per cluster and level, M and N packed (upper triangle, row by row), gamma and U (k x ndl x `rec(r)`)
+    /// per cluster, one contiguous record (`stride`): at each level M and N packed (upper triangle, row by row, the
+    /// off-diagonals doubled), gamma and U (`rec(r)` values); then its centre's coefficients on its order directions,
+    /// P'm (r values, `OrderState::coefs_of`)
     pub c: Vec<f32>,
-    /// per cluster, its centre's coefficients on its order directions, P'm (k x r, `OrderState::coefs_of`)
-    pub pm: Vec<f32>,
 }
 
 impl WForms {
@@ -39,10 +39,21 @@ impl WForms {
         r * (r + 1) + 2
     }
 
+    /// The values of one cluster's record: `rec(r)` per level, then P'm.
+    pub fn stride(r: usize, ndl: usize) -> usize {
+        ndl * Self::rec(r) + r
+    }
+
     /// Cluster ci's record at level l.
     pub fn of(&self, ndl: usize, ci: usize, l: usize) -> &[f32] {
-        let w = Self::rec(self.r);
-        &self.c[(ci * ndl + l) * w..(ci * ndl + l + 1) * w]
+        let (w, s) = (Self::rec(self.r), Self::stride(self.r, ndl));
+        &self.c[ci * s + l * w..ci * s + (l + 1) * w]
+    }
+
+    /// Cluster ci's P'm (r values).
+    pub fn pm(&self, ndl: usize, ci: usize) -> &[f32] {
+        let s = Self::stride(self.r, ndl);
+        &self.c[(ci + 1) * s - self.r..(ci + 1) * s]
     }
 
     /// Cluster ci's predicted spread squared at level l for the coefficients `a` (r values, the centre's taken off) and
@@ -70,10 +81,10 @@ impl WForms {
     /// Whether the forms fit an index of `ng` groups and `k` clusters at `ndl` levels of `n` dimensions, every value
     /// finite: what a build must make and an open must find.
     pub fn check(&self, ng: usize, k: usize, ndl: usize, n: usize) -> Result<(), String> {
-        if self.h.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) || self.pm.len() != k * self.r {
-            return Err(format!("{}, {} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1], FILES[2]));
+        if self.h.len() != ng * ndl * n || self.c.len() != k * Self::stride(self.r, ndl) {
+            return Err(format!("{} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1]));
         }
-        match self.h.iter().chain(&self.c).chain(&self.pm).position(|x| !x.is_finite()) {
+        match self.h.iter().chain(&self.c).position(|x| !x.is_finite()) {
             Some(i) => Err(format!("the W2 forms hold a value that is not a number (at {i})")),
             None => Ok(()),
         }
@@ -299,7 +310,7 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
         let (cl, one) = (&ix.cl[c], &sums[c]);
         let nc = one.rows;
         let dual = if nc > 0 { dual_of(ix, c) } else { Vec::new() };
-        let mut out = Vec::with_capacity(ndl * WForms::rec(r));
+        let mut out = Vec::with_capacity(WForms::stride(r, ndl));
         for l in 0..ndl {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
@@ -315,15 +326,14 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
             out.extend(pack(&nn, r));
             out.extend([gamma as f32, uu as f32]);
         }
+        out.extend_from_slice(&ix.order.as_ref().unwrap().coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])[..r]);
         out
     }).collect();
-    let st = ix.order.as_ref().unwrap();
-    let pm = (0..k).flat_map(|c| st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])[..r].to_vec()).collect();
     let h = (0..ng * ndl * n).map(|i| {
         let (gl, t) = (i / n, i % n);
         ((ix.groups[gl / ndl].d[gl % ndl][t] as f64).powi(2) * g[i]) as f32
     }).collect();
-    WForms { r, h, c: recs.concat(), pm }
+    WForms { r, h, c: recs.concat() }
 }
 
 #[cfg(test)]

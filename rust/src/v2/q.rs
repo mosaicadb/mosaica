@@ -1180,15 +1180,15 @@ unsafe fn push_rows(v: &mut Vec<u32>, idx: *const u32, m: u16, r0: u32) {
 const PF: usize = 8;
 
 /// Cluster ci's W2 spread squared at each deterministic level, with the centre's term taken off as the reader's
-/// estimate takes it (`wrule`): `qv` the query in its group's basis (`GQ2::qv`), `alr` the cluster's centre coefficient
-/// for the query (`CQ2::alr`), `a` the query's coefficients on the cluster's order directions; a' = a - alr P'm (P'm
-/// stored, `WForms::pm`), D' = (qv - alr mv) d_l (mv the stored `Cl2::mv32`, qv the group setup's `GQ2::qv32`),
-/// T' = D'GD' = sum_j (qv_j - alr mv_j)^2 h_lj (h_l = d_l^2 G_l, stored; two levels a pass, `centred_sq2`), and tau^2
-/// from a' and T' (`WForms::tau2`).
+/// estimate takes it (`wrule`): `gq` the query's group setup (qv in f32, `GQ2::qv32`), `alr` the cluster's centre
+/// coefficient for the query (`CQ2::alr`), `a` the query's coefficients on the cluster's order directions. a' = a - alr
+/// P'm (P'm stored at the end of the cluster's record, `WForms::pm`); T' = D'GD' with D' = (qv - alr mv) d_l (mv the
+/// stored `Cl2::mv32`), that is sum_j (qv_j - alr mv_j)^2 h_lj (h_l = d_l^2 G_l, stored; two levels a pass,
+/// `centred_sq2`); and tau^2 from a''s packed outer product and T' (`WForms::tau2_outer`).
 pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
     let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
     let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
-    let pm = &wf.pm[ci * wf.r..(ci + 1) * wf.r];
+    let pm = wf.pm(ndl, ci);
     let mut ac = [0f32; super::order::R_MAX];
     for ((x, &aj), &y) in ac.iter_mut().zip(a).zip(pm) {
         *x = (aj as f64 - alr * y as f64) as f32;
