@@ -1144,7 +1144,7 @@ pub struct Cl2 {
     pub btot: f64,
     pub mvn: f64,
     pub rmax: f64,
-    pub kx: f64,         // the largest clamp excess of a key in the cluster: keys are within DA + kx of x . mhat
+    pub kx: f64,         // the largest clamp excess of a key in the cluster (`da`)
     pub numax: f64,      // norm sort: the largest |z|, the grid of the stored codes (nu = numax code / 65535)
     pub bmin: f64,       // norm sort: bounds of m.r over the cluster
     pub bmax: f64,
@@ -1287,6 +1287,11 @@ pub fn anchor_mhat(anchors: &[f64], cl: &[Cl2], n: usize) -> Vec<f64> {
 pub const INDEX_FORMAT: u32 = 3;
 
 impl Cl2 {
+    /// The bound on |stored key - x . mhat| in this cluster: DA and the cluster's clamp excess.
+    #[inline]
+    pub fn da(&self) -> f64 {
+        DA + self.kx
+    }
     /// The centre's weights, as the query side combines them: det by coordinate mv sig (f32), rand by position.
     pub fn wm(&self, gp: &GroupPlan2) -> Vec<f32> {
         let mut w: Vec<f32> = self.mv32.iter().zip(&gp.sig).map(|(&m, &s)| m * s).collect();
@@ -1910,10 +1915,6 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], kx: f
         }
     }
     let mn32 = mn as f32;
-    let rmax = ah.iter().map(|&a| {
-        let al = a as f64 / 32767.0 - (DA + kx);
-        (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
-    }).fold(0f64, f64::max);
     let nc = ah.len();
     let mut l1m = [0f32; J + 1];
     l1m[0] = (wm[..n].iter().map(|x| x.abs() as f64).sum::<f64>() * 1.001) as f32;
@@ -1922,7 +1923,12 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], kx: f
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, kx, numax: 0.0, bmin: 0.0, bmax: 0.0 }
+    let mut c = Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax: 0.0, kx, numax: 0.0, bmin: 0.0, bmax: 0.0 };
+    c.rmax = ah.iter().map(|&a| {
+        let al = a as f64 / 32767.0 - c.da();
+        (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
+    }).fold(0f64, f64::max);
+    c
 }
 
 /// What the build and the opening of a saved index both derive from the fit: the level metadata, the rotations, the
@@ -2266,11 +2272,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, ah, done[c].kx, x2, n);
         (info.g, info.r0, info.r1) = (p.grp[c], row0[c], row0[c + 1]);
         if nusort {
-            // m.r = mn a - mn^2 from the key, within mn (DA + kx)
+            // m.r = mn a - mn^2 from the key, within mn da
             info.numax = done[c].numax;
             let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
-            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * (DA + info.kx) + 1e-12;
-            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * (DA + info.kx) - 1e-12;
+            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * info.da() + 1e-12;
+            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * info.da() - 1e-12;
         }
         info
     }).collect();

@@ -717,7 +717,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     }
     // |v_c| < DECODED_MAX = 3.5 for a deterministic coordinate (asserted by DetTab::new)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
-    let fixed = a.abs() * c.mn * (DA + c.kx) + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
+    let fixed = a.abs() * c.mn * c.da() + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
     // ewj is NaN until the randomised levels' inputs are in, so that an interval read before them is no interval
     let mut cq = CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [f32::NAN; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None };
     if let Some(rot) = gq.rot.get() {
@@ -864,7 +864,7 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     // rm is within (2.5 n + 4) u qn of q_perp . mhat (cm's error, n u |beta| from pm, three roundings), so the exact
     // rm^2 is at least rm^2 - 2 |rm| (3 n + 8) u qn; 6 u (rho^2 + rm^2) covers rounding the squares and the sums
     let rp = root_up(rho * rho - rm * rm, 2.0 * rm.abs() * (3 * n + 8) as f64 * U64 * pr.qn + 6.0 * U64 * (rho * rho + rm * rm));
-    Cut { cm, s1, bh, bl, rm, rp, da: DA + c.kx }
+    Cut { cm, s1, bh, bl, rm, rp, da: c.da() }
 }
 
 pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize, usize, usize) {

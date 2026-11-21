@@ -735,7 +735,7 @@ pub fn scale_check(ix: &Index2) -> (usize, usize, f64, f64, f64) {
         let gp = &ix.groups[c.g];
         let s = item_scale(ix.ahat[r], c.mn32, gp.lamsum) as f64;
         let pred = s * s * mean[c.g];
-        let tol = (x2 - 1.0).abs() + 2.0 * c.mn * (crate::index::DA + c.kx) + 1e-6 + 1e-3 * rr;
+        let tol = (x2 - 1.0).abs() + 2.0 * c.mn * c.da() + 1e-6 + 1e-3 * rr;
         bad += ((pred - rr).abs() > tol) as usize;
         worst = worst.max((pred - rr).abs() / mean[c.g]);
     }
