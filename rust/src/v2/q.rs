@@ -71,7 +71,10 @@ pub fn tick() -> u64 {
 }
 
 pub struct GQ2 {
-    pub qv: Vec<f64>,      // V_q^T q, exact up to one rounding
+    // V_q^T q (in the units of the query's Prep2) to one rounding (qv_exact); when group_q2r splits the query, its
+    // two products and their sum round, within about u (2 |q| + 2 sqrt n) of the exact value, far inside the
+    // 1e-12 |qv| the bounds allow
+    pub qv: Vec<f64>,
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
@@ -96,7 +99,9 @@ pub struct Prep2 {
     pub q32: Vec<f32>,
     pub q64: Vec<f64>,
     pub qn: f64,
-    /// q16 2^24 in 13-bit halves for qv_exact (group_q2r splits a query with a value of 2 or more)
+    /// q16 2^24 in 13-bit halves for qv_exact. The high half wraps from |x| = 16 on, and qv_exact's i32 sums hold
+    /// |x| < 2 only: group_q2r reads them only then and splits a larger query (the qv timing bench in run2.rs reads
+    /// them as they are).
     pub qhi: Vec<i16>,
     pub qlo: Vec<i16>,
     /// The nearest anchor, found on first use: a plan that scans never reads the anchors.
