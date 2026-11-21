@@ -1,0 +1,39 @@
+one-block constant c1(d): {31: 5.259, 63: 6.434, 95: 6.931, 127: 7.202, 223: 7.574, 255: 7.639, 287: 7.69, 479: 7.857, 671: 7.93, 767: 7.953} | several blocks: 7.963
+group 12, built curves: w32 = 0.3322; block sums after the prefix / F = [0.1248, 0.1353, 0.0672, 0.0048]
+  built [2,0,0,0]            h/F = 0.2405  (+0.0%)  rates [2, 0, 0, 0]
+  1 blocks, free rates       h/F = 0.2405  (-0.0%)  rates [2.0, 0.0, 0.0, 0.0]
+  1 blocks, menu rates       h/F = 0.2405  (+0.0%)  rates [2, 0, 0, 0]
+  2 blocks, free rates       h/F = 0.1982  (-17.6%)  rates [0.94, 0.79, 0.0, 0.0]
+  2 blocks, menu rates       h/F = 0.2331  (-3.1%)  rates [1, 0.5, 0, 0]
+  3 blocks, free rates       h/F = 0.1941  (-19.3%)  rates [0.75, 0.62, 0.16, 0.0]
+  3 blocks, menu rates       h/F = 0.2046  (-14.9%)  rates [1, 0.5, 0.12, 0]
+  4 blocks, free rates       h/F = 0.1950  (-18.9%)  rates [0.73, 0.6, 0.15, 0.02]
+  4 blocks, menu rates       h/F = 0.2371  (-1.4%)  rates [0.5, 0.5, 0.12, 0.12]
+--- item 1% (kappa 1): entering 56 B 0.068 of N, entering 96 B as built 0.040
+  2 blocks, free rates     entering 96 B 0.030 (-24.4%) | bytes per item -0.29 | ns per item at 1.8 / 3 / 10 ns per block-rise: -0.01 / +0.04 / +0.31 | pays in time only below 2.03 ns
+  2 blocks, menu rates     entering 96 B 0.038 (-4.6%) | bytes per item +0.03 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.10 / +0.17 / +0.61 | pays in time only below 0.24 ns
+  3 blocks, free rates     entering 96 B 0.029 (-26.5%) | bytes per item -0.23 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.10 / +0.23 / +0.95 | pays in time only below 0.82 ns
+  3 blocks, menu rates     entering 96 B 0.032 (-20.9%) | bytes per item -0.14 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.13 / +0.27 / +1.04 | pays in time only below 0.61 ns
+  4 blocks, free rates     entering 96 B 0.030 (-26.1%) | bytes per item -0.12 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.23 / +0.43 / +1.64 | pays in time only below 0.48 ns
+  4 blocks, menu rates     entering 96 B 0.039 (-2.2%) | bytes per item +0.27 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.36 / +0.60 / +2.01 | pays in time only below 0.03 ns
+--- item 50% (kappa 1): entering 56 B 0.536 of N, entering 96 B as built 0.413
+  2 blocks, free rates     entering 96 B 0.348 (-15.7%) | bytes per item -1.82 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.10 / +0.51 / +2.90 | pays in time only below 1.51 ns
+  2 blocks, menu rates     entering 96 B 0.402 (-2.7%) | bytes per item +0.36 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.82 / +1.42 / +4.95 | pays in time only below 0.17 ns
+  3 blocks, free rates     entering 96 B 0.342 (-17.2%) | bytes per item -1.27 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.98 / +2.01 / +8.02 | pays in time only below 0.66 ns
+  3 blocks, menu rates     entering 96 B 0.358 (-13.2%) | bytes per item -0.60 | ns per item at 1.8 / 3 / 10 ns per block-rise: +1.20 / +2.29 / +8.66 | pays in time only below 0.48 ns
+  4 blocks, free rates     entering 96 B 0.343 (-16.9%) | bytes per item -0.41 | ns per item at 1.8 / 3 / 10 ns per block-rise: +1.96 / +3.64 / +13.44 | pays in time only below 0.40 ns
+  4 blocks, menu rates     entering 96 B 0.408 (-1.2%) | bytes per item +2.21 | ns per item at 1.8 / 3 / 10 ns per block-rise: +2.83 / +4.74 / +15.90 | pays in time only below 0.03 ns
+--- text 1% (kappa 1.742): entering 56 B 0.480 of N, entering 96 B as built 0.289
+  2 blocks, free rates     entering 96 B 0.201 (-30.5%) | bytes per item -2.85 | ns per item at 1.8 / 3 / 10 ns per block-rise: -0.32 / -0.06 / +1.45 | pays in time only below 3.27 ns
+  2 blocks, menu rates     entering 96 B 0.273 (-5.5%) | bytes per item +0.07 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.65 / +1.17 / +4.19 | pays in time only below 0.30 ns
+  3 blocks, free rates     entering 96 B 0.193 (-33.2%) | bytes per item -2.45 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.44 / +1.25 / +5.95 | pays in time only below 1.14 ns
+  3 blocks, menu rates     entering 96 B 0.214 (-26.0%) | bytes per item -1.61 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.72 / +1.60 / +6.74 | pays in time only below 0.82 ns
+  4 blocks, free rates     entering 96 B 0.195 (-32.7%) | bytes per item -1.66 | ns per item at 1.8 / 3 / 10 ns per block-rise: +1.33 / +2.72 / +10.81 | pays in time only below 0.65 ns
+  4 blocks, menu rates     entering 96 B 0.282 (-2.6%) | bytes per item +1.86 | ns per item at 1.8 / 3 / 10 ns per block-rise: +2.49 / +4.19 / +14.12 | pays in time only below 0.04 ns
+--- text 50% (kappa 1.742): entering 56 B 0.910 of N, entering 96 B as built 0.828
+  2 blocks, free rates     entering 96 B 0.764 (-7.8%) | bytes per item -1.26 | ns per item at 1.8 / 3 / 10 ns per block-rise: +0.77 / +1.63 / +6.64 | pays in time only below 0.72 ns
+  2 blocks, menu rates     entering 96 B 0.819 (-1.2%) | bytes per item +0.97 | ns per item at 1.8 / 3 / 10 ns per block-rise: +1.51 / +2.57 / +8.73 | pays in time only below 0.09 ns
+  3 blocks, free rates     entering 96 B 0.756 (-8.7%) | bytes per item -0.19 | ns per item at 1.8 / 3 / 10 ns per block-rise: +2.31 / +4.23 / +15.46 | pays in time only below 0.36 ns
+  3 blocks, menu rates     entering 96 B 0.775 (-6.4%) | bytes per item +0.58 | ns per item at 1.8 / 3 / 10 ns per block-rise: +2.56 / +4.56 / +16.18 | pays in time only below 0.26 ns
+  4 blocks, free rates     entering 96 B 0.758 (-8.5%) | bytes per item +1.24 | ns per item at 1.8 / 3 / 10 ns per block-rise: +3.97 / +6.99 / +24.62 | pays in time only below 0.22 ns
+  4 blocks, menu rates     entering 96 B 0.824 (-0.5%) | bytes per item +3.92 | ns per item at 1.8 / 3 / 10 ns per block-rise: +4.86 / +8.12 / +27.14 | pays in time only below 0.01 ns

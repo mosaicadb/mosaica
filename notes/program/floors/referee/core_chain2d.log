@@ -41,7 +41,3 @@ eps=0.05 voronoi (6,1) order=1 cells=6 H=1.624  (a) min width/corr=2.4240  (b) m
 eps=0.05 strips  (0.4,2) order=0 cells=75 H=2.558  (a) min width/corr=1.5296  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
 eps=0.05 strips  (0.4,2) order=1 cells=75 H=2.558  (a) min width/corr=1.5296  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
 worst: (a) 1.3827 (needs >= 1)   (b) 0.1723 (>= 0)   (c) 0.2083 (>= 0)   (d) 0.14980 (>= 0)
-
-real	0m2.061s
-user	0m2.089s
-sys	0m0.058s

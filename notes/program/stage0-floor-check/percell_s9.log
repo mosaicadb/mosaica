@@ -1,0 +1,23 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+9. convex polygons in R^2: E h_K(g) = perimeter(Gam^1/2 A)/(2 sqrt(2 pi)); P exact by quadrature across vertical strips
+   check: square [-1,1]^2: ln P quadrature -0.763430292604 exact -0.763430292604
+   check: 2000-gon radius 1.3: ln P -0.56134370 (disc -0.56134265), E h 1.62930771 (disc 1.62930838)
+   spectrum flat   : min R = 1.540673 (8 vertices)
+   spectrum 1:0.1  : min R = 1.584159 (8 vertices)
+   spectrum 1:0.01 : min R = 1.564809 (6 vertices)
+   spectrum 1:1e-4 : min R = 1.651024 (4 vertices)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   polygon (2-D)                  R = 1.540673 +- 1.0e-08   n =   2  spectrum flat               8 vertices: [[0.06, -0.389], [-0.42, -0.317], [-0.222, -0.446], [-0.56, -0.025], [-0.385, 0.333], [-0.455, 0.281], [0.29, -0.037], [-0.053, 0.395]]
+
+By dimension:
+   box aligned                    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   box misaligned                 n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ball                           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid aligned              n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid misaligned           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   thin shell                     n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ball cut by half-space/slab    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   L1 ball                        n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+maxrss 97928 KB, 52.85 s

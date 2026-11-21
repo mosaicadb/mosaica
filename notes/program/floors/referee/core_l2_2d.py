@@ -50,10 +50,16 @@ def corr1d(edges, p):
     D = np.where(x0 >= 0, lo_u - hi_u, hi - lo)
     # int_{x0}^{x1} [y_j + w (Phi(x) - Phi(x0)) / q] x phi(x) dx
     #   = y_j (phi(x0) - phi(x1)) - w phi(x1) + (w / q) D / (2 sqrt pi)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        term = edges[:-1] * (ph0 - ph1) - w * ph1 + np.where(q > 0, w / np.where(q > 0, q, 1.0), 0.0) * D / (
-            2 * math.sqrt(math.pi))
-    term = np.where(q > 0, term, 0.0)
+    # The last two terms cancel to first order when the piece is short in x (a small mass in the middle of the
+    # law), so there the integral of (u - U0) Phi^-1(u) is taken with Phi^-1 linear across the piece:
+    #   (w / q) J = w q (x0 / 2 + (x1 - x0) / 3), relative error O((x1 - x0)^2).
+    pos = q > 0
+    short = np.isfinite(x0) & np.isfinite(x1) & (np.abs(f1 - f0) < 1e-3)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        exact = -w * ph1 + w * np.where(pos, D / np.where(pos, q, 1.0), 0.0) / (2 * math.sqrt(math.pi))
+    approx = w * q * (f0 / 2 + (f1 - f0) / 3)
+    term = edges[:-1] * (ph0 - ph1) + np.where(short, approx, exact)
+    term = np.where(pos, term, 0.0)
     return term.sum(-1)
 
 

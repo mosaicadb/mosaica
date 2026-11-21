@@ -1,0 +1,18 @@
+(a) min over k of kappa_k - k = 0.6487 at k = 1; kappa_1 = 1.64872 (sqrt e = 1.64872)
+(b) L3 closed form against SLSQP on 300 programmes (ties, H = 0, 0.3, 2, 12): max relative difference 2.4e-04
+(c) L4 on 400 spectra: min of (W - Phi)/F and (Phi - bound 3)/F = 0.00e+00; min (W - bound 4)/F = 0.00e+00; convexity defect of W, Phi, V_S >= 1.4e-10 (all need >= 0 up to rounding)
+(d) F2a: brute-force minimum over u against kappa_k sqrt(theta) + tail, 65 spectra x 7 rates, ties included: max relative difference 5.4e-16 (the minimum is at u = 0 in every case)
+(e) one head coordinate (sqrt gam = 1, step w) times shells of thickness delta on an isotropic tail (sqrt gam = eps)
+    n_T=30 done; smallest Eh/max V so far 1.04303 at (n_T, eps, w, delta)=(30, 0.01, 0.05, 0.365) with Eh/W=1.11415, Eh/V_{head}=1.09632
+    n_T=30 done; smallest Eh/max V so far 1.04303 at (n_T, eps, w, delta)=(30, 0.01, 0.05, 0.365) with Eh/W=1.11415, Eh/V_{head}=1.09632
+    n_T=300 done; smallest Eh/max V so far 1.00451 at (n_T, eps, w, delta)=(300, 0.01, 0.05, 0.115) with Eh/W=1.01517, Eh/V_{head}=1.01349
+    n_T=300 done; smallest Eh/max V so far 1.00451 at (n_T, eps, w, delta)=(300, 0.01, 0.05, 0.115) with Eh/W=1.01517, Eh/V_{head}=1.01349
+    n_T=3000 done; smallest Eh/max V so far 1.00045 at (n_T, eps, w, delta)=(3000, 0.01, 0.05, 0.037) with Eh/W=1.00190, Eh/V_{head}=1.00173
+    n_T=3000 done; smallest Eh/max V so far 1.00045 at (n_T, eps, w, delta)=(3000, 0.01, 0.05, 0.037) with Eh/W=1.00190, Eh/V_{head}=1.00173
+    shells only, n=100: smallest Eh/W = 1.032321 (delta=0.200, H=2.683); Eh - W = 3.147, Eh - Theorem 1 = 0.556
+    shells only, n=1000: smallest Eh/W = 1.004342 (delta=0.063, H=3.833); Eh - W = 4.326, Eh - Theorem 1 = 0.557
+    shells only, n=10000: smallest Eh/W = 1.000549 (delta=0.020, H=4.984); Eh - W = 5.483, Eh - Theorem 1 = 0.557
+
+real	0m27.795s
+user	0m27.760s
+sys	0m0.031s

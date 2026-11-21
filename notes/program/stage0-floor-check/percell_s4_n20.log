@@ -1,0 +1,18 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+4. aligned ellipsoids {sum z_i^2/e_i^2 <= 1}: E h = E||diag(e sqrt gam) g||, ln P by Laplace inversion (gaussq.py)
+   n =  20: min R = 1.095744 +- 1.3e-14  (flat; e = rho s_i(lam)^beta, rho=1.238e-15, lam=9.82e-18, beta=16.809)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   ellipsoid aligned              R = 1.095744 +- 1.3e-14   n =  20  spectrum flat               e = rho s_i(lam)^beta, rho=1.238e-15, lam=9.82e-18, beta=16.809
+
+By dimension:
+   box aligned                    n=1:   -     n=20:   -   
+   box misaligned                 n=1:   -     n=20:   -   
+   ball                           n=1:   -     n=20:   -   
+   ellipsoid aligned              n=1:   -     n=20: 1.0957
+   ellipsoid misaligned           n=1:   -     n=20:   -   
+   thin shell                     n=1:   -     n=20:   -   
+   ball cut by half-space/slab    n=1:   -     n=20:   -   
+   L1 ball                        n=1:   -     n=20:   -   
+maxrss 96536 KB, 34.87 s

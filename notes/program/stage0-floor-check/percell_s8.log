@@ -1,0 +1,20 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+8. L1 balls {||z||_1 <= rho} (aligned and Haar-rotated): E h = rho E max_i |(R^T Gam^1/2 g)_i|, P by MC (both with s.e.)
+   n =   2: min R = 1.61152 +- 0.03579  (flat; rotated, P=0.01)
+   n =   5: min R = 1.62816 +- 0.04651  (flat; rotated, P=0.001)
+   n =  20: min R = 1.91598 +- 0.01762  (flat; aligned, P=0.001)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   L1 ball                        R = 1.611520 +- 3.6e-02   n =   2  spectrum flat               rotated, P=0.01
+
+By dimension:
+   box aligned                    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   box misaligned                 n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ball                           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid aligned              n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid misaligned           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   thin shell                     n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ball cut by half-space/slab    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   L1 ball                        n=1:   -     n=2: 1.6115  n=5: 1.6282  n=20: 1.9160  n=100:   -   
+maxrss 123340 KB, 0.97 s

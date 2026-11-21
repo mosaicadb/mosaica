@@ -1,0 +1,6 @@
+(1) centred balls: smallest E_g h / Phi(ln 1/P) = 1.0011 at (n, rho, P) = (10000, 79.583, 3.774550696641508e-198)
+(4) centred balls: smallest E_g h / W(ln 1/P) = 0.6228 at (n, rho, P) = (100, 0.2, 3.6300228998054266e-150)   [below 1: W fails cell by cell]
+    small disc at the origin, n = 2: limit kappa_2 / (2 sqrt e) = 0.8862
+(2) centred boxes, 4,000 random: smallest E_g h / Phi(ln 1/P) = 1.6487
+(3) centred ellipses, 75 cases: smallest E_g h / Phi(ln 1/P) = 1.4613
+real	0m39.889s

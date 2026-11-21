@@ -15,7 +15,3 @@ adversary 2x2: smallest gap 2.203e-01
 adversary 3x3: smallest gap 1.262e-01
 adversary 4x4: smallest gap 9.826e-02
 adversary 6x3: smallest gap 9.138e-02
-
-real	0m21.367s
-user	0m22.531s
-sys	0m0.118s

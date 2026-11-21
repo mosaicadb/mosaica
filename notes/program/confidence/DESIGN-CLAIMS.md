@@ -522,6 +522,137 @@ deterministic levels with the norm code's bound in the R_j slot).
 
 ---
 
+## C5. The cost of stored scalars
+
+Added at the PI's request after the owner pointed out that every coded block makes the query read and decode that
+block's scalars per item, and that a native trial of three coded blocks at 56 B lost on time. C3 and C4 above are
+left as written. Each place where a conclusion of theirs changes is marked **Changes** below and listed in C5.6.
+
+### C5.1 What a coded block costs [measured where a source is named; the per-rise time is an estimate]
+
+**Bytes.** `rust/results/system/bd_p2c.out`, build line: stored bytes per item, cumulative by level, key included:
+6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.3 [measured].
+
+- The first randomised level is 29.5 B: 24 B of code and 5.5 B of scalars (SYSTEM.md section 5). The 5.5 B are |y_j|
+  in 8 bits for each of the four blocks, coded or not, and κ in 8 bits and tan φ in 4 bits for the one coded block
+  (SYSTEM.md 2.1).
+- The levels at 96, 160 and 256 B store 40.4, 69.9 and 99.5 B. Group 0's rates give 36, 68 and 93 B of code, so
+  about 12.8 B of scalars over the 10 rises of those levels: 1.3 B per rise [estimate: only group 0's rates are
+  logged and the bytes are a mean over groups].
+- **Per (item, coded block, rise): 1 to 1.5 B (κ at 4 or 8 bits, tan φ at 4 bits). Per block, once: 1 B of |y|.**
+  Sure to within the 4-or-8-bit choice. `rust/REPORT_CONST.md` step 4 agrees: one more 4-bit scalar row is 0.5 B
+  per block per rise.
+- Correction to C3 (c) and C4: my stored-bytes list (4.5, 9, 13.5, 18, 27, 36, 65.5, 107.5, 174.6, 275.3 without
+  the key) was wrong at four levels. The log gives 4.5, 9, 13.5, 18, 26.5, 35, 64.5, 104.9, 174.8, 274.3.
+
+**Time.** SYSTEM.md section 4.2 (`bd_p2c.out`, profiled, ms per query at 1M, one thread) [measured]:
+
+| | Item 1% | Item 50% | Text 1% | Text 50% |
+|---|---|---|---|---|
+| Level decode | 1.24 | 18.23 | 7.36 | 19.55 |
+| Bounds and decisions | 1.19 | 21.23 | 8.23 | 22.66 |
+| of which the randomised scalars' decode | 0.58 | 10.78 | 4.20 | 11.61 |
+| Re-pack and compaction | 1.66 | 9.14 | 7.97 | 8.90 |
+| Full vectors | 0.86 | 10.90 | 1.11 | 13.54 |
+| Profiled wall | 12.79 | 87.69 | 47.97 | 93.34 |
+| Scalars' decode, share of the profiled wall | 4.5% | 12.3% | 8.8% | 12.4% |
+
+`rust/REPORT_BOUNDS.md` Part 1: before that work the scalar decode was 12.2 to 13.1 ms of 23 ms, mostly AVX2 gathers
+from 256-entry tables; with two permutes and a multiply per 8-bit scalar it fell to 9.9 ms at item 50% and 3.8 ms at
+text 1%. Its closing section: "the scalars are now mostly the tan permute and the per-half bookkeeping of the rises".
+`rust/REPORT_RAND.md` step 2: kappa and tan are recomputed at every rise, and on four levels every coded block rises
+at every level. `rust/REPORT_SETUP.md` has no per-item constant for the scalars.
+
+To turn the phase into a cost per rise I need the number of rises decoded, and the breakdown file does not print
+entrants per level. At item 50%: 91% of items enter 56 B and 20% enter 256 B (SYSTEM.md 4.1); the table counts give
+8.17 item-levels per item over the ten levels; with the bytes these leave the share entering 96 B anywhere between
+0.44 and 0.91. So the rises decoded are 4.0 to 5.9 per item of N, and
+
+- **scalar decode: 1.8 to 2.7 ns per (item, coded block, rise) at item 50%** [estimate from a measured phase and
+  inferred counts]. If the four |y| of the first level are counted as scalars of equal cost, 1.4 ns per rise and
+  0.7 ns per |y|. Text 1%, with rougher counts: 1.75 to 2.8 ns. I use **1.4 to 2.8 ns**.
+- **All-in, from the trial**: `--design-exact` "codes three blocks at 56 B instead of one, and items entering 96 B
+  fall 2%. But it is 8–24% slower at 1M, because the first level decodes more scalars" (`rust/REPORT_BOUNDS.md`,
+  Part 2). At item 50% (71.3 ms; 0.91 of items enter 56 B; two extra block-rises each) 8% is 3.1 ns and 24% is
+  9.4 ns per extra (item, block); at text 1% (37.7 ms, 0.46 entering) 3.3 and 9.8 ns. **3 to 10 ns per extra
+  (item, coded block) at the first level** [estimate: the report does not say which cell is which, and the trial
+  changed the rates of every level, not only the number of blocks]. This is above the decode alone because a coded
+  block also adds accumulator updates in the bound, a state array to compact and table units to build.
+- For scale [measured phases over inferred counts, item 50%]: level decode is 0.13 ns per code byte per item (18.23 ms
+  over about 137 B of code per item); everything else per (item, level) is about 3.2 ns; a full vector is 104 ns
+  (SYSTEM.md 2.2; the timed plan constant is 110 ns); the planner's own cost per candidate is 7.8 + 31.3·depth ns
+  (`rust/src/v2/q.rs`, `bd_p2c.out`).
+
+**So one block-rise costs 1 to 1.5 B, about 1% of what an item reaching 256 B stores, but as much time as decoding
+11 to 21 B of code (decode alone) or 23 to 75 B (all-in).** In bytes scalars are 4 to 5% of what a query reads at
+item 50% (about 14 of 301 B); in time their decode alone is 9 to 12% at the three larger cells. C3 and C4 counted
+the first and not the second.
+
+A second omission surfaced here: the constant. It is 6.931 with one block coded and 7.963 with several (SYSTEM.md
+section 3), and C3 held c fixed. A level that codes a second block pays 15% on its whole random term.
+
+### C5.2 The first randomised level, alternatives valued in bytes and in time [model with measured costs]
+
+`c5a.py`, `c5a.log`. Built prefix (256 bits) and built cuts, 192 code bits, built curves, the constant by number of
+coded blocks (c1(d) exact for one block: 6.931 at d = 95; 7.963 otherwise). "Menu" restricts rates to 0, ⅛, ¼, ½, 1,
+2, 3, 4, as the index does. Width at 32 B in the model: 0.332·F.
+
+| First level | Rates | h/F | Against built |
+|---|---|---|---|
+| Built, one block | 2, 0, 0, 0 | 0.2405 | |
+| Two blocks, free rates | 0.94, 0.79, 0, 0 | 0.198 | −17.6% |
+| Two blocks, menu | 1, ½, 0, 0 | 0.233 | −3.1% |
+| Three blocks, free | 0.75, 0.62, 0.16, 0 | 0.194 | −19.3% |
+| Three blocks, menu | 1, ½, ⅛, 0 | 0.205 | −14.9% |
+| Four blocks, free | 0.73, 0.60, 0.15, 0.02 | 0.195 | −18.9% |
+| Four blocks, menu | ½, ½, ⅛, ⅛ | 0.237 | −1.4% |
+
+A narrower first level changes one count only: the items entering 96 B. An item enters a later level when its
+margin is inside the previous level's width, and the later widths do not move. So per item of N
+
+    Δtime = e_56·(J − 1)·τ − Δe_96·(τ_0 + τ_byte·36 + 3τ),      Δbytes = e_56·(J − 1)·1.5 − Δe_96·(36 + 4.5),
+
+with τ the cost of a block-rise, τ_0 = 3.2 ns, τ_byte = 0.133 ns, e_56 the share entering 56 B and Δe_96 the fall in
+the share entering 96 B. The margins are C4.2's (Gaussian; item κ = 1, text κ = 1.742).
+
+| Cell (e_56, e_96 as built) | Alternative | Entering 96 B | Bytes per item | ns per item at τ = 1.8 / 3 / 10 | Pays in time below |
+|---|---|---|---|---|---|
+| Item 1% (0.068, 0.040) | 2 blocks, free | −24% | −0.29 | −0.01 / +0.04 / +0.31 | 2.0 ns |
+| | 3 blocks, menu | −21% | −0.14 | +0.13 / +0.27 / +1.04 | 0.6 ns |
+| Item 50% (0.536, 0.413) | 2 blocks, free | −16% | −1.82 | +0.10 / +0.51 / +2.90 | 1.5 ns |
+| | 3 blocks, free | −17% | −1.27 | +0.98 / +2.01 / +8.02 | 0.7 ns |
+| | 3 blocks, menu | −13% | −0.60 | +1.20 / +2.29 / +8.66 | 0.5 ns |
+| Text 1% (0.480, 0.289) | 2 blocks, free | −31% | −2.85 | −0.32 / −0.06 / +1.45 | 3.3 ns |
+| | 3 blocks, menu | −26% | −1.61 | +0.72 / +1.60 / +6.74 | 0.8 ns |
+| Text 50% (0.910, 0.828) | 2 blocks, free | −8% | −1.26 | +0.77 / +1.63 / +6.64 | 0.7 ns |
+| | 3 blocks, menu | −6% | +0.58 | +2.56 / +4.56 / +16.18 | 0.3 ns |
+
+Reading.
+
+1. **In time, coding three or four blocks at the first level does not pay at any cost the sources allow.** It would
+   pay only below 0.3 to 1.1 ns per block-rise; the decode alone is 1.4 to 2.8 ns and the trial's all-in figure 3 to
+   10 ns. The reason is in the formula: every item entering the level pays for the extra blocks, and only the
+   fraction that is then decided is saved, at about 8 ns plus its own three rises each.
+2. Two blocks at free rates is the one alternative near the margin: it pays below 1.5 to 3.3 ns at 1% answers and
+   below 0.7 to 1.5 ns at 50%. With menu rates it gains 3% of width and pays nowhere.
+3. **In bytes, the alternatives gain a little: 0.1 to 2.9 B per item at free rates, between −1.6 and +0.6 B at menu
+   rates.** That is the case for a disk-resident store only.
+4. **The model overstates the gain itself.** The trial measured 2% fewer items entering 96 B with three blocks; the
+   model gives 13 to 26% at 1% and 50% answers of item queries and 6 to 26% for text. With the trial's 2% the
+   formula gives +3.3, +5.5 and +18 ns per item at item 50% for τ = 1.8, 3 and 10, that is +5%, +8% and +25% of
+   71.3 ms: the trial's 8 to 24% is what the cost model returns for τ between 3 and 10 ns. So the cost side of this
+   section agrees with the trial, and the width side of my model does not. The likely reason is the one in C3 (c)
+   item 4: the model's block norms after the prefix are not the index's, whose block 0 is about 1.5 times heavier,
+   so moving bits from block 0 to the others gains less there.
+
+**Changes C3 (c) item 1.** "The 56 B level is the far point" stays true of the width at equal bytes. The
+recommendation that went with it, to code every block at that level, is **withdrawn for the in-memory index**: on
+time it loses at every scalar cost consistent with the sources, and the native trial already showed it. It stands
+only as a statement about bytes read, and even there the measured gain (2% of the entrants to 96 B, against 3 B more
+per entrant to 56 B) is a loss of about 2 B per entrant on the trial's figures.
+
+---
+
 ## What failed or is not established
 
 - C3 (a): nothing failed. The PI's c²π/2 is confirmed as the sign sketch's limit against the zero-bit bound; it is

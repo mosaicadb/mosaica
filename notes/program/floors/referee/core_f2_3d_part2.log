@@ -1,0 +1,25 @@
+  a=(np.float64(1.0), np.float64(1.0), np.float64(1.0)) voronoi                cells=50 H=3.581 Eh=2.0428  W=0.9094  max_S V_S=1.2402 at S=(0, 1, 2)  Eh/W=2.246  Eh/maxV=1.647
+  a=(np.float64(1.0), np.float64(1.0), np.float64(1.0)) voronoi-metric         cells=8 H=1.802 Eh=5.2922  W=1.6455  max_S V_S=2.2439 at S=(0, 1, 2)  Eh/W=3.216  Eh/maxV=2.358
+  a=(np.float64(1.0), np.float64(1.0), np.float64(1.0)) cubic                  cells=729 H=4.375 Eh=1.1966  W=0.6978  max_S V_S=0.9516 at S=(0, 1, 2)  Eh/W=1.715  Eh/maxV=1.258
+  a=(np.float64(1.0), np.float64(1.0), np.float64(1.0)) bcc                    cells=189 H=3.143 Eh=1.7758  W=1.0523  max_S V_S=1.4351 at S=(0, 1, 2)  Eh/W=1.687  Eh/maxV=1.237
+  a=(np.float64(1.0), np.float64(1.0), np.float64(1.0)) head grid x tail disc  cells=153 H=2.593 Eh=3.0405  W=1.2640  max_S V_S=1.7237 at S=(0, 1, 2)  Eh/W=2.405  Eh/maxV=1.764
+  a=(np.float64(1.0), np.float64(1.0), np.float64(0.1)) voronoi                cells=20 H=2.667 Eh=2.4875  W=0.6271  max_S V_S=0.8702 at S=(0, 1)  Eh/W=3.967  Eh/maxV=2.859
+  a=(np.float64(1.0), np.float64(1.0), np.float64(0.1)) voronoi-metric         cells=20 H=2.674 Eh=1.9751  W=0.6254  max_S V_S=0.8676 at S=(0, 1)  Eh/W=3.158  Eh/maxV=2.276
+  a=(np.float64(1.0), np.float64(1.0), np.float64(0.1)) cubic                  cells=75 H=2.605 Eh=1.4018  W=0.6437  max_S V_S=0.8945 at S=(0, 1)  Eh/W=2.178  Eh/maxV=1.567
+  a=(np.float64(1.0), np.float64(1.0), np.float64(0.1)) bcc                    cells=139 H=2.705 Eh=1.4081  W=0.6172  max_S V_S=0.8558 at S=(0, 1)  Eh/W=2.281  Eh/maxV=1.645
+  a=(np.float64(1.0), np.float64(1.0), np.float64(0.1)) head grid x tail disc  cells=153 H=2.593 Eh=2.0011  W=0.6470  max_S V_S=0.8992 at S=(0, 1)  Eh/W=3.093  Eh/maxV=2.225
+  a=(np.float64(1.0), np.float64(0.1), np.float64(0.1)) voronoi                cells=50 H=3.598 Eh=1.0431  W=0.1948  max_S V_S=0.2657 at S=(0, 1, 2)  Eh/W=5.355  Eh/maxV=3.926
+  a=(np.float64(1.0), np.float64(0.1), np.float64(0.1)) voronoi-metric         cells=8 H=1.856 Eh=1.2634  W=0.3563  max_S V_S=0.4748 at S=(0, 1, 2)  Eh/W=3.546  Eh/maxV=2.661
+  a=(np.float64(1.0), np.float64(0.1), np.float64(0.1)) cubic                  cells=45 H=2.031 Eh=0.8764  W=0.3312  max_S V_S=0.4479 at S=(0, 1, 2)  Eh/W=2.646  Eh/maxV=1.957
+  a=(np.float64(1.0), np.float64(0.1), np.float64(0.1)) bcc                    cells=93 H=2.193 Eh=0.9314  W=0.3116  max_S V_S=0.4244 at S=(0, 1, 2)  Eh/W=2.989  Eh/maxV=2.195
+  a=(np.float64(1.0), np.float64(0.1), np.float64(0.1)) head grid x tail disc  cells=153 H=2.593 Eh=0.4836  W=0.2723  max_S V_S=0.3714 at S=(0, 1, 2)  Eh/W=1.776  Eh/maxV=1.302
+  a=(np.float64(1.0), np.float64(0.3), np.float64(0.05)) voronoi                cells=50 H=3.669 Eh=1.0863  W=0.2250  max_S V_S=0.3057 at S=(0, 1)  Eh/W=4.829  Eh/maxV=3.554
+  a=(np.float64(1.0), np.float64(0.3), np.float64(0.05)) voronoi-metric         cells=50 H=3.603 Eh=0.6789  W=0.2308  max_S V_S=0.3142 at S=(0, 1)  Eh/W=2.941  Eh/maxV=2.160
+  a=(np.float64(1.0), np.float64(0.3), np.float64(0.05)) cubic                  cells=75 H=2.246 Eh=0.9589  W=0.4064  max_S V_S=0.5707 at S=(0, 1)  Eh/W=2.360  Eh/maxV=1.680
+  a=(np.float64(1.0), np.float64(0.3), np.float64(0.05)) bcc                    cells=77 H=2.376 Eh=1.0244  W=0.3839  max_S V_S=0.5379 at S=(0, 1)  Eh/W=2.669  Eh/maxV=1.905
+  a=(np.float64(1.0), np.float64(0.3), np.float64(0.05)) head grid x tail disc  cells=153 H=2.593 Eh=0.7541  W=0.3496  max_S V_S=0.4877 at S=(0, 1)  Eh/W=2.157  Eh/maxV=1.546
+part 2 (codes on the cube): smallest Eh / max_S V_S = 1.2374 ((np.float64(1.0), np.float64(1.0), np.float64(1.0)), 'bcc', (0, 1, 2))
+
+real	0m8.587s
+user	0m8.431s
+sys	0m0.148s

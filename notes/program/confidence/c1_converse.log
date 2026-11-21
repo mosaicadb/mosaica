@@ -1,0 +1,40 @@
+
+PART 2  steepness: T_d(t*q)/T_d(q) with T_d(q) = delta (one-sided), delta = 1e-9/(1e9*4) = 2.5e-19
+  d     q_d(delta)  c=q*sqrt(d)   t=0.99     t=0.98     t=0.95     t=0.90
+  95    0.7565      7.373             3.47       11.5        334   4.64e+04
+  127   0.6847      7.717             3.02       8.88        191   1.94e+04
+  255   0.5186      8.282             2.55        6.4       92.4   5.91e+03
+  287   0.4928      8.349             2.51        6.2       85.9   5.23e+03
+  767   0.3139      8.694             2.32       5.34         61   2.91e+03
+  quantile ratio q_d(m*lam*delta)/q_d(delta), the cost of Lemma B2's Markov and union steps:
+  d     x10      x100     x1000    x1e4
+  95    0.9812  0.9611  0.9395  0.9164
+  127   0.9789  0.9565  0.9328  0.9075
+  255   0.9751  0.9491  0.9219  0.8934
+  287   0.9747  0.9482  0.9206  0.8917
+  767   0.9724  0.9438  0.9141  0.8834
+
+PART 3  Theorem B's bound over the achievable w (both one-sided, delta = 2.5e-19), by block and rate
+  achievable: A4 at the angle theta_1 with M*Omega_d(theta_1) = 2 ln d (random code, A3)
+  bound: max over (m, q0, theta) of cos(eps_m) H_q0(theta) (1 - m delta/T_d(q0) - M Omega_d(theta))
+  d    R     q       tan_R   k_R    plain q*tan_R  w*=H_q(th_R)  achievable  bound    bound/ach  bound/w*
+  95   0.25  0.7565  1.5538  1.381  1.1754         0.7616        0.8187      0.6989   0.854      0.918   B6: 0.7568 0.924 0.994
+  95   1.00  0.7565  0.5774  0.191  0.4367         0.4002        0.4260      0.3617   0.849      0.904   B6: 0.3917 0.920 0.979
+  95   2.00  0.7565  0.2582  0.038  0.1953         0.1917        0.2032      0.1724   0.848      0.899   B6: 0.1867 0.919 0.974
+  95   7.00  0.7565  0.0078  0.000  0.0059         0.0059        0.0063      0.0053   0.848      0.898   B6: 0.0057 0.919 0.972
+  255  0.25  0.5186  1.5538  0.649  0.8058         0.6275        0.6565      0.5715   0.871      0.911   B6: 0.6120 0.932 0.975
+  255  1.00  0.5186  0.5774  0.090  0.2994         0.2868        0.2952      0.2565   0.869      0.894   B6: 0.2749 0.931 0.959
+  255  2.00  0.5186  0.2582  0.018  0.1339         0.1327        0.1361      0.1182   0.869      0.891   B6: 0.1268 0.932 0.956
+  255  7.00  0.5186  0.0078  0.000  0.0041         0.0041        0.0041      0.0036   0.869      0.890   B6: 0.0039 0.932 0.955
+PART 1  Monte Carlo, one-sided failure rates (harmful side: truth - estimate > half-width)
+  d=12 M=512 (R=0.75) delta=0.01 q_d(delta)=0.6339  codebook fixed, (y, Delta) rotated
+  s = Delta.y ; columns: failure rate of each rule, then its mean half-width
+  s       plain   naive   shrunkA4 pivot  | w_plain w_naive w_A4   w_pivot  mean k
+  +0.00   0.0100  0.0100  0.0025   0.0100 | 0.5812  0.3108  0.4986 0.4845   0.347
+  +0.20   0.0084  0.0585  0.0059   0.0100 | 0.5811  0.3108  0.4985 0.4769   0.347
+  +0.40   0.0046  0.1721  0.0093   0.0103 | 0.5810  0.3108  0.4984 0.4533   0.347
+  +0.60   0.0006  0.3739  0.0091   0.0102 | 0.5813  0.3108  0.4986 0.4116   0.347
+  +0.80   0.0000  0.6778  0.0024   0.0100 | 0.5815  0.3108  0.4987 0.3465   0.348
+  -0.40   0.0046  0.0000  0.0000   0.0103 | 0.5812  0.3108  0.4986 0.4535   0.347
+  standard error of a rate near delta: 0.00016
+  worst s for A4 is +sqrt(k/(1+k)); at mean k that is about 0.51

@@ -34,7 +34,9 @@ def ecsq(w, off=0.5):
 def tail_norm(N, D, o):
     """shells [o + jD, o + (j+1)D) of ||z_tail|| (first cell [0, o + D)); returns (E[rho_upper], H)."""
     rmax = math.sqrt(stats.chi2.isf(1e-18, N))
-    e = np.concatenate([[0.0], np.arange(o + D, rmax + 2 * D, D)])
+    # the first edge o + D is always a cell boundary, and edges continue past rmax (an earlier version dropped every
+    # edge when o + D > rmax, leaving the tail with zero width)
+    e = np.concatenate([[0.0], o + D + D * np.arange(0, max(1, int(math.ceil((rmax - o - D) / D)) + 2))])
     F = np.concatenate([[0.0], stats.chi2.cdf(e[1:] ** 2, N)])      # mass beyond the last edge < 1e-18
     P = np.diff(F)
     up = e[1:]
@@ -97,7 +99,8 @@ print("spectrum [1]*m + [eps]*N; head code; for each target the optimised code (
 print("m  N     eps    head   target     E h/target   H (nats)   E h        F2(S=head)  F2(max S, k)    W          code parameters")
 overall = {}
 import sys
-MS = [int(a) for a in sys.argv[1:]] or [1, 2, 3]
+MS = [int(a) for a in sys.argv[1:] if not a.startswith('--')] or [1, 2, 3]
+ONLY = [a[7:] for a in sys.argv[1:] if a.startswith('--only=')]
 HEX_S = np.geomspace(0.25, 4.0, 12)
 for m in MS:
     for N in (20, 99, 400, 2000):

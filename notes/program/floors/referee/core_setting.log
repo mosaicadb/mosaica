@@ -1,0 +1,2 @@
+commutator norm 150.84, rank SQ 4, rank SR 5
+rank m = 4; max |Delta.r - sum sqrt(gam) g z| = 1.57e-07; max |cov(z) - I| = 0.005 (sampling error ~ 0.007)

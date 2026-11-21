@@ -1,0 +1,13 @@
+  shape ball r=1.5       min LHS/RHS = 1.1494 at spectrum (1, 1, 1) tail axes (2,)
+  shape cube side 2      min LHS/RHS = 1.0674 at spectrum (1, 0.1, 0.1) tail axes (1, 2)
+  shape tilted slab      min LHS/RHS = 1.1732 at spectrum (0.1, 0.1, 1) tail axes (1, 0)
+  shape tilted rod       min LHS/RHS = 2.1466 at spectrum (0.1, 1, 1) tail axes (2, 0)
+  shape simplex          min LHS/RHS = 1.5879 at spectrum (1, 1, 1) tail axes (0,)
+  shape plate            min LHS/RHS = 1.6565 at spectrum (1, 1, 0.1) tail axes (0, 1)
+  shape off-centre ball  min LHS/RHS = 1.2880 at spectrum (1, 1, 1) tail axes (0,)
+  shape box 3 x 1 x 0.5  min LHS/RHS = 1.0603 at spectrum (1, 0.1, 0.1) tail axes (1, 2)
+part 1 (single cells, (*) in three dimensions): smallest LHS/RHS = 1.0603 (box 3 x 1 x 0.5)
+
+real	0m4.545s
+user	0m4.487s
+sys	0m0.052s

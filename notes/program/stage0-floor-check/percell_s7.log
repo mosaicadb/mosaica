@@ -1,0 +1,20 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+7. ball cut by a half-space or slab {a <= v.z <= b}: h exact per g, E h by Monte Carlo (200,000 draws), P by quadrature
+   n =   2: min R = 1.54294 +- 0.00574 (MC s.e., 20,000 draws)  (flat; v=e1, rho/sqrt n=0.5, slab=[-inf,1.0], P=0.501)
+   n =   5: min R = 1.28445 +- 0.00292 (MC s.e., 20,000 draws)  (flat; v=en, rho/sqrt n=0.5, slab=[-inf,1.0], P=0.0599)
+   n =  20: min R = 1.11142 +- 0.00125 (MC s.e., 20,000 draws)  (flat; v=en, rho/sqrt n=0.5, slab=[-inf,1.0], P=0.000273)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   ball cut by half-space/slab    R = 1.111415 +- 1.3e-03   n =  20  spectrum flat               v=en, rho/sqrt n=0.5, slab=[-inf,1.0], P=0.000273
+
+By dimension:
+   box aligned                    n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   box misaligned                 n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   ball                           n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   ellipsoid aligned              n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   ellipsoid misaligned           n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   thin shell                     n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+   ball cut by half-space/slab    n=1:   -     n=2: 1.5429  n=5: 1.2845  n=20: 1.1114
+   L1 ball                        n=1:   -     n=2:   -     n=5:   -     n=20:   -   
+maxrss 105168 KB, 11.11 s

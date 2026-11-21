@@ -214,3 +214,46 @@ where a measured source is named.
 - The dump after 08:45: run `c4_dump_test.py` (arguments in C4.4) and read T1 to T5.
 - The build log's rates for the 50k index, to make the variance-share check of C3 (c) item 4 exact.
 - Per-level entrant counts of one verify run at 1M, for the deterministic part of the staircase.
+
+## 2026-11-21, entry 10: C5 opened at the PI's request (the cost of stored scalars)
+
+The owner's point: each coded block at a level makes the query read and decode that block's scalars per item, and a
+native trial that coded three blocks at 56 B instead of one was 8 to 24% slower although fewer items went on
+(`rust/REPORT_BOUNDS.md`). My C3 (c) item 1 recommends that direction and charged only 16 bits of scalars per coded
+block in the built variant and nothing in time. So it cannot stand as written. Plan: (1) per-block costs in bytes and
+nanoseconds from the sources; (2) the layout programme with those costs, re-solved for group 12, c = 8, built curves,
+at 56 to 256 B, and the scalar cost at which the answer flips; (3) C3 (c)'s table and C4.3's split redone; (4) what a
+native test must measure. C3 and C4 stay as written; C5 says where they change.
+
+## 2026-11-21, entry 11: C5 step 1 (costs from the sources) and the first-level alternatives
+
+Sources read: SYSTEM.md 2.1, 4.2, 5; `rust/REPORT_BOUNDS.md` (Part 1, the dump table, `--design-exact`, the last
+level's depth, "The next bottleneck"); `rust/REPORT_RAND.md` (steps 1 and 2, the breakdown); `rust/REPORT_SETUP.md`
+(no per-item constant for scalars); `rust/results/system/bd_p2c.out` (3.7 kB: the build line and the four breakdown
+rows); `rust/src/v2/q.rs` line 2032 (the planner's per-candidate cost).
+
+- Bytes [measured, bd_p2c.out build line: stored bytes per item cumulative by level 6.5, 11.0, 15.5, 20.0, 28.5, 37.0,
+  66.5, 106.9, 176.8, 276.3, key included]: first randomised level 29.5 B = 24 code + 5.5 scalars = 4 × 1 B of |y|
+  (all four blocks, coded or not) + 1.5 B for block 0's κ (8 bits) and tan φ (4 bits). Later levels 40.4, 69.9,
+  99.5 B; group 0's rates give 36, 68 and 93 B of code, so 12.8 B of scalars over 10 rises, 1.3 B per rise. So a
+  (coded block, rise) costs 1 to 1.5 B and a block's |y| 1 B once. My STORED list in c3c.py and c4.py was 0.5 to
+  2.6 B off at four levels (27, 36, 65.5, 107.5 where the log gives 26.5, 35, 64.5, 104.9 without the key).
+- Time [measured phases, bd_p2c.out, profiled; entrant counts inferred]: scalar decode 10.78 ms at item 50%, 4.20
+  at text 1%, 0.58 at item 1%, 11.61 at text 50%. Rises decoded per query at item 50%: about 0.91 + 3·0.88 + 3·0.50 +
+  4·0.21 = 5.9 per item of N if 96 B is entered by 0.88 and 160 B by 0.50; those two are poorly fixed by the bytes
+  and the table counts (0.44 to 0.91 for the first), so 10.78 ms is 1.4 to 2.8 ns per (item, block, rise) for the
+  scalar decode alone.
+- The `--design-exact` trial, all-in: +8 to +24% of 71.3 ms (item 50%) over 0.91·2 extra block-rises per item is 3.1
+  to 9.4 ns per extra (item, block); the same at text 1% (37.7 ms, 0.46 entering) is 3.3 to 9.8 ns. The report does
+  not say which cell is the 8 and which the 24.
+- Other constants: level decode 18.23 ms over about 137 B of code per item at item 50% = 0.13 ns per code byte;
+  everything else per (item, level) about 3.2 ns (8.17 item-levels per item from the table counts); a full vector
+  104 to 110 ns. So one block-rise costs as much time as decoding 11 to 75 bytes of code.
+- Found while doing this: the constant is 6.931 with one block coded and 7.963 with several, and my model held it
+  fixed. With it, and with menu rates, the model's gain from three blocks at 56 B falls from 21% of width to 15%.
+- `c5a.py`, `c5a.log`: alternatives for the first randomised level (built prefix and cuts, 192 code bits). In time
+  no alternative with three or four blocks pays above 1.1 ns per block-rise in any cell; two blocks at free rates
+  pay below 1.5 to 3.3 ns. The trial's own figure (2% fewer entering 96 B) is far below the model's 13 to 26% for
+  three blocks at menu rates, so the model overstates the gain as well as omitting the cost.
+
+Next: `c5b.py`, the one-shot programme with a charge per coded block and the constant by number of blocks.

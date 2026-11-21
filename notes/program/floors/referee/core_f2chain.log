@@ -1,0 +1,18 @@
+rectangle with the tail mass at its two ends: LHS/RHS = 1.00020 (limit 1)
+  shape disc r=1               min LHS/RHS over spectra and head choice: 1.0980
+  shape disc r=0.3 at (2,1)    min LHS/RHS over spectra and head choice: 1.1745
+  shape thin tilted strip      min LHS/RHS over spectra and head choice: 2.2925
+  shape steep strip            min LHS/RHS over spectra and head choice: 2.5159
+  shape triangle               min LHS/RHS over spectra and head choice: 1.4470
+  shape tilted ellipse         min LHS/RHS over spectra and head choice: 1.9978
+  shape square                 min LHS/RHS over spectra and head choice: 1.0264
+  shape wide rectangle         min LHS/RHS over spectra and head choice: 1.3368
+  shape L shape                min LHS/RHS over spectra and head choice: 1.7132
+  shape two discs              min LHS/RHS over spectra and head choice: 1.1455
+part 1 (shapes): smallest LHS/RHS = 1.0264
+part 2 (adversary over densities on random supports): smallest LHS/RHS = 1.00062 (0, np.int64(3), np.int64(4), np.float64(0.05), np.float64(1.0))
+part 3 (partitions): per cell 1.0036, averaged form of step 6 1.0288, b-bar slack 0.0538 (>= 0)
+
+real	1m6.565s
+user	1m6.474s
+sys	0m0.088s

@@ -1,0 +1,18 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+5. misaligned ellipsoids R diag(e) B: E h = E||diag(e) R^T Gam^1/2 g|| (eigenvalues of diag(e) R^T Gam R diag(e)); P as aligned
+   n =  20: min R = 1.272670  (measured(n128 g5); slight rotation, e = 2.53 (d/dmax)^-0.345)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   ellipsoid misaligned           R = 1.272670 +- 1.3e-06   n =  20  spectrum measured(n128 g5)  slight rotation, e = 2.53 (d/dmax)^-0.345
+
+By dimension:
+   box aligned                    n=1:   -     n=20:   -   
+   box misaligned                 n=1:   -     n=20:   -   
+   ball                           n=1:   -     n=20:   -   
+   ellipsoid aligned              n=1:   -     n=20:   -   
+   ellipsoid misaligned           n=1:   -     n=20: 1.2727
+   thin shell                     n=1:   -     n=20:   -   
+   ball cut by half-space/slab    n=1:   -     n=20:   -   
+   L1 ball                        n=1:   -     n=20:   -   
+maxrss 96620 KB, 12.71 s

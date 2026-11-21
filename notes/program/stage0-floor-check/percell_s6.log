@@ -1,0 +1,22 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+6. shells {rho1 <= ||z - c|| <= rho2}: E h = rho2 E||Gam^1/2 g||, P = cdf(rho2^2) - cdf(rho1^2)
+   n =   1: min R = 1.656099  (flat; rho2/sqrt n=0.3, thickness 0.5)
+   n =   2: min R = 1.469895  (flat; rho2/sqrt n=0.3, thickness 0.5)
+   n =   5: min R = 1.270334  (flat; rho2/sqrt n=0.3, thickness 0.5)
+   n =  20: min R = 1.100730  (flat; rho2/sqrt n=0.3, thickness 0.5)
+   n = 100: min R = 1.028404  (flat; rho2/sqrt n=0.3, thickness 0.5)
+
+Summary of step 2 (smallest R = E h_K / Phi(ln 1/P) per family; error is quadrature or MC s.e.)
+   thin shell                     R = 1.028404 +- 0.0e+00   n = 100  spectrum flat               rho2/sqrt n=0.3, thickness 0.5
+
+By dimension:
+   box aligned                    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   box misaligned                 n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ball                           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid aligned              n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   ellipsoid misaligned           n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   thin shell                     n=1: 1.6561  n=2: 1.4699  n=5: 1.2703  n=20: 1.1007  n=100: 1.0284
+   ball cut by half-space/slab    n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+   L1 ball                        n=1:   -     n=2:   -     n=5:   -     n=20:   -     n=100:   -   
+maxrss 96624 KB, 1.05 s
