@@ -867,9 +867,8 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
-    if wg.len() != groups.len() * meta.ndl() * n || wc.len() != k * meta.ndl() * super::wrule::WForms::rec(r) || wg.iter().chain(wc.iter()).any(|x| !x.is_finite()) {
-        return Err(damaged(&format!("{} and {} do not hold the W2 forms of {} groups and {k} clusters at {} levels", super::wrule::FILES[0], super::wrule::FILES[1], groups.len(), meta.ndl())));
-    }
+    let wforms = super::wrule::WForms { r, g: wg.to_vec(), c: wc.to_vec() };
+    wforms.check(groups.len(), k, meta.ndl(), n).map_err(|e| damaged(&e))?;
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         order,
@@ -903,7 +902,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         nrows,
         vrow: Vec::new(),
         nent,
-        wforms: Some(Arc::new(super::wrule::WForms { r, g: wg.to_vec(), c: wc.to_vec() })),
+        wforms: Some(Arc::new(wforms)),
     };
     // what this open derived again (plans, codebooks, rotations, centres; with this library and its dependencies) must
     // be what the build derived

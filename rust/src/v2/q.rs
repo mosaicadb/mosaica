@@ -656,8 +656,7 @@ impl CQ2 {
             let rec = wf.of(ndl, ci, l);
             let (gamma, u) = (rec[2 * rp] as f64, rec[2 * rp + 1] as f64);
             let tau2 = super::wrule::packed_quad(&rec[..rp], a) + gamma * (tl - super::wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0);
-            let den = self.dwa[l] as f64 * u.sqrt();
-            self.ddial[l] = if den > 0.0 { (psi * tau2.max(0.0).sqrt() / den).min(1.0) as f32 } else { 1.0 };
+            self.ddial[l] = super::wrule::factor(psi, tau2, self.dwa[l] as f64, u);
         }
     }
 

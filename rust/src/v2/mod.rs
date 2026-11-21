@@ -2475,6 +2475,9 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
         }
         build2(p, prof, &Real2 { src }, full, o, design_c, dir, &mut lg)
     };
+    if let Some(w) = &ix.wforms {
+        w.check(ix.groups.len(), ix.k(), ix.meta.ndl(), ix.n()).map_err(|e| format!("the build made W2 forms it cannot use ({e}): a fault in the library, not in the fit; report it"))?;
+    }
     Ok(ix)
 }
 

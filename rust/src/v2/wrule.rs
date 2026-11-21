@@ -45,6 +45,27 @@ impl WForms {
     pub fn gdiag(&self, n: usize, ndl: usize, g: usize, l: usize) -> &[f32] {
         &self.g[(g * ndl + l) * n..(g * ndl + l + 1) * n]
     }
+
+    /// Whether the forms fit an index of `ng` groups and `k` clusters at `ndl` levels of `n` dimensions, every value
+    /// finite: what a build must make and an open must find.
+    pub fn check(&self, ng: usize, k: usize, ndl: usize, n: usize) -> Result<(), String> {
+        if self.g.len() != ng * ndl * n || self.c.len() != k * ndl * Self::rec(self.r) {
+            return Err(format!("{} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1]));
+        }
+        match self.g.iter().chain(&self.c).position(|x| !x.is_finite()) {
+            Some(i) => Err(format!("the W2 forms hold a value that is not a number (at {i})")),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The factor W2 puts on a row's upper half-width at a deterministic level: min(1, psi tau / (dwa sqrt U)), tau^2 the
+/// predicted spread (`CQ2::set_w2`), dwa the query's factor on the rows' stored norms and U their mean square. The
+/// certified width (1) wherever that is not a number below 1: tau^2 not at least 0 (a NaN), dwa or U at 0, or psi
+/// infinite.
+pub fn factor(psi: f64, tau2: f64, dwa: f64, u: f64) -> f32 {
+    let f = psi * tau2.sqrt() / (dwa * u.sqrt());
+    if tau2 >= 0.0 && f < 1.0 { f as f32 } else { 1.0 }
 }
 
 /// a'Xa for X symmetric r x r, packed as its upper triangle row by row.
@@ -250,4 +271,21 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
         out
     }).collect();
     WForms { r, g: g.iter().map(|&x| x as f32).collect(), c: recs.concat() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The factor is psi tau / (dwa sqrt U) below 1, and 1 (the certified width) at 1 and above, at an infinite psi,
+    /// at dwa or U 0, and at a tau^2 that is not a number; 0 at tau 0 and a finite psi.
+    #[test]
+    fn the_w2_factor_is_the_certified_width_where_it_cannot_be_less() {
+        assert_eq!(factor(2.0, 0.25, 4.0, 1.0), 0.25);
+        assert_eq!(factor(2.0, 4.0, 1.0, 1.0), 1.0);
+        assert_eq!(factor(2.0, 0.0, 1.0, 1.0), 0.0);
+        for (psi, tau2, dwa, u) in [(f64::INFINITY, 0.25, 4.0, 1.0), (f64::INFINITY, 0.0, 1.0, 1.0), (2.0, 0.25, 4.0, 0.0), (2.0, 0.25, 0.0, 1.0), (2.0, 0.0, 0.0, 0.0), (2.0, f64::NAN, 4.0, 1.0), (2.0, -1e-30, 4.0, 1.0)] {
+            assert_eq!(factor(psi, tau2, dwa, u), 1.0, "psi {psi}, tau^2 {tau2}, dwa {dwa}, U {u}");
+        }
+    }
 }
