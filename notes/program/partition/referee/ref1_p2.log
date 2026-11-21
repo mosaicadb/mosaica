@@ -1,0 +1,36 @@
+== P2.2: H*(w; c gamma) = H*(w / sqrt(c); gamma), and the saving against (e/2) lam w ==
+worst |H*(w; 2^-e gamma) - H*(2^(e/2) w; gamma)|: 3.090860900556436e-11
+exact saving over (e/2) lam w: min 0.8558 median 0.9954 max 1.0000 (below 1: H* is convex in ln w)
+2^(1/19) = 1.0371550444461919 ; 1000^(1/19) = 1.4384498882876628 ; n/D = 768/19 = 40.421052631578945 bits = 5.052631578947368 B
+-- exponents from the quoted rms residuals --
+K 1,000 -> 58,750 at N = 1M (rms 0.3765 -> 0.3034): mean-square exponent 0.10599094060106352 D = 18.86953723269375
+K 31 -> 1,000 at 1,000 rows a cell (rms 0.507 -> 0.377): mean-square exponent 0.17057316999268715 D = 11.725173426077175
+step by step at N = 1M, mean-square exponent: [0.102 0.094 0.123]
+-- the table: lam w as the slope of nats against ln W, group 12 of the floors' section 7 --
+  0 to   4 B: lam w =  124.4; saving per doubling  6.55 bits = 0.82 B
+  4 to   8 B: lam w =  150.3; saving per doubling  7.91 bits = 0.99 B
+  8 to  16 B: lam w =  187.2; saving per doubling  9.85 bits = 1.23 B
+ 16 to  32 B: lam w =  246.5; saving per doubling 12.97 bits = 1.62 B
+ 32 to  96 B: lam w =  364.6; saving per doubling 19.19 bits = 2.40 B
+group 2 for comparison: [np.float64(118.9), np.float64(146.3), np.float64(176.5), np.float64(229.6), np.float64(345.4)]
+-- against REPORT_CLUSTERSIZE: bytes per item, base (1,000 a cell) against P4 (4,000) --
+text 1%: per item 67.9 -> 71.6: 1.85 B per doubling; per item entering the levels 71.0 -> 73.1: 1.02 B per doubling; bytes of f16 vectors in the change (share x 1,536 B): 0.3 of 3.7 B
+text 50%: per item 348.3 -> 356.8: 4.25 B per doubling; per item entering the levels 348.6 -> 357.2: 4.25 B per doubling; bytes of f16 vectors in the change (share x 1,536 B): 5.4 of 8.5 B
+== P2.3 ==
+by bytes, c_K = 768, u = 1: S* = [222, 665] ; with 1,000 B of support table added: [511, 1532]
+by time: c_K = 5500.0 to 10000.0 byte-equivalents = 7.161458333333333 to 13.020833333333334 centres; S* = [1588, 8664]
+text 0.01%: eps from 1,000->4,000 0.0597, from 1,000->16,000 0.0597, least squares 0.0597 (claimed 0.055); S* with claimed eps 6,458, with fitted eps 5,950; per-cell phases fall as S^-0.61, not S^-1 (1/S predicts 2.6, 0.6; measured 4.1, 1.9); S* with that exponent 8,276; measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: 30.4 / 26.6 / 26.8
+text 1%: eps from 1,000->4,000 0.0125, from 1,000->16,000 0.0121, least squares 0.0121 (claimed 0.012); S* with claimed eps 16,977, with fitted eps 16,841; per-cell phases fall as S^-0.57, not S^-1 (1/S predicts 4.1, 1.0; measured 6.9, 3.4); S* with that exponent 53,385; measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: 72.2 / 64.1 / 61.9
+item 1%: eps from 1,000->4,000 0.1562, from 1,000->16,000 0.1615, least squares 0.1615 (claimed 0.15); S* with claimed eps 2,744, with fitted eps 2,549; per-cell phases fall as S^-0.48, not S^-1 (1/S predicts 1.4, 0.4; measured 2.8, 1.5); S* with that exponent 1,530; measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: 15.3 / 15.4 / 17.3
+with N: 1000^0.13 = 2.455, 1000^0.21 = 4.266; 6,500 and 17,000 scaled: 15956 to 72519; rule at 1B: 64000
+== P2.4 / P2.5 / P4 arithmetic spot checks ==
+yahoo e_q = 0.0776, D = 25.8
+LAION e_q = 0.0706, D = 28.3
+glove e_q = 0.0546, D = 36.6
+bases per row at 1M, G = 64: 37.748736 ; centres: 0.384 ; support table: 0.5 ; 16 directions: 6.144 ; a basis per 2,000-row cell: 294.912
+n^2 bytes as rows of code at 19 and 68 B: 31043.36842105263 8673.882352941177
+exchange rate: 19 log2(1.1) = 2.6125669512487653 doublings
+balanced/optimal distortion, Gaussian, D = 19 : 1.00578388112112
+balanced/optimal distortion, Gaussian, D = 10 : 1.022027516724805
+balanced/optimal distortion, Gaussian, D = 5 : 1.1045204194808496
+exp(z(2000)/sqrt(2*76)) = 1.32129893021524

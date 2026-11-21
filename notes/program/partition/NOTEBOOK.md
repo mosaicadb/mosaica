@@ -99,3 +99,35 @@ corrected at 08:10.
   scheme's level-B cost is the floor's idealisation, not the built code; a neighbour-graph partition is scored only
   through its objective on the built cells. `git status` shows CLAIMS.md, NOTEBOOK.md and the first two check scripts
   as tracked, so someone committed them during the session; I ran no git command that changes anything.
+- 08:45. The referee's report arrived (`referee/referee-1.md`). The text it saw is kept as `CLAIMS_before_referee.md`
+  and `EXPERIMENT-SPEC_before_referee.md`. Revising in one round; steps logged below.
+- 08:47. Referee round, step 1: `check_after_referee.py` (log beside it) reproduces the referee's counter-example
+  (two segments as one group: F(W_g) 0.577 for A against 0.639 for B at h = 0.35, traces 0.333 against 0.206; both
+  are fixed points of "nearest centre in the group's own dual norm", up to 7 and 17 of 20,000 sampled rows next to
+  s = 0 for B), the majoriser inequality, the four ordered cost quantities, S* with the measured exponent of the
+  per-cell work (8,276 / 53,385 / 1,530), 1.02 B per doubling per entering item at text 1%, and the bytes against
+  the number of groups in `rust/REPORT_CLUSTERSIZE.md`. P1.1, P1.2 and P1.3 repaired in CLAIMS.md.
+- 08:48. Referee round, step 2: P1.4 restated (case 1 was wrong: the group's norm is refitted, the within-group cost is
+  N_g·F(W_g)², concave in the scatter), P1.5 (the net first), P1.6 (the fit stated exactly; not a fixed point), P1.7
+  (variance against share), P1.9's table.
+- 08:49. Referee round, step 3: P2.1 (three assumptions; the two exponents are two experiments), P2.2 (an identity for
+  the second-moment cost, not a floor; 1.0 B per doubling per entering item; the text 50% comparison withdrawn),
+  P2.3 (ε 0.060; per-cell work as S^(−p); S* good to a factor of three), P2.5 (bases: a trade between bytes and time).
+- 08:50. Referee round, step 4: P3.1 (where it stops; a divergence between shapes; positive definite at every step; B4b
+  with sides exchanged), P3.2 (tangent plane), P3.3 (leave-out variants lose the descent), P3.4 (both measured slopes;
+  the proxy), P3.5 (the referee's step for (c); tie and empty-cell rules; the level must be chosen; the condition on
+  "at least as much").
+- 08:50. Referee round, step 5: P4 (the exchange rate limited to a uniform loosening in the dual metric; P4.3's list; SOAR's
+  cell size; the ranking, with the built rule run to a fixed point added as row 4 and the proxy warning), P5 (headline
+  is a level cost and bytes; S0 added).
+- 08:51. Referee round, step 6: section L touched, S rewritten, "What failed" extended, "Changes after the referee"
+  written. CLAIMS.md done; EXPERIMENT-SPEC.md next.
+- 08:54. Referee round, step 7: EXPERIMENT-SPEC.md rewritten (its section 7 lists the changes): the first item is now the
+  distance of the built partition from a fixed point; the headline is a level cost and bytes; B runs the theorem's
+  scheme and a cross-fitted one side by side with a pass of single-cell moves; C has a fixed level (16 B) and three
+  contrasts (zero read, weighted levels, within-group only); the sweep runs at two corpus sizes.
+- 08:54. State at the end of the referee round. Every point of the report is repaired in the text; I dispute none. No
+  tag raised; P2.2's narrowed. The headline changed: the mismatch between k-means and the code's cost is at every
+  step where a covariance is formed, including which rows share a cell inside a group, and not only in the basis.
+  Still open and needing the corpus: how far the built fit is from a fixed point; whether the dual spectrum scales
+  uniformly with K; whether any gain in a level cost carries into the built code's bytes.

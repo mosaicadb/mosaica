@@ -1,0 +1,36 @@
+== 1. P1.4: the two segments as ONE group (a = 1), Sigma_Q = I ==
+h 0.1: trace A 0.333 B 0.093;  zero-read F(W_g): A 0.577  B 0.389;  B/A 0.673
+h 0.35: trace A 0.333 B 0.206;  zero-read F(W_g): A 0.577  B 0.639;  B/A 1.106
+   h 0.1 partition A: rows whose nearest centre in the group's own dual norm is another cell: 0
+   h 0.1 partition B: rows whose nearest centre in the group's own dual norm is another cell: 7
+   h 0.35 partition A: rows whose nearest centre in the group's own dual norm is another cell: 0
+   h 0.35 partition B: rows whose nearest centre in the group's own dual norm is another cell: 17
+
+== 2. P1.2: F(W) <= F(W0)/2 + tr(M(W0)^-1 W)/2, equality at W0 (300 random pairs, random Sigma_Q) ==
+least value of majoriser - F over 300 pairs: 7.675e-02 (never negative)
+
+== 3. P1.3: four ordered quantities, as averages over a group (300 random groups) ==
+violations of own <= diagonal <= fixed allocation <= D(pooled), averaged over the group: 0 ; cells whose diagonal-model cost exceeds D(pooled): 428 of 1047
+
+== 4. P2.3: S* with per-cell work falling as S^-p (figures of rust/REPORT_CLUSTERSIZE.md's breakdown) ==
+text 0.01%: p 0.61  eps 0.0597  S* with 1/S 5,950  S* with S^-p 8,276   measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: [30.4, 26.6, 26.8]
+text 1%: p 0.57  eps 0.0121  S* with 1/S 16,841  S* with S^-p 53,385   measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: [72.2, 64.1, 61.9]
+item 1%: p 0.48  eps 0.1615  S* with 1/S 2,549  S* with S^-p 1,530   measured per-cell + per-row ms at 1,000 / 4,000 / 16,000: [15.3, 15.4, 17.3]
+
+== 5. P2.2 against the measured bytes (same report) ==
+text 1%: bytes per item entering the levels: 71.0 -> 73.1 ; per doubling 1.02 B
+text 50%: rise 8.5 B, of which full vectors 5.4 B
+
+== 6. P3.4: bytes per item against the number of groups, same cells (same report) ==
+64 -> 31 groups, 4,000 rows a cell (1.00 doublings)
+   text 0.01%: all bytes +1.7% (+1.7% per halving of G); without full vectors 14.7 -> 16.1 B, +9.4% (+9.4% per halving)
+   text 1%: all bytes +6.8% (+6.8% per halving of G); without full vectors 60.1 -> 63.9 B, +6.4% (+6.4% per halving)
+   text 50%: all bytes +5.2% (+5.2% per halving of G); without full vectors 173.7 -> 178.6 B, +2.8% (+2.8% per halving)
+   item 1%: all bytes -5.5% (-5.5% per halving of G); without full vectors 9.7 -> 10.6 B, +9.7% (+9.7% per halving)
+   item 50%: all bytes +3.2% (+3.2% per halving of G); without full vectors 156.4 -> 159.7 B, +2.1% (+2.1% per halving)
+62 -> 7 groups, 16,000 rows a cell (3.15 doublings)
+   text 0.01%: all bytes +35.8% (+10.2% per halving of G); without full vectors 16.2 -> 24.0 B, +48.0% (+13.3% per halving)
+   text 1%: all bytes +28.8% (+8.4% per halving of G); without full vectors 61.2 -> 77.8 B, +27.2% (+7.9% per halving)
+   text 50%: all bytes +20.1% (+6.0% per halving of G); without full vectors 174.3 -> 192.4 B, +10.4% (+3.2% per halving)
+   item 1%: all bytes +19.4% (+5.8% per halving of G); without full vectors 11.8 -> 16.0 B, +35.8% (+10.2% per halving)
+   item 50%: all bytes +22.0% (+6.5% per halving of G); without full vectors 155.6 -> 175.1 B, +12.5% (+3.8% per halving)

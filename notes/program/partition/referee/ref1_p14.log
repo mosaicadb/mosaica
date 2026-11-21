@@ -1,0 +1,17 @@
+== P1.4 case 1: two partitions of one group, each a fixed point of nearest centre in its own dual norm ==
+h = 0.1: start A (by segment): rows moved at the fixed point 0; spectrum of pooled covariance [0.     0.3346]; F = 0.5785, trace = 0.3346
+h = 0.1: start B (by sign of s): rows moved at the fixed point 0; spectrum of pooled covariance [0.01   0.0841]; F = 0.3899, trace = 0.0941
+h = 0.35: start A (by segment): rows moved at the fixed point 0; spectrum of pooled covariance [0.     0.3341]; F = 0.5781, trace = 0.3341
+h = 0.35: start B (by sign of s): rows moved at the fixed point 0; spectrum of pooled covariance [0.0832 0.1225]; F = 0.6385, trace = 0.2057
+== P1.5: expected largest of n standard normals ==
+1000 3.241
+2000 3.435
+4000 3.62
+16000 3.966
+== P1.6: is the built partition a maximiser of the sum of the keys? fit.py's procedure on a toy ==
+rows whose key is not the largest x.m^ over the stored centres: 0.11676666666666667
+sum of keys as built 22832.77495525326 ; with each row moved to its best stored centre 22960.96639049113
+sum of keys on continuing Lloyd on all rows: start 22833.1 after 60 passes 23904.6 (gain 4.693%); mean (1 - key) falls 2.883%
+sum_c n_c |m_c| (spherical objective) 22833.1; N - sum_c n_c |m_c|^2 (= sum n_c tr Sigma_c) 51307.4; |m_c| ranges 0.365 to 0.401
+== P1.7: mean of f(q) against tr(B Sigma_qq)/tr(T Sigma_qq) ==
+mean over queries of f(q) 0.1523; ratio of the averaged variances 0.1527

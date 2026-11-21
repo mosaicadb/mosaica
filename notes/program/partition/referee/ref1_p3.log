@@ -1,0 +1,23 @@
+== P3.1 ==
+{'rises': np.int64(0), 'steps': 45, 'price_viol': np.int64(0), 'id5': np.float64(1.957573364119017e-13), 'right4': np.int64(0), 'left4': np.int64(0), 'single_better': 29, 'fixed_points': 40, 'loo_rises': np.int64(153), 'loo_steps': 609}
+  rises: steps of the alternation that raised Psi (should be 0); left4/right4/price_viol: violations of item 4; id5: worst relative error of item 5's identity;
+  single_better: fixed points (of 40 ) from which moving ONE cell and refitting both metrics lowers the functional;
+  loo_rises: passes of the leave-own-rows-out variant of P3.3 that raised the functional, of loo_steps.
+d(X, Y) for X = tY, t = 0.1, 1, 7: [9.769962616701378e-15, 4.263256414560601e-14, 3.410605131648481e-13] ; for an unrelated X: 5.5022452723421225 ; F(Y)^2 = 61.11136132270393
+d(rank-one X, Y) = 51.15567042847312 (finite)
+== P3.5 ==
+trial 0 n 4 H 0.0: objective 100758.9 -> 91305.9 in 22 passes, rises 0
+trial 0 n 4 H 2.0: objective 32382.0 -> 27201.0 in 21 passes, rises 0
+trial 0 n 4 H 8.0: objective 1612.2 -> 1326.6 in 42 passes, rises 0
+trial 1 n 7 H 0.0: objective 1541623.6 -> 1134312.9 in 38 passes, rises 0
+trial 1 n 7 H 2.0: objective 695524.5 -> 541475.8 in 60 passes, rises 0
+trial 1 n 7 H 8.0: objective 120892.4 -> 67737.7 in 60 passes, rises 0
+trial 2 n 6 H 0.0: objective 427062.9 -> 369080.8 in 40 passes, rises 0
+trial 2 n 6 H 2.0: objective 183894.8 -> 149641.7 in 18 passes, rises 0
+trial 2 n 6 H 8.0: objective 24607.3 -> 17627.7 in 30 passes, rises 0
+row scheme: steps that raised the objective, over 36 runs at H = 0, 2, 8 nats: 0
+least (best allocation in a random basis pair) / W(H) over 300 trials: 1.000006280169562 (>= 1 means the dual pair is not beaten)
+H 0.0 coordinates above the water level per group, of 6 : [0, 0, 0]
+H 3.0 coordinates above the water level per group, of 6 : [6, 6, 6]
+H 10.0 coordinates above the water level per group, of 6 : [6, 6, 6]
+one assignment step from the same start; rows whose best cell differs between levels: H 0 vs 3: 0.118, H 0 vs 10: 0.118, H 3 vs 10: 0.000; rows moved at H = 0: 0.087
