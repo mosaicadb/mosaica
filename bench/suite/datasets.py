@@ -23,6 +23,8 @@ DATASETS = {
     # ANN-Benchmarks
     "glove-100-angular": annb(1_183_514, 100),
     "nytimes-256-angular": annb(290_000, 256, "text"),
+    # Euclidean in ANN-Benchmarks; here normalised like every set, so its truth is the cosine one
+    "sift-128-euclidean": annb(1_000_000, 128, "images"),
     # VIBE's cosine and normalized sets up to 1.5M vectors (bench/vibe/README.md)
     "yahoo-minilm-384-normalized": vibe(677_305, 384),
     "glove-200-cosine": vibe(1_193_514, 200, kind="words"),

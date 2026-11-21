@@ -11,6 +11,7 @@
 # computed and modelled cost against a scan's. ab_curves.py interpolates time and rows to a recall.
 # usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
 #        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
+#        [--index DIR]
 import argparse
 import os
 import random
@@ -41,11 +42,13 @@ def main():
     ap.add_argument("--core", type=int, default=3)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--nq", type=int, default=0, help="the first this many queries (0: all)")
+    ap.add_argument("--index", default="", help="the index directory (default: the suite's work directory); give each "
+                    "build of the library its own copy (`cp -al` of the fit), since a build re-encodes a stale index")
     a = ap.parse_args()
     data = os.environ["SUITE_DATA"]
     prep = Prep(prep_dir(data, a.dataset))
     os.sched_setaffinity(0, {a.core})
-    path = os.path.join(work_dir(data, a.dataset, "vexact"), "index")
+    path = a.index or os.path.join(work_dir(data, a.dataset, "vexact"), "index")
     psis = [float(x) for x in a.psi.split(",")]
     ix = {arm: vexact_py.Index(path, core=a.core) for arm in a.arms}
     first = next(iter(ix.values()))
