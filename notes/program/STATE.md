@@ -38,7 +38,7 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
   referee describes; the kernel tests on AVX-512 and on AVX2 alone. With the implementing session.
 - The first randomised level: one wider block at the same 24 B, two blocks, and the `--design-exact` layout with
   phases recorded, so that the cost of a scalar read is measured and not inferred (chapter 4, §4.9).
-- A fit at query weight 0.2 against the data-only fit and the fit at 0.5, on both query sets (floors B4d).
+- Deferred: the data-only fit against the fits at query weight 0.2 and 0.5, on both query sets (floors B4d).
 - The 24-scale encoder. Low priority: about one point of the last level's width, an encode loop four times longer,
   and the stored κ grid under a wider range of scales unchecked.
 
@@ -52,11 +52,11 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
 - The first randomised level stays as built. The native run listed above (one wider block at the same 24 B, two
   blocks, the exact-design layout with phases recorded) is a todo, not scheduled.
 
-- The basis is fitted to the data. A query sample is an optional input at build, mixed in with a query weight from 0
-  to 0.5, default 0.2, on the trace-normalised covariances as `rust/tools/fit.py` forms them (it mixes at a fixed 0.5
-  today). Any weight gives a sound index; only widths move. The weight is a dial, not a share of traffic. Owed before
-  a benchmark is republished with it: one native fit at 0.2 against the data-only fit and the fit at 0.5, on both
-  query sets (floors B4d has the figures by formula). With the implementing session.
+- The basis is fitted to the data. A query sample is an optional input at build, mixed in with a configurable query
+  weight from 0 to 0.5 on the trace-normalised covariances as `rust/tools/fit.py` forms them. The default stays 0.5
+  for now (the owner first chose 0.2 and then kept 0.5 until it is measured). Any weight gives a sound index; only
+  widths move. The weight is a dial, not a share of traffic. Deferred: a native comparison of the data-only fit and
+  the fits at 0.2 and 0.5 on both query sets (floors B4d has the figures by formula). With the implementing session.
 
 ## Rules for agents on this machine
 
