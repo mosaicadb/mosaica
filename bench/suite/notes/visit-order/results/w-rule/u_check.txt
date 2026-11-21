@@ -1,0 +1,12 @@
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 162.15s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 41.49s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 27.97s
+u-inat.txt   rms(h) / |D|             units 372: CV across queries p10 / median / p90 0.0144 / 0.0355 / 0.0715; p90 / p10 within a unit, median 1.077; level of the ratio, median 0.592
+u-inat.txt   rms(h) / (dwa rms(r))    units 372: CV across queries p10 / median / p90 0.0000 / 0.0000 / 0.0001; p90 / p10 within a unit, median 1.000; level of the ratio, median 1.000
+u-inat.txt   dwa / |D|                units 372: CV across queries p10 / median / p90 0.0144 / 0.0355 / 0.0715; p90 / p10 within a unit, median 1.077; level of the ratio, median 0.973
+u-laion.txt  rms(h) / |D|             units 322: CV across queries p10 / median / p90 0.0014 / 0.0029 / 0.0066; p90 / p10 within a unit, median 1.006; level of the ratio, median 0.534
+u-laion.txt  rms(h) / (dwa rms(r))    units 322: CV across queries p10 / median / p90 0.0000 / 0.0000 / 0.0000; p90 / p10 within a unit, median 1.000; level of the ratio, median 1.000
+u-laion.txt  dwa / |D|                units 322: CV across queries p10 / median / p90 0.0014 / 0.0029 / 0.0066; p90 / p10 within a unit, median 1.006; level of the ratio, median 0.996
+u-yahoo.txt  rms(h) / |D|             units 464: CV across queries p10 / median / p90 0.0053 / 0.0131 / 0.0332; p90 / p10 within a unit, median 1.028; level of the ratio, median 0.679
+u-yahoo.txt  rms(h) / (dwa rms(r))    units 464: CV across queries p10 / median / p90 0.0000 / 0.0000 / 0.0000; p90 / p10 within a unit, median 1.000; level of the ratio, median 1.000
+u-yahoo.txt  dwa / |D|                units 464: CV across queries p10 / median / p90 0.0053 / 0.0131 / 0.0332; p90 / p10 within a unit, median 1.028; level of the ratio, median 0.990

@@ -1,0 +1,27 @@
+[build2] level ratios: 400 rows as queries, 10.7s
+[build2] W2 forms: 41.4s
+[build2] assembled 238.2s; anon 743 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+/home/joe/code/vexact-data/wrule/val/inat: 4000 lines of /home/joe/code/vexact-data/sampled/dump/w-inat-test.txt; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) 1.0000 / 1.0000 / 1.0000 / 1.0000 / 1.0000; gamma 0.9999 / 1.0000 / 1.0000 / 1.0000 / 1.0001
+storage: per cluster and level 274 f32 (1096 B), per cluster 2192 B; per group and level 2048 f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 240.54s
+196608	/home/joe/code/vexact-data/wrule/val/inat/encoded/wrule_g.bin
+548000	/home/joe/code/vexact-data/wrule/val/inat/encoded/wrule_c.bin
+2000	/home/joe/code/vexact-data/wrule/val/inat/encoded/level_ratio.bin
+[build2] level ratios: 400 rows as queries, 2.0s
+[build2] W2 forms: 7.5s
+[build2] assembled 53.4s; anon 687 MB; x2 bound 6.328e-4; escapes: det norms 1257, |y| 3486, kappa 11075, tan 23166; code hash f282d680b4f756a9
+/home/joe/code/vexact-data/wrule/val/laion: 4000 lines of /home/joe/code/vexact-data/sampled/dump/w-laion-test.txt; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) 1.0000 / 1.0000 / 1.0000 / 1.0000 / 1.0000; gamma 0.9999 / 1.0000 / 1.0000 / 1.0000 / 1.0001
+storage: per cluster and level 274 f32 (1096 B), per cluster 2192 B; per group and level 512 f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 54.31s
+262144	/home/joe/code/vexact-data/wrule/val/laion/encoded/wrule_g.bin
+1096000	/home/joe/code/vexact-data/wrule/val/laion/encoded/wrule_c.bin
+4000	/home/joe/code/vexact-data/wrule/val/laion/encoded/level_ratio.bin
+[build2] level ratios: 400 rows as queries, 1.8s
+[build2] W2 forms: 3.3s
+[build2] assembled 43.0s; anon 587 MB; x2 bound 3.052e-4; escapes: det norms 24, |y| 2597, kappa 9908, tan 16991; code hash 25d0c4be6d18a504
+/home/joe/code/vexact-data/wrule/val/yahoo: 4000 lines of /home/joe/code/vexact-data/sampled/dump/w-yahoo-test.txt; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) 1.0000 / 1.0000 / 1.0000 / 1.0000 / 1.0000; gamma 0.9999 / 1.0000 / 1.0000 / 1.0000 / 1.0001
+storage: per cluster and level 274 f32 (1096 B), per cluster 2192 B; per group and level 384 f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 43.75s
+196608	/home/joe/code/vexact-data/wrule/val/yahoo/encoded/wrule_g.bin
+743088	/home/joe/code/vexact-data/wrule/val/yahoo/encoded/wrule_c.bin
+2712	/home/joe/code/vexact-data/wrule/val/yahoo/encoded/level_ratio.bin

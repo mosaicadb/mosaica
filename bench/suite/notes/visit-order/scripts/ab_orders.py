@@ -11,10 +11,11 @@
 # computed and modelled cost against a scan's. ab_curves.py interpolates time and rows to a recall.
 # With a build that gives them, a k-NN adaptive line also has the stored vectors read and the rows past the
 # deterministic levels; --level-psi sets the deterministic levels' psi apart from the stop's, --level-psi-offset C
-# to max(0, psi - C) at each psi.
+# to max(0, psi - C) at each psi; --width-rule picks the deterministic levels' width (derived, ratio or w2) on a build
+# that has the choice.
 # usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
 #        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
-#        [--index DIR] [--level-psi X | --level-psi-offset C]
+#        [--index DIR] [--level-psi X | --level-psi-offset C] [--width-rule RULE]
 import argparse
 import os
 import random
@@ -49,6 +50,8 @@ def main():
                     "statistical width (default: psi)")
     ap.add_argument("--level-psi-offset", type=float, default=None, help="the adaptive k-NN arm's level psi at each psi: "
                     "max(0, psi - this)")
+    ap.add_argument("--width-rule", default=None, help="the adaptive k-NN arm's width rule at the deterministic levels "
+                    "(derived, ratio or w2; default: the build's)")
     ap.add_argument("--index", default="", help="the index directory (default: the suite's work directory); give each "
                     "build of the library its own copy (`cp -al` of the fit), since a build re-encodes a stale index")
     a = ap.parse_args()
@@ -58,6 +61,8 @@ def main():
     path = a.index or os.path.join(work_dir(data, a.dataset, "vexact"), "index")
     psis = [float(x) for x in a.psi.split(",")]
     ix = {arm: vexact_py.Index(path, core=a.core) for arm in a.arms}
+    if a.width_rule is not None and "adaptive" in ix:
+        ix["adaptive"].set_width_rule(a.width_rule)
     first = next(iter(ix.values()))
     Q = prep.queries()
     if a.nq:

@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use roaring::RoaringBitmap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
-use vexact::v2::adaptive::{measured_constants, Adaptive, AdaptiveInfo, PSI};
+use vexact::v2::adaptive::{measured_constants, Adaptive, AdaptiveInfo, WidthRule, PSI};
 use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, query_ok, threshold2, threshold_ok, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
@@ -179,6 +179,15 @@ impl Index {
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| ad.knn_levels(ix, q, k, vis, psi, level_psi, plan).0.ents));
         Ok(ids(py, &ents, k))
+    }
+
+    /// The approximate k-NN's width at its deterministic levels on the index path (`adaptive::WidthRule`): "derived",
+    /// "ratio" (the default) or "w2"; for every k-NN query on this index from now on.
+    fn set_width_rule(&mut self, rule: &str) -> PyResult<()> {
+        let r = WidthRule::parse(rule).map_err(PyValueError::new_err)?;
+        let ad = self.adaptive.as_mut().map_err(|e| PyValueError::new_err(e.clone()))?;
+        ad.rule = r;
+        Ok(())
     }
 
     /// The approximate threshold query (`v2::adaptive`): the visible entity ids, ascending, scoring at least t among the

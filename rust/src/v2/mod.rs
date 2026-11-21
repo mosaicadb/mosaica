@@ -23,6 +23,7 @@ pub mod adaptive;
 pub mod setup;
 pub mod store;
 pub mod tail;
+pub mod wrule;
 
 /// How an index is made: the partition and the fit (`create` only), the support table's anchors (`create`, and
 /// `rebuild` when given) and the encoding (`create` and `rebuild`). The default is the build SYSTEM.md describes.
@@ -1275,6 +1276,9 @@ pub struct Index2 {
     /// The approximate k-NN's correction to its deterministic levels' width, per cluster and level (k x ndl,
     /// `adaptive::level_ratios`; a compaction shares its parent's); None for an index without stored vectors.
     pub lratio: Option<Arc<Vec<f32>>>,
+    /// The W2 width's stored forms (`wrule::WForms`; a compaction shares its parent's); None for an index without
+    /// stored vectors.
+    pub wforms: Option<Arc<wrule::WForms>>,
 }
 
 /// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
@@ -1495,6 +1499,7 @@ impl Index2 {
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
             order: self.order.clone(),
             lratio: self.lratio.clone(),
+            wforms: self.wforms.clone(),
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -2284,8 +2289,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     }).collect();
     let esc = done.iter().zip(&row0).flat_map(|(d, &r0)| d.esc.iter().map(move |&(l, slot, i, v)| ((l, slot, (r0 + i as usize) as u32), v))).collect();
     drop(done);
+    // the inverse bases, kept for the W2 forms
+    let vinv: Vec<Vec<f64>> = groups.iter_mut().map(|gp| std::mem::take(&mut gp.vinv)).collect();
     for gp in groups.iter_mut() {
-        gp.vinv = Vec::new();
         gp.vq = Vec::new();
     }
     let row_ent = row_ent.finish();
@@ -2344,13 +2350,18 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         full,
         nrows,
         lratio: None,
+        wforms: None,
     };
     if real {
         let tr = Timer::new();
         let (ratio, nq) = adaptive::build_level_ratios(&ix, o.seed);
         ix.lratio = Some(Arc::new(ratio));
         log(format!("level ratios: {nq} rows as queries, {:.1}s", tr.s()));
+        let tw = Timer::new();
+        ix.wforms = Some(Arc::new(wrule::build(&ix, &vinv, &p.centres[..k * n])));
+        log(format!("W2 forms: {:.1}s", tw.s()));
     }
+    drop(vinv);
     if let Some(d) = dir {
         store::save_rest(&ix, d);
     }

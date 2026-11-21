@@ -645,6 +645,22 @@ pub struct IntDet {
 }
 
 impl CQ2 {
+    /// The deterministic levels read at the W2 width for `psi`: min(1, psi tau / (dwa_l sqrt U)) of each upper
+    /// half-width, tau^2 = a'Ma + gamma max(0, T_l - a'Na) from cluster ci's stored forms (`wrule::WForms`), `a` its
+    /// coefficients on its order directions and `t` its group's T = D'GD per level.
+    pub fn set_w2(&mut self, ix: &Index2, ci: usize, psi: f64, a: &[f32], t: &[f64]) {
+        let ndl = ix.meta.ndl();
+        let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+        let rp = wf.r * (wf.r + 1) / 2;
+        for (l, &tl) in t.iter().enumerate().take(ndl) {
+            let rec = wf.of(ndl, ci, l);
+            let (gamma, u) = (rec[2 * rp] as f64, rec[2 * rp + 1] as f64);
+            let tau2 = super::wrule::packed_quad(&rec[..rp], a) + gamma * (tl - super::wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0);
+            let den = self.dwa[l] as f64 * u.sqrt();
+            self.ddial[l] = if den > 0.0 { (psi * tau2.max(0.0).sqrt() / den).min(1.0) as f32 } else { 1.0 };
+        }
+    }
+
     /// The deterministic levels read at the statistical width for `psi`: min(1, psi rho_g,l r_c,l) of each upper
     /// half-width, rho_g,l the derived width's share (`GroupPlan2::rho`) and r_c,l cluster ci's stored ratio
     /// (`Index2::lratio`, `adaptive::level_ratios`).
@@ -1178,6 +1194,20 @@ unsafe fn push_rows(v: &mut Vec<u32>, idx: *const u32, m: u16, r0: u32) {
 
 /// Blocks ahead whose codes are prefetched on the aligned path.
 const PF: usize = 8;
+
+/// Row `row`'s stored norm at deterministic level l, in cluster ci: pconst_l s ntab_l[code] (s the row's scale), or its
+/// escaped value (code 15). The row's half-width there is dwa_l times this (`CQ2::dwa`) plus the fixed terms.
+pub fn det_norm(ix: &Index2, ci: usize, l: usize, row: usize) -> f64 {
+    let (c, gp) = (&ix.cl[ci], &ix.groups[ix.cl[ci].g]);
+    let ri = row - c.r0;
+    let byte = ix.lscal[l][ix.soff[l][ci] + (ri / BLK) * gp.levels[l].srows * 16 + (ri % BLK & 15)];
+    let code = (if ri % BLK < 16 { byte & 15 } else { byte >> 4 }) as usize;
+    if code == 15 {
+        ix.esc.get(l as u8, 0, row as u32) as f64
+    } else {
+        gp.pconst[l] as f64 * crate::index::item_scale(ix.ahat[row], c.mn32, gp.lamsum) as f64 * gp.ntab[l][code] as f64
+    }
+}
 
 /// Nibble of slot i of a block in row u.
 #[inline(always)]
@@ -3923,8 +3953,12 @@ pub struct KnnReader<'a> {
     zcl: Vec<(usize, usize, f64, f64)>,
     /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
     z: (f64, f64, f64),
-    /// psi of the deterministic levels' statistical width (`with_width`)
-    width: Option<f64>,
+    /// psi and rule of the deterministic levels' statistical width (`with_width`)
+    width: Option<(f64, super::adaptive::WidthRule)>,
+    /// under W2, the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
+    pub coef: Option<Vec<f32>>,
+    /// under W2, per group, T = D'GD at each deterministic level once the group is first read
+    wt: Vec<Option<[f64; NDL_MAX]>>,
     pub st: Stats,
 }
 
@@ -3932,15 +3966,43 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, wt: Vec::new(), st }
     }
 
     /// The reader with each cluster's deterministic levels on the index path read at its statistical width for `psi`
-    /// (at least 0; infinity is the certified width; `CQ2::set_width`), not at the query's dial.
-    pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
+    /// (at least 0; infinity is the certified width) under `rule` (`CQ2::set_width` for the stored ratio, `CQ2::set_w2`
+    /// for W2), not at the query's dial; the `Derived` rule is the query's dial (`Adaptive::dial`) and sets nothing here.
+    pub fn with_width(mut self, psi: f64, rule: super::adaptive::WidthRule) -> KnnReader<'a> {
         assert!(psi >= 0.0, "the statistical width needs a psi of at least 0, not {psi}");
-        self.width = Some(psi);
+        self.width = Some((psi, rule));
         self
+    }
+
+    /// Cluster ci's W2 width on `cq` (its group's setup `gq`): its coefficients a on its order directions (given by
+    /// the caller, else computed as its sigma computes them), and its group's T at each level (once per group).
+    fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<Vec<f32>>) {
+        let (ix, pr) = (self.ix, self.pr);
+        let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
+        let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+        let a = coef.unwrap_or_else(|| {
+            let st = ix.order.as_ref().unwrap();
+            let mut p = vec![0f32; st.r];
+            unsafe { crate::kernel::gemv_i8(&pr.q32, st.dirs(ci, st.r, n), n, &mut p) };
+            p.iter().zip(&st.dsc[ci * st.r..(ci + 1) * st.r]).map(|(&x, &d)| x * d).collect()
+        });
+        if self.wt.is_empty() {
+            self.wt = vec![None; ix.groups.len()];
+        }
+        let t = *self.wt[g].get_or_insert_with(|| {
+            let gp = &ix.groups[g];
+            let mut t = [0f64; NDL_MAX];
+            for (l, x) in t.iter_mut().enumerate().take(ndl) {
+                let gd = wf.gdiag(n, ndl, g, l);
+                *x = (0..n).map(|j| (gq.qv[j] * gp.d[l][j] as f64).powi(2) * gd[j] as f64).sum();
+            }
+            t
+        });
+        cq.set_w2(ix, ci, psi, &a, &t);
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -3993,6 +4055,7 @@ impl<'a> KnnReader<'a> {
     /// Reads cluster ci's visible rows by `path`.
     pub fn visit(&mut self, ci: usize, path: KnnPath) {
         let (ix, pr, vis, kk) = (self.ix, self.pr, self.vis, self.kk);
+        let coef = self.coef.take();
         let c = &ix.cl[ci];
         let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
         let fits = !self.top.full() && self.top.h.len() + self.flat.len() + nv <= kk;
@@ -4055,8 +4118,10 @@ impl<'a> KnnReader<'a> {
                 let gq = get_gq2(ix, pr, c.g, &mut self.st);
                 let tq = tick();
                 let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
-                if let Some(psi) = self.width {
-                    cq.set_width(ix, ci, psi);
+                match self.width {
+                    Some((psi, super::adaptive::WidthRule::Ratio)) => cq.set_width(ix, ci, psi),
+                    Some((psi, super::adaptive::WidthRule::W2)) => self.w2(ci, gq, &mut cq, psi, coef),
+                    _ => {}
                 }
                 self.st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };
