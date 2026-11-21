@@ -85,3 +85,20 @@ Running:
 
 Done since the table above was written: chapter 2 carries the proved floor (section 2.9a), audited; the confidence
 lower bounds and the partition claims are revised after their referees; neither has entered the chapters.
+
+## The fixed-cluster-count replay on the real reader (from the visit-order session, 21 November 09:40)
+
+The approximate track's idealised finding (A2.6: the built stop lost to a fixed cluster count on LAION and glove
+unfiltered) was rerun on the library's own stream by the visit-order session. Fixed count's rows over the stop's rows
+at recall 0.9 / 0.95 / 0.98 / 0.99, 100 queries, k = 10; below 1 means the fixed count reads fewer. [measured, by that
+session; logs in /home/joe/code/vexact-data/sc-study/out-fixed2/]
+
+- Pooled stop (b87f1513e), unfiltered. The stop wins on LAION (1.07 / 1.05 / 1.11 / 1.06), yahoo, landmark and BioCLIP
+  (1.42 to 1.87). The fixed count wins on arxiv (0.82 / 0.83 / 0.75 / 0.73), iNaturalist, glove (0.82 to 0.89) and SIFT.
+- The older stop (f528836) loses to a fixed count on LAION (0.60 to 0.82), which is what the idealised replay saw.
+- Under filters the pooled stop wins nearly everywhere (1% sets 1.03 to 1.4; BioCLIP 1.2 to 2.4), except iNaturalist
+  region-25, SIFT at 25% and arxiv random-25 at high recall.
+
+Reading, theirs: the per-query stop costs 5 to 25% against a fixed count on four datasets unfiltered and wins by more
+elsewhere and under filters; there is room to improve the stop at high recall on those four, and no case for a fixed
+count. A2.6's LAION statement does not hold for the pooled stop; its glove statement does.
