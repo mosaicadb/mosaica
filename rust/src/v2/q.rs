@@ -71,14 +71,21 @@ pub struct GQ2 {
     pub qv: Vec<f64>,      // V_q^T q, exact up to one rounding
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
-    pub wq: Vec<f32>,      // det: qv*sig by coordinate; rand: R_j (qv*dt) by position
+    pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
     pub cq: [f64; NDL_MAX],    // sum qv^2 D_l^2
     pub qvt_pos: Vec<f64>, // qv*dt in position order
     pub a2: [f64; J],
     pub l1det: f64,        // |wq| sums (weight rounding bound)
-    pub l1j: [f64; J],
+    pub rot: OnceLock<Rot2>, // the randomised levels' weights: set by setup_groups, else when first read (get_rot)
     pub cyc: (u64, u64),   // basis product, the rest of the group setup (rotations included when done per group)
-    pub gtab: Vec<OnceLock<GTab>>,     // f32 tables of wq per level, combined per cluster with the centre's
+    pub gtab: Vec<OnceLock<GTab>>,     // f32 tables of the weights per level, combined per cluster with the centre's
+}
+
+/// A group's weights for every level: `wq` is GQ2::wq followed by R_j (qv*dt) by position (2n, as the levels' fields
+/// index them), `l1j` the |.| sums of each block's rotated weights.
+pub struct Rot2 {
+    pub wq: Vec<f32>,
+    pub l1j: [f64; J],
 }
 
 pub struct Prep2 {
@@ -226,31 +233,30 @@ pub unsafe fn dot64v(a: &[f64], b: &[f64]) -> f64 {
     r
 }
 
-/// y = R x for a row-major square f64 matrix (n a multiple of 8).
+/// One output of a rotation, row . x: two 8-lane sums over 16 columns at a time, one more 8-column step into the
+/// first, their reduction, then the remaining columns in order.
 #[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
-pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
+pub unsafe fn row64(row: &[f64], x: &[f64]) -> f64 {
     let n = x.len();
-    for a in 0..n {
-        let row = r.as_ptr().add(a * n);
-        let (mut s0, mut s1) = (_mm512_setzero_pd(), _mm512_setzero_pd());
-        let mut i = 0;
-        while i + 16 <= n {
-            s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
-            s1 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i + 8)), _mm512_loadu_pd(x.as_ptr().add(i + 8)), s1);
-            i += 16;
-        }
-        while i + 8 <= n {
-            s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
-            i += 8;
-        }
-        let mut v = _mm512_reduce_add_pd(_mm512_add_pd(s0, s1));
-        while i < n {
-            v += *row.add(i) * x[i];
-            i += 1;
-        }
-        y[a] = v;
+    let row = row.as_ptr();
+    let (mut s0, mut s1) = (_mm512_setzero_pd(), _mm512_setzero_pd());
+    let mut i = 0;
+    while i + 16 <= n {
+        s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
+        s1 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i + 8)), _mm512_loadu_pd(x.as_ptr().add(i + 8)), s1);
+        i += 16;
     }
+    while i + 8 <= n {
+        s0 = _mm512_fmadd_pd(_mm512_loadu_pd(row.add(i)), _mm512_loadu_pd(x.as_ptr().add(i)), s0);
+        i += 8;
+    }
+    let mut v = _mm512_reduce_add_pd(_mm512_add_pd(s0, s1));
+    while i < n {
+        v += *row.add(i) * x[i];
+        i += 1;
+    }
+    v
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (vpmaddwd), then one rounding to f64.
@@ -288,14 +294,10 @@ pub unsafe fn dot64v(a: &[f64], b: &[f64]) -> f64 {
     r
 }
 
-/// y = R x for a row-major square f64 matrix.
+/// One output of a rotation, row . x (`dot64v`).
 #[cfg(not(target_feature = "avx512f"))]
-#[target_feature(enable = "avx2,fma")]
-pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
-    let n = x.len();
-    for a in 0..n {
-        y[a] = dot64v(&r[a * n..(a + 1) * n], x);
-    }
+pub unsafe fn row64(row: &[f64], x: &[f64]) -> f64 {
+    dot64v(row, x)
 }
 
 /// f32 dot product (eight 8-lane accumulators); |result - exact| <= 64 u sum |a_i b_i| for n <= 4096.
@@ -329,11 +331,8 @@ pub unsafe fn dot32(a: &[f32], b: &[f32]) -> f64 {
     r
 }
 
-pub fn group_q2(ix: &Index2, g: usize, pr: &Prep2) -> GQ2 {
-    group_q2r(ix, g, pr, true)
-}
-
-/// The group setup; with rot = false the rotated weights are left for a batched product (setup_groups).
+/// The group setup; with rot = false the rotated weights are left for a batched product (setup_groups) or for when
+/// they are first read (get_rot).
 pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     let n = ix.n();
     let gp = &ix.groups[g];
@@ -341,7 +340,7 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     let mut qv = vec![0f64; n];
     unsafe { qv_exact(&gp.v8t, &gp.vsc, n, &pr.qhi, &pr.qlo, &mut qv) };
     let t1 = tick();
-    let mut wq = vec![0f32; 2 * n];
+    let mut wq = vec![0f32; n];
     for c in 0..n {
         wq[c] = (qv[c] * gp.sig[c] as f64) as f32;
     }
@@ -368,29 +367,51 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
         qv[c] * gp.dt[c] as f64
     }).collect();
     let mut a2 = [0f64; J];
-    let mut l1j = [0f64; J];
     let mut qdt2 = vec![0f32; J * n];
     for j in 0..J {
-        let nbj = gp.nb[j];
         let xs = &qvt_pos[gp.boff[j]..gp.boff[j + 1]];
         a2[j] = xs.iter().map(|x| x * x).sum();
         for pp in gp.boff[j]..gp.boff[j + 1] {
             let c = gp.ridx[pp] as usize;
             qdt2[j * n + c] = (qv[c] * (gp.dt[c] as f64).powi(2)) as f32;
         }
-        if !rot {
-            continue;
-        }
-        let mut y = vec![0f64; nbj];
-        unsafe { matvec64(&ix.rots[j], xs, &mut y) };
-        for a in 0..nbj {
-            wq[n + gp.boff[j] + a] = y[a] as f32;
-            l1j[j] += y[a].abs();
+    }
+    let l1det = wq.iter().map(|x| x.abs() as f64).sum();
+    let gq = GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, rot: OnceLock::new(), cyc: (0, 0), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() };
+    if rot {
+        let _ = gq.rot.set(rotate(ix, &[&gq]).pop().unwrap());
+    }
+    let t3 = tick();
+    GQ2 { cyc: (t1 - t0, t3 - t1), ..gq }
+}
+
+/// The groups' weights for every level, each row of a rotation read once for up to 8 groups; each product is row64's,
+/// so a group's values do not depend on the groups rotated with it.
+pub fn rotate(ix: &Index2, gqs: &[&GQ2]) -> Vec<Rot2> {
+    let n = ix.n();
+    let mut out: Vec<Rot2> = gqs.iter().map(|gq| {
+        let mut wq = gq.wq.clone();
+        wq.resize(2 * n, 0.0);
+        Rot2 { wq, l1j: [0.0; J] }
+    }).collect();
+    // the blocks are the index's, the same in every group
+    let gp0 = &ix.groups[0];
+    for j in 0..J {
+        let (b0, nbj) = (gp0.boff[j], gp0.nb[j]);
+        let r = &ix.rots[j];
+        for c0 in (0..gqs.len()).step_by(8) {
+            let c1 = (c0 + 8).min(gqs.len());
+            for a in 0..nbj {
+                let row = &r[a * nbj..(a + 1) * nbj];
+                for i in c0..c1 {
+                    let y = unsafe { row64(row, &gqs[i].qvt_pos[b0..b0 + nbj]) };
+                    out[i].wq[n + b0 + a] = y as f32;
+                    out[i].l1j[j] += y.abs();
+                }
+            }
         }
     }
-    let l1det = wq[..n].iter().map(|x| x.abs() as f64).sum();
-    let t3 = tick();
-    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0, t3 - t1), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
+    out
 }
 
 /// Set up several groups at once: exact basis products in parallel, then one product per randomised block with the
@@ -401,7 +422,7 @@ pub fn setup_groups(ix: &Index2, pr: &Prep2, gs: &[usize], st: &mut Stats) {
         return;
     }
     let n = ix.n();
-    let mut gqs: Vec<GQ2> = gs.par_iter().map(|&g| group_q2r(ix, g, pr, false)).collect();
+    let gqs: Vec<GQ2> = gs.par_iter().map(|&g| group_q2r(ix, g, pr, false)).collect();
     for gq in &gqs {
         st.cyc[P_BASIS] += gq.cyc.0;
         st.cyc[P_GPOST] += gq.cyc.1;
@@ -424,17 +445,18 @@ pub fn setup_groups(ix: &Index2, pr: &Prep2, gs: &[usize], st: &mut Stats) {
         }
         y
     }).collect();
-    for (i, gq) in gqs.iter_mut().enumerate() {
+    for (i, gq) in gqs.iter().enumerate() {
         let gp = &ix.groups[gs[i]];
+        let mut r = Rot2 { wq: gq.wq.clone(), l1j: [0.0; J] };
+        r.wq.resize(2 * n, 0.0);
         for j in 0..J {
-            let nbj = gp.nb[j];
-            gq.l1j[j] = 0.0;
-            for a in 0..nbj {
+            for a in 0..gp.nb[j] {
                 let v = ys[j][a * m + i];
-                gq.wq[n + gp.boff[j] + a] = v as f32;
-                gq.l1j[j] += v.abs();
+                r.wq[n + gp.boff[j] + a] = v as f32;
+                r.l1j[j] += v.abs();
             }
         }
+        let _ = gq.rot.set(r);
     }
     st.cyc[P_ROT] += tick() - t0;
     st.groups += m as u64;
@@ -443,14 +465,40 @@ pub fn setup_groups(ix: &Index2, pr: &Prep2, gs: &[usize], st: &mut Stats) {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests only: get_gq2 rotates a group as it sets it up, instead of when the rotation is first read.
+    pub static ROTATE_AT_SETUP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Group g's setup without its rotations (get_rot).
 pub fn get_gq2<'a>(ix: &Index2, pr: &'a Prep2, g: usize, st: &mut Stats) -> &'a GQ2 {
     pr.gq[g].get_or_init(|| {
         st.groups += 1;
-        let gq = group_q2(ix, g, pr);
+        #[cfg(test)]
+        let gq = group_q2r(ix, g, pr, ROTATE_AT_SETUP.get());
+        #[cfg(not(test))]
+        let gq = group_q2r(ix, g, pr, false);
         st.cyc[P_BASIS] += gq.cyc.0;
         st.cyc[P_GPOST] += gq.cyc.1;
         gq
     })
+}
+
+/// Group g's weights for every level (g set up). The first read rotates g together with every other group set up for
+/// this query and not yet rotated, each rotation's rows read once for all of them (`rotate`).
+pub fn get_rot<'a>(ix: &Index2, pr: &'a Prep2, g: usize, st: &mut Stats) -> &'a Rot2 {
+    let gq = pr.gq[g].get().expect("get_rot reads a group already set up");
+    if let Some(r) = gq.rot.get() {
+        return r;
+    }
+    let t0 = tick();
+    let todo: Vec<&GQ2> = pr.gq.iter().filter_map(|x| x.get()).filter(|x| x.rot.get().is_none()).collect();
+    for (x, r) in todo.iter().zip(rotate(ix, &todo)) {
+        let _ = x.rot.set(r);
+    }
+    st.cyc[P_ROT] += tick() - t0;
+    gq.rot.get().unwrap()
 }
 
 /// Per query, per opened cluster.
@@ -461,8 +509,9 @@ pub struct CQ2 {
     pub nd: [f32; J],
     pub fixed: f32,
     pub ewdet: f32, // weight-rounding bound, det (times s)
-    pub ewj: [f32; J], // per block (times kappa)
-    pub w: Vec<f32>,
+    pub ewj: [f32; J], // per block (times kappa), from the first randomised level on (enter_rand)
+    pub w: Vec<f32>, // the deterministic levels' weights; the randomised levels' follow from the first of them on
+    pub rand: bool,  // ewj and w's randomised weights are in (enter_rand)
     pub luts: Vec<Option<LevelLut>>,
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
@@ -482,6 +531,25 @@ pub struct IntDet {
 }
 
 impl CQ2 {
+    /// What the randomised levels read beyond the deterministic ones, brought in once: the group's rotated weights
+    /// (`get_rot`), their rounding bounds ewj and, where w is kept, its randomised weights.
+    pub fn enter_rand<'a>(&mut self, ix: &Index2, ci: usize, pr: &'a Prep2, st: &mut Stats) -> &'a Rot2 {
+        let c = &ix.cl[ci];
+        let rot = get_rot(ix, pr, c.g, st);
+        if !self.rand {
+            let a = self.alr as f64;
+            for j in 0..J {
+                self.ewj[j] = (4.0 * U * (rot.l1j[j] + a.abs() * c.l1m[1 + j] as f64) + 1e-30) as f32;
+            }
+            if !self.w.is_empty() {
+                let al = self.alr;
+                self.w.extend(rot.wq[ix.n()..].iter().zip(c.wmr.iter()).map(|(&q, &m)| q - al * m));
+            }
+            self.rand = true;
+        }
+        rot
+    }
+
     /// Decide the deterministic levels of threshold queries on the integer path.
     /// With combined tables (set `gtab` first), the common step comes from the units' range bounds: the group's sum
     /// and largest plus |alpha| times the centre's.
@@ -562,17 +630,12 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     let al = alr;
     let mut w = Vec::with_capacity(if want_w { 2 * n } else { 0 });
     if want_w {
-        w.extend(gq.wq[..n].iter().zip(c.mv32.iter()).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
-        w.extend(gq.wq[n..].iter().zip(c.wmr.iter()).map(|(&q, &m)| q - al * m));
-    }
-    let mut ewj = [0f32; J];
-    for j in 0..J {
-        ewj[j] = (4.0 * U * (gq.l1j[j] + a.abs() * c.l1m[1 + j] as f64) + 1e-30) as f32;
+        w.extend(gq.wq.iter().zip(c.mv32.iter()).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
     }
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [0.0; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -1346,6 +1409,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         // live slot is kept (verify: its bounds are computed and checked, not used); a later level's bound does not
         // depend on whether an earlier one decided
         let dnodec = l < ndl && mode == Mode2::Thr && cq.ddec >> l & 1 == 0;
+        let w = if l < ndl { &gq.wq[..] } else { &cq.enter_rand(ix, ci, pr, st).wq[..] };
         let tl1 = tick();
         if intm && l == ndl {
             // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
@@ -1374,7 +1438,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 let mut lut = sv.lut();
                 let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
-                    let gt = gq.gtab[l].get_or_init(|| group_tab(&gq.wq, lp, &ix.etab));
+                    let gt = gq.gtab[l].get_or_init(|| group_tab(w, lp, &ix.etab));
                     combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
                 } else {
                     build_lut(&cq.w, lp, &ix.etab, step, &mut lut);
