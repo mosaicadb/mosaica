@@ -89,30 +89,13 @@ fn pack(m: &[f64], r: usize) -> impl Iterator<Item = f32> + '_ {
     (0..r).flat_map(move |i| (i..r).map(move |j| m[i * r + j] as f32))
 }
 
-/// An orthonormal basis of the span of `vs` (Gram-Schmidt, twice; vectors left with no length dropped).
-pub fn orthonormal(vs: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    let mut qb: Vec<Vec<f64>> = Vec::new();
-    for v in vs {
-        let mut b = v.clone();
-        for _ in 0..2 {
-            for w in &qb {
-                let dt: f64 = b.iter().zip(w).map(|(x, y)| x * y).sum();
-                b.iter_mut().zip(w).for_each(|(x, y)| *x -= dt * y);
-            }
-        }
-        let nb = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if nb > 1e-9 {
-            qb.push(b.iter().map(|x| x / nb).collect());
-        }
-    }
-    qb
-}
-
 /// Per level of a cluster with order directions `dirs8` (r rows of n int8) and scales `dsc` (p_j = dirs8_j dsc_j, as
 /// the order state holds them) in group `gp`: B~ = B (P'P)^-1 (r vectors of n), b_j = (V_q^T p_j) d_l, and an
 /// orthonormal basis of span B. V_q^T P is one product per cluster (the int8 basis taken to f64 a block of its rows
-/// at a time), scaled by d_l at each level; P'P is inverted once. A direction the order state left zero (a cluster
-/// too small to span r) has a zero column in B~ (its coefficient is 0 too), and P'P is inverted over the others.
+/// at a time), scaled by d_l at each level; P'P is inverted once. Both P's rank and B's take the order state's rule
+/// (`order::orthonormal64`): a direction left with under 1e-6 of the largest one's norm once the others are taken out
+/// is in their span. Such a p_j (the order state leaves zero directions where a cluster is too small to span r) has a
+/// zero column in B~, and P'P is inverted over the others; such a b_j adds no column to Q.
 fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
     const ROWS: usize = 256;
     let r = dsc.len();
@@ -135,7 +118,7 @@ fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -
     }
     let dot = |x: &[f64], y: &[f64]| x.iter().zip(y).map(|(a, b)| a * b).sum::<f64>();
     let row = |j: usize| &p[j * n..(j + 1) * n];
-    let live: Vec<usize> = (0..r).filter(|&j| row(j).iter().any(|&x| x != 0.0)).collect();
+    let live = basis(&(0..r).map(row).collect::<Vec<_>>(), n).0;
     let rl = live.len();
     let ptp: Vec<f64> = (0..rl * rl).map(|i| dot(row(live[i / rl]), row(live[i % rl]))).collect();
     let pinv = gauss_jordan_inverse(&ptp, rl);
@@ -145,8 +128,19 @@ fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -
         for (jj, &j) in live.iter().enumerate() {
             bt[j] = (0..n).map(|t| (0..rl).map(|kk| bs[live[kk]][t] * pinv[kk * rl + jj]).sum()).collect();
         }
-        (bt, orthonormal(&bs))
+        (bt, basis(&bs.iter().map(|b| &b[..]).collect::<Vec<_>>(), n).1)
     }).collect()
+}
+
+/// The columns among `cols` (each n values) whose orthonormal basis column (`order::orthonormal64`) is not zero, and
+/// those basis columns.
+fn basis(cols: &[&[f64]], n: usize) -> (Vec<usize>, Vec<Vec<f64>>) {
+    let m = cols.len();
+    let y: Vec<f64> = (0..n).flat_map(|t| cols.iter().map(move |c| c[t])).collect();
+    let q = super::order::orthonormal64(&y, n, m);
+    let keep: Vec<usize> = (0..m).filter(|&j| (0..n).any(|t| q[t * m + j] != 0.0)).collect();
+    let vs = keep.iter().map(|&j| (0..n).map(|t| q[t * m + j]).collect()).collect();
+    (keep, vs)
 }
 
 /// `dual_dirs` of cluster c of `ix`, from its order state.
