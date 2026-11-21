@@ -549,9 +549,10 @@ pub struct Adaptive {
     low: Vec<f64>,
     /// the pooled within-cluster covariance, whose share of its trace along the query scales the stream's radii
     pooled: super::order::Pooled,
-    /// per level, the spread of a row's error as a share of its certified half-width: each deterministic level's median
-    /// over the groups of `GroupPlan2::rho`, and the randomised levels the last deterministic level's; k-NN at psi
-    /// reads each level at psi rho of its half-width (at most the certified width)
+    /// per level, the spread of a row's error as a share of its certified half-width, the median over the groups: a
+    /// deterministic level's `GroupPlan2::rho`, a randomised level's 1 / c (its half-width is c times the spread of the
+    /// row's error, c the certified constant `GroupPlan2::csgl`); k-NN at psi reads each level at psi rho of its
+    /// half-width (at most the certified width), psi spreads of the row's error at every level and dimension
     rho: Vec<f64>,
 }
 
@@ -610,12 +611,13 @@ impl Adaptive {
         let sizes: Vec<usize> = ix.cl.iter().map(|c| c.r1 - c.r0).collect();
         let pooled = super::order::Pooled::new(&st, &sizes, ix.n());
         let (nl, ndl) = (ix.meta.nl(), ix.meta.ndl());
-        let mut rho: Vec<f64> = (0..ndl).map(|l| {
-            let mut r: Vec<f64> = ix.groups.iter().filter(|gp| gp.cal.is_some()).map(|gp| gp.rho[l] as f64).collect();
+        let rho: Vec<f64> = (0..nl).map(|l| {
+            let mut r: Vec<f64> = ix.groups.iter().filter(|gp| gp.cal.is_some())
+                .map(|gp| if l < ndl { gp.rho[l] as f64 } else { 1.0 / gp.csgl[l - ndl] as f64 })
+                .collect();
             r.sort_by(f64::total_cmp);
             r.get(r.len() / 2).copied().unwrap_or(1.0)
         }).collect();
-        rho.resize(nl, rho.last().copied().unwrap_or(1.0));
         Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, rho })
     }
 
