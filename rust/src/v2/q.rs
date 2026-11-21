@@ -158,7 +158,7 @@ impl Prep2 {
                     }
                 }
             }
-            anc_of(self.qn, ba, best)
+            anc_of(self.qn, n, ba, best)
         })
     }
 
@@ -190,8 +190,19 @@ impl Prep2 {
     }
 }
 
-fn anc_of(qn: f64, a: usize, beta: f64) -> Anc {
-    Anc { a, beta, rho: (qn * qn - beta * beta).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12 }
+/// u = 2^-53, the unit roundoff of f64.
+const U64: f64 = f64::EPSILON / 2.0;
+
+/// sqrt(d) rounded up, where d is a difference of squares computed in f64 and `slack` bounds its rounding error.
+fn root_up(d: f64, slack: f64) -> f64 {
+    (d.max(0.0) + slack).sqrt() * (1.0 + 1e-12)
+}
+
+/// rho >= |q - beta p| for the computed beta = q . p and qn = |q| over n dimensions: qn^2 - beta^2 carries
+/// (n + 2) u qn^2 from qn^2, 2 n u qn^2 from beta's error, 4 u qn^2 from beta^2, the difference and the slack's
+/// addition, and beta^2 (|p|^2 - 1) <= (2e-12 + (n + 2) u) beta^2 for an anchor whose norm is 1 within 1e-12.
+fn anc_of(qn: f64, n: usize, a: usize, beta: f64) -> Anc {
+    Anc { a, beta, rho: root_up(qn * qn - beta * beta, (4 * n + 16) as f64 * U64 * qn * qn + 2e-12 * beta * beta) }
 }
 
 /// The query rounded to f16, as f16 and as f32, and its norm.
@@ -781,13 +792,17 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let c = &ix.cl[ci];
     let k = ix.k();
     let cm = qm / c.mn;
-    let s1 = (pr.qn * pr.qn - cm * cm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
+    // qn^2 carries (n + 2) u qn^2 and cm = q.m / |m| is within (1.5 n + 2) u qn of q . mhat, so cm^2 within
+    // (3 n + 4) u qn^2 of its square; 4 u qn^2 more for cm^2, the difference and the slack's addition
+    let s1 = root_up(pr.qn * pr.qn - cm * cm, (4 * n + 16) as f64 * U64 * pr.qn * pr.qn);
     let Anc { a, beta: b, rho } = pr.anc(ix);
     let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
     let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
     let pm = if ix.apm.is_empty() { dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat) } else { ix.apm[a * k + ci] };
     let rm = cm - b * pm;
-    let rp = (rho * rho - rm * rm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
+    // rm is within (2.5 n + 4) u qn of q_perp . mhat (cm's error, n u |beta| from pm, three roundings), so the exact
+    // rm^2 is at least rm^2 - 2 |rm| (3 n + 8) u qn; 6 u (rho^2 + rm^2) covers rounding the squares and the sums
+    let rp = root_up(rho * rho - rm * rm, 2.0 * rm.abs() * (3 * n + 8) as f64 * U64 * pr.qn + 6.0 * U64 * (rho * rho + rm * rm));
     Cut { cm, s1, bh, bl, rm, rp, da: DA + c.kx }
 }
 

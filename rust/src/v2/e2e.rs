@@ -1270,7 +1270,7 @@ impl crate::bucket::FitRows for Planted {
 
 /// synth4k's fit and its index built in memory under `o`, with the rows `plant` gives from the fit's parameters
 /// (row, f16 vector) in place of the fit's.
-fn build_planted(o: &BuildOptions, plant: impl Fn(&crate::index::Params) -> Vec<(usize, Vec<u16>)>) -> (crate::index::Params, Index2) {
+fn build_planted(o: &BuildOptions, mut plant: impl FnMut(&crate::index::Params) -> Vec<(usize, Vec<u16>)>) -> (crate::index::Params, Index2) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (mut p, prof) = prepare(dir, o).unwrap();
     p.load_perm().unwrap();
@@ -1342,6 +1342,77 @@ fn keys_clamped_past_da_are_allowed_for() {
             }
         }
     }
+}
+
+/// A query equal to a centre's int8 vector (exact in f16) lies along that cluster's anchor to within the f32 rounding of
+/// the centre, so |q|^2 - beta^2 cancels. In each cluster a top row is planted whose p . x lies just under a grid point
+/// of the support table and whose residual leans towards q - beta p, so that at the row's own score the table's bound
+/// beta hi + rho sqrt(x2) exceeds it only through rho. The cluster is not skipped there, and threshold answers at that
+/// score equal brute force.
+#[test]
+fn a_query_along_an_anchor_keeps_a_cluster_whose_top_row_matches() {
+    use crate::util::{f16_to_f32, f32_to_f16};
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let mq8 = crate::util::try_read_npy(&format!("{dir}/mq8.npy")).unwrap().i8s();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(11);
+    let f64s = |x: &[u16]| x.iter().map(|&h| f16_to_f32(h) as f64).collect::<Vec<f64>>();
+    let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+    let mut queries = Vec::new();
+    let (p, ix) = build_planted(&BuildOptions::default(), |p| {
+        let (n, xs) = (p.meta.n, crate::index::RealSource::open(&p.xs_path));
+        (0..p.meta.k).filter_map(|c| {
+            let ph = mhat_of(p, c);
+            // the int8 vector scaled by a power of 2 to a norm in (1/2, 1]
+            let mi = &mq8[c * n..(c + 1) * n];
+            let sc = 2f64.powi(-(mi.iter().map(|&v| v as f64 * v as f64).sum::<f64>().sqrt().log2().ceil() as i32));
+            let q: Vec<f64> = mi.iter().map(|&v| v as f64 * sc).collect();
+            let beta = dot(&q, &ph);
+            let qp: Vec<f64> = q.iter().zip(&ph).map(|(a, b)| a - beta * b).collect();
+            let u: Vec<f64> = qp.iter().zip(&ph).map(|(a, b)| a - dot(&qp, &ph) * b).collect();
+            let un = dot(&u, &u).sqrt();
+            let top = (p.cstart[c]..p.cstart[c + 1]).map(|r| dot(&f64s(xs.row(r)), &ph)).fold(f64::MIN, f64::max);
+            if top > 0.98 {
+                return None;
+            }
+            let v0 = top + 0.01;
+            // the candidate whose score most exceeds beta hi, hi being p . x rounded up to the table's grid
+            let (mut best, mut row) = (f64::MIN, Vec::new());
+            for _ in 0..20_000 {
+                let y: Vec<f64> = (0..n).map(|i| v0 * ph[i] + (1.0 - v0 * v0).sqrt() * (0.9 * u[i] / un + 0.1 * (rng.gen::<f64>() - 0.5))).collect();
+                let yn = dot(&y, &y).sqrt();
+                let x: Vec<u16> = y.iter().map(|&v| f32_to_f16((v / yn) as f32)).collect();
+                let xv = f64s(&x);
+                let v = dot(&xv, &ph);
+                let hi = ((v + 1e-9) * 32768.0).ceil() / 32768.0;
+                let gain = dot(&xv, &qp) - beta * (hi - v);
+                if v > top && gain > best {
+                    (best, row) = (gain, x);
+                }
+            }
+            queries.push((c, q.iter().map(|&v| v as f32).collect::<Vec<f32>>(), best));
+            Some((p.cstart[c], row))
+        }).collect()
+    });
+    let mut tried = 0;
+    for (c, q, gain) in queries {
+        if gain <= 2e-9 {
+            continue;
+        }
+        tried += 1;
+        let row = ix.row_of_ent(p.perm[p.cstart[c]] as u32);
+        let pr = prep2(&ix, &q);
+        assert_eq!(pr.anc(&ix).a, c, "cluster {c}: the query's nearest anchor is another cluster's");
+        let th = exact_value2(&ix, &pr, row);
+        let cl = &ix.cl[c];
+        assert!((cl.r0..cl.r1).all(|r| exact_value2(&ix, &pr, r) <= th), "cluster {c}: the planted row is not its top row");
+        assert!(!matches!(support_pre(&ix, &pr, th, cl.r1 - cl.r0, c, false), Some(Pre::Skip)), "cluster {c}: skipped at its top row's score {th}");
+        let t = truth(&ix, &q, None);
+        for (pname, plan) in plans() {
+            let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+            assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "cluster {c}, plan {pname}, t {th}");
+        }
+    }
+    assert!(tried > 0, "no planted row exceeds beta hi by more than the table's margin: the test checks nothing");
 }
 
 /// The calibration and the encoding give the same index on one thread as on several (code and store hashes), with the
