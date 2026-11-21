@@ -654,7 +654,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     if want_w {
         w.extend(gq.wq.iter().zip(c.mv32.iter()).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
     }
-    // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
+    // |v_c| < DECODED_MAX = 3.5 for a deterministic coordinate (asserted by DetTab::new)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * (DA + c.kx) + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
     // ewj is NaN until the randomised levels' inputs are in, so that an interval read before them is no interval

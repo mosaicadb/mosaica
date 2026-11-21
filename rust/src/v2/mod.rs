@@ -264,6 +264,9 @@ pub struct DetTab {
 }
 pub const TREE_DEPTHS: [usize; 3] = [1, 2, 4];
 pub const MAX_STAGES: usize = 4;
+/// The largest magnitude a deterministic coordinate decodes to (a tree centroid plus every residual stage), which the
+/// weights' rounding bound `ewdet` assumes.
+pub const DECODED_MAX: f64 = 3.5;
 
 impl DetTab {
     pub fn new(p: &Params) -> DetTab {
@@ -289,6 +292,8 @@ impl DetTab {
                 d[j][st + 1] = r.iter().map(|v| v * v).sum::<f64>() / ns as f64;
             }
         }
+        let top = TREE_DEPTHS.iter().map(|&j| cent[j].iter().map(|v| v.abs() as f64).fold(0.0, f64::max) + delta[j].iter().map(|v| v.abs() as f64).sum::<f64>()).fold(0.0, f64::max);
+        assert!(top < DECODED_MAX, "the fit's tree tables decode a coordinate to {top}, past the {DECODED_MAX} the deterministic levels' rounding bound assumes; refit them");
         DetTab { cent, edges, delta, d }
     }
     #[inline]
@@ -1874,6 +1879,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], kx: f64, x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
     assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
+    assert!(mn <= crate::index::CENTRE_NORM_MAX, "a cluster centre has norm {mn}, above {}: the vectors are not normalised; refit from normalised vectors", crate::index::CENTRE_NORM_MAX);
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
     // mv = V_q^T m
     let mut mv = vec![0f64; n];

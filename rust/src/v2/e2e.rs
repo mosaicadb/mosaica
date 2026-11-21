@@ -1440,6 +1440,16 @@ fn a_query_along_an_anchor_keeps_a_cluster_whose_top_row_matches() {
     assert!(tried > 0, "no planted row exceeds beta hi by more than the table's margin: the test checks nothing");
 }
 
+/// The deterministic code's tables are refused when a coordinate could decode past DECODED_MAX.
+#[test]
+fn tree_tables_decoding_past_their_bound_are_refused() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let mut p = crate::index::load_params(dir).unwrap();
+    DetTab::new(&p);
+    p.tree_cent[4 * 256 + 15] = DECODED_MAX;
+    assert!(std::panic::catch_unwind(|| DetTab::new(&p)).is_err(), "tables decoding to {DECODED_MAX} accepted");
+}
+
 /// The calibration and the encoding give the same index on one thread as on several (code and store hashes), with the
 /// default sample and with a sample smaller than the data (spread over the clusters).
 #[test]

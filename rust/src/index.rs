@@ -1,7 +1,12 @@
 //! The build parameters tools/fit.py writes to a fitted directory, and the mapped file of f16 vectors in cluster order.
 use crate::util::*;
 
-pub const DA: f64 = 0.5 / 32767.0 + 1e-7;
+/// The stored key's error bound: half its step, plus the f32 evaluation of m . r from it (q::cluster_q2w's fixed
+/// term), within 4 u (1 + |m|) |m| for u = 2^-24, which 5e-7 covers while |m| <= CENTRE_NORM_MAX.
+pub const DA: f64 = 0.5 / 32767.0 + 5e-7;
+/// The largest centre norm DA covers; the build refuses a larger one (a fit of normalised vectors has |m| <= 1 up to
+/// their f16 rounding).
+pub const CENTRE_NORM_MAX: f64 = 1.09;
 
 /// The stored key of a row whose x . mhat the build computes as `a`, and how far `a` lies outside [-1, 1], where the
 /// key is clamped (rounded up; 0 inside). The key is within DA plus that excess of x . mhat.
