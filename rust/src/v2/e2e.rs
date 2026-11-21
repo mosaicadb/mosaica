@@ -136,6 +136,73 @@ fn a_nan_threshold_is_refused() {
     }
 }
 
+/// Queries far from unit norm (the fixture's scaled by 366, 0.01 and 0.001) answer as brute force on every plan, with
+/// scores in the caller's units: thresholds (the intervals and exact scores returned with them holding the exact
+/// scores), the scan, exact k-NN, and the approximate queries, which at psi infinite (and knn2_fast over every
+/// cluster, up to f32) are exact and at the default psi give a subset of the exact threshold answer. Every reported
+/// k-NN score is its item's exact score within the f32 error.
+#[test]
+fn queries_far_from_unit_norm_answer_exactly() {
+    let f = fixture();
+    let ix = &f.ix;
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    let exact_scores = |q: &[f32], ents: &[(f64, u32)], what: &str| {
+        let pr = prep2(ix, q);
+        let err = 2.0 * full_err2(ix, &pr);
+        for &(v, e) in ents.iter().filter(|x| x.0.is_finite()) {
+            let x = exact_value2(ix, &pr, ix.row_of_ent(e));
+            assert!((v - x).abs() <= err, "{what}: entity {e}'s reported score {v}, exact {x}");
+        }
+    };
+    for scale in [366.0f32, 0.01, 1e-3] {
+        for (qi, q0) in f.queries.iter().enumerate() {
+            let q: Vec<f32> = q0.iter().map(|&x| x * scale).collect();
+            let pr = prep2(ix, &q);
+            for (sname, bm) in &f.sets[..3] {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let t = truth(ix, &q, bm.as_ref());
+                let what = format!("scale {scale}, query {qi}, set {sname}");
+                for th in thresholds(&t) {
+                    let want = answer(&t, th);
+                    for (pname, plan) in plans() {
+                        let r = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: true, plan });
+                        assert_eq!(to_bitmap2(ix, &r.rows), want, "{what}, plan {pname}, t {th}");
+                        for &(row, lb, ub, lv) in &r.iv {
+                            let v = exact_value2(ix, &pr, row as usize);
+                            assert!(lb as f64 <= v && v <= ub as f64, "{what}, plan {pname}, t {th}: row {row} level {lv}: {v} outside [{lb}, {ub}]");
+                        }
+                        for &(row, v) in &r.exact {
+                            assert_eq!(v, exact_value2(ix, &pr, row as usize), "{what}, plan {pname}, t {th}: row {row}'s exact score");
+                        }
+                    }
+                    let r = scan_visible(ix, &pr, th, vis.as_ref(), false, false);
+                    assert_eq!(to_bitmap2(ix, &r.rows), want, "{what}, scan, t {th}");
+                    let (a, _) = ad.threshold(ix, &q, th, vis.as_ref(), f64::INFINITY, Plan::default());
+                    assert_eq!(to_bitmap2(ix, &a.rows), want, "{what}, approximate at psi infinite, t {th}");
+                    let (a, _) = ad.threshold(ix, &q, th, vis.as_ref(), adaptive::PSI, Plan::default());
+                    let got = to_bitmap2(ix, &a.rows);
+                    assert!(got.is_subset(&want), "{what}, approximate, t {th}: rows outside the exact answer");
+                }
+                for k in [1, 10, 100].into_iter().filter(|&k| k <= t.len()) {
+                    for (pname, plan) in plans() {
+                        let out = knn2(ix, &q, k, vis.as_ref(), plan);
+                        assert_eq!(sub_values(ix, &out.ents, &q), top_values(&t, k), "{what}, plan {pname}, k {k}");
+                        exact_scores(&q, &out.ents, &format!("{what}, plan {pname}, k {k}"));
+                    }
+                    let (a, _) = ad.knn(ix, &q, k, vis.as_ref(), adaptive::PSI, Plan::default());
+                    exact_scores(&q, &a.ents, &format!("{what}, approximate k-NN, k {k}"));
+                    let a = knn2_fast(ix, &f.ap, &q, k, vis.as_ref(), ix.k(), None, Plan::default());
+                    let err = 2.0 * full_err2(ix, &pr);
+                    assert!(a.ents.len() == k && sub_values(ix, &a.ents, &q).iter().all(|&v| v >= t[k - 1].0 - err), "{what}, knn2_fast over every cluster, k {k}");
+                    exact_scores(&q, &a.ents, &format!("{what}, knn2_fast, k {k}"));
+                }
+            }
+        }
+    }
+    // a zero query is refused
+    assert!(std::panic::catch_unwind(|| prep2(ix, &vec![0f32; ix.n()])).is_err(), "a zero query was taken");
+}
+
 /// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
 /// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
 #[test]
