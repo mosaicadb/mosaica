@@ -1463,6 +1463,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         let tt = tick();
         st.cyc[P_LVSETUP] += tt - tl1;
+        let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
         let lut: &LevelLut = {
             if cq.luts[l].is_none() {
                 st.cyc[C_TABLES] += 1;
@@ -1470,7 +1471,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 st.cyc[C_TSURV] += live as u64;
                 st.cyc[C_TSMALL] += (live <= 8) as u64;
                 let mut lut = sv.lut();
-                let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
                     let gt = gq.gtab[l].get_or_init(|| group_tab(w, lp, &ix.etab));
                     combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
@@ -1481,6 +1481,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
             cq.luts[l].as_ref().unwrap()
         };
+        // tables are cached by level alone: the integer levels must not read ones built with another step
+        assert!(step.map_or(true, |s| lut.parts.iter().all(|p| p.scale == s)), "level {l}'s cached tables have another step than the integer levels' {step:?}; open the cluster afresh for another mode");
         st.cyc[P_TABLES] += tick() - tt;
         let tls = tick();
         for pl in &lut.parts {
