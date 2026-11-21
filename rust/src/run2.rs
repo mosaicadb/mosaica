@@ -999,6 +999,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             for g in 0..ix.groups.len() {
                 get_gq2(ix, &pr, g, &mut st);
             }
+            get_rot(ix, &pr, pr.gq[0].get().unwrap(), &mut st);
             tg.push(t.ms());
             let t = Timer::new();
             let mut qv = vec![0f64; ix.n()];
@@ -1027,8 +1028,9 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             trot.push(t.ms());
             let t = Timer::new();
             let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| {
-                let mut cq = cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, pr.qm(ix, ci));
-                cq.enter_rand(ix, ci, &pr, &mut st);
+                let gq = pr.gq[ix.cl[ci].g].get().unwrap();
+                let mut cq = cluster_q2(ix, ci, gq, &pr, pr.qm(ix, ci));
+                cq.enter_rand(ix, ci, gq, &pr, &mut st);
                 cq
             }).collect();
             tc.push(t.ms());
@@ -1055,7 +1057,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             }
             tw.push(t.ms() * 1e6 / nu as f64);
         }
-        out!("setup2 {cls} (1 thread, {} groups, {} clusters): group setup {:.2} ms (int8 basis products alone, warm {:.2} ms; rotations alone {:.2} ms), cluster setup {:.2} ms ({:.2} us each), all tables of every cluster and level {:.2} ms ({:.2} us per cluster; warm {:.1} ns per unit)",
+        out!("setup2 {cls} (1 thread, {} groups, {} clusters): group setup with every group's rotations in one pass {:.2} ms (int8 basis products alone, warm {:.2} ms; rotations alone {:.2} ms), cluster setup {:.2} ms ({:.2} us each), all tables of every cluster and level {:.2} ms ({:.2} us per cluster; warm {:.1} ns per unit)",
             ix.groups.len(), ix.k(), median(&tg), median(&tq), median(&trot), median(&tc), median(&tc) * 1e3 / ix.k() as f64, median(&tl), median(&tl) * 1e3 / ix.k() as f64, median(&tw));
     }
 }
@@ -1496,8 +1498,10 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     for k in 0..13 {
                         parts[k] += ms(cy[k]);
                     }
+                    // the rotations done at setup and those done when first read (inside run_cluster) shown together
+                    parts[P_ROT] += ms(cy[P_ROTLATE]);
                     let inner = |ks: &[usize]| ks.iter().map(|&k| cy[k] as i64).sum::<i64>();
-                    let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP]);
+                    let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP, P_ROTLATE]);
                     let clo = cy[P_CLUSTER] as i64 - cy[P_RUNCL] as i64 - inner(&[P_CLSETUP, P_FULL]);
                     let qo = cy[P_QUERY] as i64 - cy[P_CLUSTER] as i64 - cy[P_MERGE] as i64 - inner(&[P_ANCHOR, P_CUT, P_BASIS, P_ROT, P_PLAN, P_GPOST]);
                     for (k, v) in [(13, cy[P_COMPACT] as i64), (14, cy[P_LVSETUP] as i64), (15, cy[P_GPOST] as i64), (16, lv), (17, clo), (18, cy[P_MERGE] as i64), (19, qo)] {
@@ -2395,8 +2399,8 @@ mod tests {
     use super::*;
 
     /// The candidates `gsetup` times hold group_q2r's values bit for bit: the post-processing as written and fused, and
-    /// the rotations group by group, together and when first read (`get_rot`), on synth4k with two and with six deterministic levels, for stored
-    /// items, a near-item and a random direction.
+    /// the rotations group by group, together and when first read (`get_rot`), on synth4k with two and with six
+    /// deterministic levels, for stored items, a near-item and a random direction.
     #[test]
     fn gsetup_candidates_give_the_librarys_values() {
         use rand::{Rng, SeedableRng};
@@ -2420,10 +2424,8 @@ mod tests {
                 // a query's groups rotated when first read: every group set up and not yet rotated, in one pass
                 let pr2 = prep2(&ix, q);
                 let mut st = Stats::new(ix.meta.nl());
-                for g in 0..gn {
-                    get_gq2(&ix, &pr2, g, &mut st);
-                }
-                get_rot(&ix, &pr2, gn / 2, &mut st);
+                let gqs: Vec<&GQ2> = (0..gn).map(|g| get_gq2(&ix, &pr2, g, &mut st)).collect();
+                get_rot(&ix, &pr2, gqs[gn / 2], &mut st);
                 let deferred: Vec<Rot2> = pr2.gq.iter().map(|x| { let r = x.get().unwrap().rot.get().expect("rotated with the group first read"); Rot2 { wq: r.wq.clone(), l1j: r.l1j } }).collect();
                 for (what, r) in [("group by group", xs.iter().map(|&gq| rotate(&ix, &[gq]).pop().unwrap()).collect()), ("together", rotate(&ix, &xs)), ("when first read", deferred)] {
                     for g in 0..gn {
@@ -2593,7 +2595,7 @@ pub fn qbench(c: &Ctx2, nq: usize) {
         while t.ms() < 50.0 {}
         (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.ms()
     };
-    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
+    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_ROTLATE, "rotlate"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
     let med = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
         let qs: Vec<&Vec<f32>> = qs.iter().take(nq).collect();

@@ -87,8 +87,10 @@ pub const SHARES: [u64; 4] = [1, 4, 16, 64];
 /// - `cut_row_us[s]`: one visible row its sorted range leaves, through the levels and, where it survives them, its
 ///   stored vector, at visible share 1 / `SHARES[s]`;
 /// - `cut_us`: a cluster's sorted range at a k-th best (its centre score in f64, the range, the visible rows in it);
-/// - `grp_us`: a group's setup as the index path pays it (the query's projections on the group's basis, `get_gq2`,
-///   and the group's rotations, `get_rot`, alone);
+/// - `grp_us`: a group's setup as k-NN's index path pays it (`KnnReader`: the query's projections on the group's
+///   basis, `get_gq2`, then the group's rotations alone, `get_rot`). Threshold queries charge it too (`Charges`),
+///   though `run_planned` sets their groups up together (`setup_groups`, one dgemm per block for all of them), whose
+///   cost per group it does not time;
 /// - `sig_us`: one cluster's sigma (its r directions' products with the query).
 ///
 /// Every `row_us` is above 0, the others at least 0, all finite (`check`).
@@ -365,8 +367,8 @@ fn measure_once(ix: &Index2) -> Option<Measured> {
                     // level reads them
                     let (p2, mut st) = (prep2(ix, q), Stats::new(nl));
                     let t = Instant::now();
-                    get_gq2(ix, &p2, g, &mut st);
-                    get_rot(ix, &p2, g, &mut st);
+                    let gq = get_gq2(ix, &p2, g, &mut st);
+                    get_rot(ix, &p2, gq, &mut st);
                     grp.push(us(t));
                 }
             }
