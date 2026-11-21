@@ -155,3 +155,49 @@ Files
 - Code: rust/src/v2/wrule.rs (the forms), q.rs (CQ2::set_w2, KnnReader::w2, det_norm), adaptive.rs (WidthRule,
   rule-aware dial, the window's coefficients), mod.rs and store.rs (Index2::wforms, wrule_g.bin, wrule_c.bin), e2e.rs
   (tests; study_w_unit and study_w2_forms).
+
+After the review (fixes on research/w-rule after 6f86a1c; the timed W2 path's widths are unchanged)
+--------------------------------------------------------------------------------------------------
+W2 build cost on 8 threads with the machine otherwise idle (forms_check.sh's rebuilds). The forms match the replay to
+1e-4 at every step.
+
+| | iNaturalist W2 | iNaturalist build | LAION W2 | LAION build |
+|---|---|---|---|---|
+| as timed (6f86a1c) | 23.2 s | 162 s | 3.8 s | 34 s |
+| after V_q^T P in one product | 18.3 s | 155.5 s | 3.3 s | 34.8 s |
+| after sums taken during the encoding | 8.1 thread-seconds + 0.3 s | 135.6 s | 3.6 thread-seconds + 0.1 s | 31.0 s |
+
+- The last row's builds have no level-ratio step: 5.6 s on iNaturalist and 1.1 s on LAION of the first row are that
+  step's.
+- 8.1 thread-seconds is about 1 s of wall time on 8 threads.
+- The replay of the encoder (errs) is gone, and with it its per-cluster memory: about 130 MB per cluster in flight on
+  iNaturalist.
+
+The centre's term (alr_check.*, study_w2_alr): measured, not changed
+------------------------------------------------------------------
+- The reader's score error is (qv - alr mv) . (z - z^), where W2 takes D = qv d_l and a = P'q. The variant takes
+  D' = (qv - alr mv) d_l, T' = D'GD' and a' = a - alr P'm.
+- Both are computed from this index's forms, on the replay's benchmark queries, first 20 clusters, each level.
+- Actual spread (interval midpoints' error) over predicted, p10 / median / p90, level 0 (level 1 alike):
+
+  | index | pairs | as built | centre off |
+  |---|---|---|---|
+  | iNaturalist | all | 0.71 / 0.85 / 1.03 | 0.78 / 0.93 / 1.10 |
+  | iNaturalist | true-neighbour | 0.70 / 0.84 / 0.98 | 0.89 / 1.01 / 1.13 |
+  | LAION | all | 0.92 / 0.99 / 1.07 | 0.93 / 1.00 / 1.08 |
+  | LAION | true-neighbour | 0.94 / 1.00 / 1.10 | 0.96 / 1.03 / 1.12 |
+  | yahoo | all | 0.90 / 0.97 / 1.03 | 0.93 / 0.99 / 1.06 |
+  | yahoo | true-neighbour | 0.87 / 0.96 / 1.03 | 0.95 / 1.01 / 1.08 |
+
+- In the sample-when-needed replay (alr/replay-*.txt; its "W1" column is W2 as built, its "W2" column the variant), at
+  0.9 kept / 0.95 kept, psi and rows past the deterministic levels per query:
+
+  | index | as built | centre off | rows, centre off against as built |
+  |---|---|---|---|
+  | iNaturalist | 4.23, 134 / 4.84, 225 | 4.81, 90 / 5.61, 170 | 33% / 24% fewer |
+  | LAION | 4.47, 373 / 5.06, 741 | 4.57, 370 / 5.16, 738 | level |
+  | yahoo | 4.34, 75 / 4.91, 123 | 4.59, 66 / 5.15, 108 | 12% fewer |
+
+- As built, W2 is wide on iNaturalist's true-neighbour pairs (median 0.84): it counts coding error along mv d_l that
+  the reader's estimate does not carry. With the centre off, the median is 1.00 to 1.03 everywhere, and fewer rows
+  pass at the same share kept, at a higher psi.

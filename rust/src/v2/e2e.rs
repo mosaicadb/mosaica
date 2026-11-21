@@ -2537,6 +2537,76 @@ fn study_w_unit() {
     }
 }
 
+/// Study (ignored; run by hand on a fit, rebuilt when stale): W2 with the centre's term taken off, against W2 as built.
+/// The reader's score error is (qv - alr mv) . (z - z^) (alr the cluster's `CQ2::alr`, mv = V_q^T m its centre's
+/// coordinates), where W2 takes D = qv d_l and a = P'q; the variant takes D' = (qv - alr mv) d_l, T' = D'GD' and a' = a -
+/// alr P'm. For each line of the replay's study_w_rule table DIAG_REF (the benchmark queries' first 20 clusters, each
+/// level): tau^2 under both, from this index's forms. Writes DIAG_OUT, the table with column 11 (W1's) replaced by W2 as
+/// built and column 12 (W2's) by the variant, for replay.py --w; prints, per level, the actual spread (the interval
+/// midpoints' error, the table's a_ref) over each prediction, p10 / median / p90, over all pairs and over those holding a
+/// true neighbour. DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
+#[test]
+#[ignore]
+fn study_w2_alr() {
+    use std::io::Write;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let refp = std::env::var("DIAG_REF").unwrap();
+    let out = std::env::var("DIAG_OUT").unwrap();
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut |_| {}) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut |_| {}).unwrap(),
+    };
+    let (n, ndl) = (ix.n(), ix.meta.ndl());
+    let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
+    let rp = wf.r * (wf.r + 1) / 2;
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| {
+        let rec = wf.of(ndl, c, l);
+        wrule::packed_quad(&rec[..rp], a) + rec[2 * rp] as f64 * (t - wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0)
+    };
+    let mut f = std::fs::File::create(&out).unwrap();
+    // per level and (all, hit): actual over predicted, as built and the variant
+    let mut r: Vec<[Vec<f64>; 4]> = (0..ndl).map(|_| Default::default()).collect();
+    for line in std::fs::read_to_string(&refp).unwrap().lines() {
+        if line.starts_with('#') {
+            writeln!(f, "{line}").unwrap();
+            continue;
+        }
+        let mut v: Vec<String> = line.split_whitespace().map(|x| x.to_string()).collect();
+        let x: Vec<f64> = v.iter().map(|y| y.parse().unwrap()).collect();
+        let (qi, c, l, hit, a_ref) = (x[0] as usize, x[1] as usize, x[3] as usize, x[5] > 0.0, x[6]);
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let pr = prep2(&ix, &q);
+        let g = ix.cl[c].g;
+        let gq = group_q2r(&ix, g, &pr, false);
+        let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
+        let (gd, dl, mv) = (wf.gdiag(n, ndl, g, l), &ix.groups[g].d[l], &ix.cl[c].mv32);
+        let t = |off: f64| -> f64 { (0..n).map(|j| ((gq.qv[j] - off * mv[j] as f64) * dl[j] as f64).powi(2) * gd[j] as f64).sum() };
+        let a = st.coefs_of(c, n, &q);
+        let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n]);
+        let a2: Vec<f32> = a.iter().zip(&am).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
+        let (w, wv) = (tau2(c, l, &a, t(0.0)), tau2(c, l, &a2, t(alr)));
+        v[11] = format!("{w:.6e}");
+        v[12] = format!("{wv:.6e}");
+        writeln!(f, "{}", v.join(" ")).unwrap();
+        for (i, p) in [w, wv].into_iter().enumerate() {
+            let ratio = (a_ref / p).sqrt();
+            r[l][2 * i].push(ratio);
+            if hit {
+                r[l][2 * i + 1].push(ratio);
+            }
+        }
+    }
+    let q3 = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); format!("{:.3} / {:.3} / {:.3} ({})", v[v.len() / 10], v[v.len() / 2], v[v.len() * 9 / 10], v.len()) };
+    for (l, x) in r.iter_mut().enumerate() {
+        let [a, b, c, d2] = x;
+        eprintln!("{dir}: level {l}, actual over predicted, p10 / median / p90 (pairs): all pairs: as built {}, centre off {}; true-neighbour pairs: as built {}, centre off {}", q3(a), q3(c), q3(b), q3(d2));
+    }
+}
+
 /// Study (ignored; run by hand on a fit, rebuilt when stale): the stored W2 forms against the replay that chose the
 /// rule (`study_w_rule` on research/sampled-width, its output DIAG_REF): for each of its (query, cluster, level) lines,
 /// tau^2 = a'Ma + gamma max(0, T - a'Na) from this index's forms, with a and T for the same query (unscaled, as the
