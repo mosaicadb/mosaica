@@ -448,7 +448,7 @@ impl Index {
 
 fn check_level_psi(level_psi: Option<f64>) -> PyResult<()> {
     match level_psi {
-        Some(x) if !(x.is_finite() && x >= 0.0) => Err(PyValueError::new_err(format!("level_psi is a finite number of at least 0, not {x}"))),
+        Some(x) if !(x >= 0.0) => Err(PyValueError::new_err(format!("level_psi is a number of at least 0 (inf: the certified width), not {x}"))),
         _ => Ok(()),
     }
 }

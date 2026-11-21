@@ -2525,8 +2525,8 @@ fn study_level_ratios() {
     eprintln!("reading the ratios as the reader does: {:.1} ns per cluster ({acc})", t.s() * 1e9 / (reps * ix.k()) as f64);
 }
 
-/// The deterministic levels' psi apart from the stop's: unset or equal to psi it is k-NN at psi; any value returns k
-/// visible items, each with its own score, and at psi infinite the exact query.
+/// The deterministic levels' psi apart from the stop's: unset or equal to psi it is k-NN at psi; any value, infinity
+/// (the certified width) too, returns k visible items, each with its own score, and at psi infinite the exact query.
 #[test]
 fn the_levels_psi_is_psi_unless_set() {
     let f = fixture();
@@ -2538,7 +2538,7 @@ fn the_levels_psi_is_psi_unless_set() {
         for psi in [2.0, adaptive::PSI] {
             let base = ad.knn(ix, q, 10, None, psi, probe_plan()).0.ents;
             assert_eq!(ad.knn_levels(ix, q, 10, None, psi, Some(psi), probe_plan()).0.ents, base);
-            for lp in [0.0, 1.0, 50.0] {
+            for lp in [0.0, 1.0, 50.0, f64::INFINITY] {
                 let got = ad.knn_levels(ix, q, 10, None, psi, Some(lp), probe_plan()).0.ents;
                 assert_eq!(got.len(), 10);
                 assert!(got.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e));

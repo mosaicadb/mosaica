@@ -3936,9 +3936,9 @@ impl<'a> KnnReader<'a> {
     }
 
     /// The reader with each cluster's deterministic levels on the index path read at its statistical width for `psi`
-    /// (finite, at least 0; `CQ2::set_width`), not at the query's dial.
+    /// (at least 0; infinity is the certified width; `CQ2::set_width`), not at the query's dial.
     pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
-        assert!(psi.is_finite() && psi >= 0.0, "the statistical width needs a finite psi of at least 0, not {psi}");
+        assert!(psi >= 0.0, "the statistical width needs a psi of at least 0, not {psi}");
         self.width = Some(psi);
         self
     }
