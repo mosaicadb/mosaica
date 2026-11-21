@@ -1,15 +1,15 @@
 inat: level 0, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.711 / 0.852 / 1.034 (2000), centre off 0.776 / 0.933 / 1.101 (2000); true-neighbour pairs: as built 0.695 / 0.837 / 0.984 (291), centre off 0.890 / 1.009 / 1.128 (291)
 inat: level 1, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.704 / 0.848 / 1.025 (2000), centre off 0.783 / 0.941 / 1.098 (2000); true-neighbour pairs: as built 0.666 / 0.824 / 0.978 (291), centre off 0.905 / 1.014 / 1.146 (291)
-inat: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 0.00e0, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 3.67 us on average
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 133.59s
+inat: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 3.07e-7, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 0.44 us on average
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 139.35s
 laion: level 0, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.916 / 0.986 / 1.068 (2000), centre off 0.931 / 1.002 / 1.084 (2000); true-neighbour pairs: as built 0.936 / 1.004 / 1.099 (368), centre off 0.961 / 1.026 / 1.124 (368)
 laion: level 1, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.925 / 0.989 / 1.061 (2000), centre off 0.940 / 1.002 / 1.074 (2000); true-neighbour pairs: as built 0.938 / 1.000 / 1.081 (368), centre off 0.960 / 1.017 / 1.103 (368)
-laion: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 0.00e0, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 1.18 us on average
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 31.01s
+laion: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 1.00e-7, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 0.25 us on average
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 31.48s
 yahoo: level 0, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.901 / 0.969 / 1.034 (2000), centre off 0.925 / 0.992 / 1.059 (2000); true-neighbour pairs: as built 0.867 / 0.956 / 1.026 (339), centre off 0.953 / 1.006 / 1.078 (339)
 yahoo: level 1, actual over predicted, p10 / median / p90 (pairs): all pairs: as built 0.912 / 0.971 / 1.026 (2000), centre off 0.938 / 0.992 / 1.051 (2000); true-neighbour pairs: as built 0.874 / 0.953 / 1.009 (339), centre off 0.958 / 1.003 / 1.061 (339)
-yahoo: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 0.00e0, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 0.98 us on average
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 25.56s
+yahoo: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference 1.15e-7, 0 of 4000 lines past 1e-4; one call (a cluster, 2 levels) 0.22 us on average
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 26.71s
 kept 0.9: psi  past det / stored / sampled  cost us
                                                     inat                             laion                             yahoo
 W1                          4.23    134/ 10/    0     11      4.47    373/ 16/    0     25      4.34     75/ 10/    0      8

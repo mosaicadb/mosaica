@@ -2661,8 +2661,8 @@ fn study_w2_cost() {
 /// level): tau^2 under both, from this index's forms. Writes DIAG_OUT, the table with column 11 (W1's) replaced by W2 as
 /// built and column 12 (W2's) by the variant, for replay.py --w; prints, per level, the actual spread (the interval
 /// midpoints' error, the table's a_ref) over each prediction, p10 / median / p90, over all pairs and over those holding a
-/// true neighbour; and the reader's tau^2 (`w2_tau2`, which the reader now uses) against the variant computed here, with
-/// the time of one `w2_tau2` call (one cluster, every level). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
+/// true neighbour; and the reader's tau^2 (`w2_tau2`, which the reader now uses, in f32 kernels) against the variant
+/// computed here in f64, with the time of one `w2_tau2` call (one cluster, every level). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
 #[test]
 #[ignore]
 fn study_w2_alr() {
@@ -2679,7 +2679,22 @@ fn study_w2_alr() {
     let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
     let (qs, d) = qn.rows_f32("queries").unwrap();
-    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| wf.tau2(ndl, c, l, a, t);
+    // in f64 throughout, apart from the reader's f32 kernels: a'Xa over the packed record (off-diagonals doubled)
+    let rp = wf.r * (wf.r + 1) / 2;
+    let quad64 = |x: &[f32], a: &[f32]| -> f64 {
+        let (mut s, mut k) = (0f64, 0);
+        for i in 0..a.len() {
+            for j in i..a.len() {
+                s += x[k] as f64 * a[i] as f64 * a[j] as f64;
+                k += 1;
+            }
+        }
+        s
+    };
+    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| {
+        let rec = wf.of(ndl, c, l);
+        quad64(&rec[..rp], a) + rec[2 * rp] as f64 * (t - quad64(&rec[rp..2 * rp], a)).max(0.0)
+    };
     let (mut worst, mut over, mut calls, mut secs) = (0f64, 0usize, 0usize, 0f64);
     let mut f = std::fs::File::create(&out).unwrap();
     // per level and (all, hit): actual over predicted, as built and the variant

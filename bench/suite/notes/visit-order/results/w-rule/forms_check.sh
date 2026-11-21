@@ -12,6 +12,6 @@ for spec in "inaturalist-resnet-2048-cosine inat" "laion-clip-512-normalized lai
   set -- $spec
   I=$C/$2; rm -rf $I; cp -al $S/fit/$1 $I
   (cd /home/joe/code/vexact-wrule/rust && env RAYON_NUM_THREADS=8 DIAG_DIR=$I DIAG_PREP=$S/prep/$1 DIAG_REF=$W/w-$2-test.txt nice -n 19 taskset -c 0-7 $BIN --ignored --nocapture --exact v2::e2e::study_w2_forms 2>&1 | grep -E "W2 forms|level ratios|assembled|lines of|storage|panicked|test result")
-  du -b $I/encoded/wrule_g.bin $I/encoded/wrule_c.bin $I/encoded/level_ratio.bin
+  du -b $I/encoded/wrule_h.bin $I/encoded/wrule_c.bin
   rm -rf $I
 done
