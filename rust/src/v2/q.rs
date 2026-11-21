@@ -629,6 +629,9 @@ pub struct CQ2 {
     pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
     pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
+    /// per deterministic level, the factor on the item intervals' upper half-width: the query's (`Prep2::dial`), or
+    /// the cluster's statistical width (`set_width`)
+    pub ddial: [f32; NDL_MAX],
 }
 
 /// The integer deterministic levels of one (query, cluster): the common table step, and per level the margins and
@@ -642,6 +645,18 @@ pub struct IntDet {
 }
 
 impl CQ2 {
+    /// The deterministic levels read at the statistical width for `psi`: min(1, psi rho_g,l r_c,l) of each upper
+    /// half-width, rho_g,l the derived width's share (`GroupPlan2::rho`) and r_c,l cluster ci's stored ratio
+    /// (`Index2::lratio`, `adaptive::level_ratios`).
+    pub fn set_width(&mut self, ix: &Index2, ci: usize, psi: f64) {
+        let ndl = ix.meta.ndl();
+        let gp = &ix.groups[ix.cl[ci].g];
+        let r = &ix.lratio.as_ref().expect("the statistical width reads the index's level ratios")[ci * ndl..(ci + 1) * ndl];
+        for (l, d) in self.ddial[..ndl].iter_mut().enumerate() {
+            *d = (psi * gp.rho[l] as f64 * r[l] as f64).min(1.0) as f32;
+        }
+    }
+
     /// What the randomised levels read beyond the deterministic ones, brought in once: the rotated weights of the
     /// cluster's group gq (`get_rot`), their rounding bounds ewj and, where w is kept, its randomised weights.
     pub fn enter_rand<'a>(&mut self, ix: &Index2, ci: usize, gq: &'a GQ2, pr: &Prep2, st: &mut Stats) -> &'a Rot2 {
@@ -751,7 +766,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * c.da() + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
     // ewj is NaN until the randomised levels' inputs are in, so that an interval read before them is no interval
-    let mut cq = CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [f32::NAN; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None };
+    let mut cq = CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [f32::NAN; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None, ddial: std::array::from_fn(|l| pr.dial.get(l).copied().unwrap_or(1.0)) };
     if let Some(rot) = gq.rot.get() {
         cq.fill_rand(ix, ci, rot);
     }
@@ -1381,10 +1396,10 @@ unsafe fn rand_half<const H: usize>(ix: &Index2, rl: &RandLv, sv: &mut State, sp
 /// Verify mode, a deterministic level of one block (bit i: slot k0 + i): count the decisions (in, out) that the
 /// real-valued certificate, evaluated in f64 from the f64 table sum, does not imply, and the active lanes whose exact
 /// score it does not contain.
-unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f64, sv: &State, k0: usize, sp: *const u8, act: u32, inm: u32, outm: u32, st: &mut Stats) {
+unsafe fn check_det(ix: &Index2, ci: usize, cq: &CQ2, l: usize, t: f64, sv: &State, k0: usize, sp: *const u8, act: u32, inm: u32, outm: u32, st: &mut Stats) {
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
-    let (qm, alr, fixed, ew, dwa, d) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64, cq.ewdet as f64, cq.dwa[l] as f64, pr.dial[l] as f64);
+    let (qm, alr, fixed, ew, dwa, d) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64, cq.ewdet as f64, cq.dwa[l] as f64, cq.ddial[l] as f64);
     for i in 0..32 {
         if act >> i & 1 == 0 {
             continue;
@@ -1499,7 +1514,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
         // only lowers Tout. An item taken in must carry its interval (out.iv), which the integer levels do not give,
         // so with out.iv they take nothing in (Tin clamps to TMAX) and leave it to the randomised levels.
-        let dmax = pr.dial[..ndl].iter().fold(0f32, |a, &d| a.max(d)) as f64;
+        let dmax = cq.ddial[..ndl].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
         let cin = if out.iv.is_some() { f64::INFINITY } else { t - cq.tol + fixed - qm };
@@ -1592,7 +1607,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             id.b[l] = b0 + lut.parts.iter().map(|p| p.off as f64).sum::<f64>();
             id.e[l] = e0 + lut.parts.iter().map(|p| p.err as f64).sum::<f64>() * (1.0 + 1e-6);
             if id.rt[l].is_none() {
-                let (b, e, sg, d) = (id.b[l], id.e[l], id.sigma as f64, pr.dial[l] as f64);
+                let (b, e, sg, d) = (id.b[l], id.e[l], id.sigma as f64, cq.ddial[l] as f64);
                 let dw = cq.dwa[l] as f64 * gp.pconst[l] as f64 * (1.0 + 1e-6);
                 let mut rin = [None; 16];
                 let mut rout = [None; 16];
@@ -1776,7 +1791,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 st.cyc[P_DECODE] += t2 - t1;
                 let (inm, outm) = (inm & act, outm & act);
                 if verify {
-                    check_det(ix, ci, pr, cq, l, t, sv, k0, sp, act, inm, outm, st);
+                    check_det(ix, ci, cq, l, t, sv, k0, sp, act, inm, outm, st);
                 }
                 let k = if sweep || dnodec { act } else { act & !(inm | outm) };
                 if !dnodec {
@@ -1841,7 +1856,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let fl = _mm512_mul_ps(u16x, _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa)));
                     let hh = _mm512_add_ps(_mm512_mul_ps(_mm512_mul_ps(_mm512_set1_ps(cq.dwa[l]), rho), one6), _mm512_add_ps(_mm512_set1_ps(cq.fixed), _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), fl)));
                     lb = _mm512_sub_ps(est, hh);
-                    ub = _mm512_add_ps(est, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
+                    ub = _mm512_add_ps(est, _mm512_mul_ps(hh, _mm512_set1_ps(cq.ddial[l])));
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
@@ -1922,7 +1937,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, _mm512_set1_ps(tout)) & hm;
                 if verify && l < ndl {
                     let sh = 16 * h;
-                    check_det(ix, ci, pr, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);
+                    check_det(ix, ci, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);
                 }
                 if dnodec {
                     keep[h] = hm;
@@ -3908,6 +3923,8 @@ pub struct KnnReader<'a> {
     zcl: Vec<(usize, usize, f64, f64)>,
     /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
     z: (f64, f64, f64),
+    /// psi of the deterministic levels' statistical width (`with_width`)
+    width: Option<f64>,
     pub st: Stats,
 }
 
@@ -3915,7 +3932,15 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, st }
+    }
+
+    /// The reader with each cluster's deterministic levels on the index path read at its statistical width for `psi`
+    /// (finite, at least 0; `CQ2::set_width`), not at the query's dial.
+    pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
+        assert!(psi.is_finite() && psi >= 0.0, "the statistical width needs a finite psi of at least 0, not {psi}");
+        self.width = Some(psi);
+        self
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -4030,6 +4055,9 @@ impl<'a> KnnReader<'a> {
                 let gq = get_gq2(ix, pr, c.g, &mut self.st);
                 let tq = tick();
                 let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
+                if let Some(psi) = self.width {
+                    cq.set_width(ix, ci, psi);
+                }
                 self.st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };
                 unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, false, &mut self.sv, &mut self.st, &mut out) };

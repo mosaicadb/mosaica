@@ -409,7 +409,7 @@ fn the_order_state_is_built_saved_and_opened() {
     assert!(e.contains(&format!("format {}", store::STORE_FORMAT - 1)) && e.contains("rebuild"), "{e}");
     std::fs::write(&json, &text).unwrap();
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    for name in order::FILES {
+    for name in order::FILES.into_iter().chain([adaptive::RATIO_FILE]) {
         let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/{name}.kept"));
         std::fs::rename(&path, &keep).unwrap();
         let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
@@ -925,6 +925,7 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
+    assert_eq!(a.lratio.as_ref().map(|r| f32b(r)), b.lratio.as_ref().map(|r| f32b(r)));
     for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
         assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
     }
@@ -2324,8 +2325,9 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
 }
 
 /// Each deterministic level's rho is a participation ratio of its n weighted coordinates, so between 1 / sqrt(n) (the
-/// terms equal) and 1 (one term); the approximate k-NN reads a level at min(1, psi rho) of its half-width, and at
-/// the certified width when psi is infinite.
+/// terms equal) and 1 (one term). The query's dial leaves the deterministic levels certified (k-NN sets them cluster
+/// by cluster) and reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi
+/// is infinite.
 #[test]
 fn the_levels_statistical_width_is_a_participation_ratio() {
     let ix = &fixture().ix;
@@ -2339,7 +2341,175 @@ fn the_levels_statistical_width_is_a_participation_ratio() {
     assert!(ad.dial(f64::INFINITY).iter().all(|&d| d == 1.0));
     let (lo, hi) = (ad.dial(1.0), ad.dial(4.0));
     assert_eq!(lo.len(), ix.meta.nl());
+    assert!(lo[..ix.meta.ndl()].iter().chain(&hi[..ix.meta.ndl()]).all(|&d| d == 1.0), "{lo:?} {hi:?}");
     assert!(lo.iter().zip(&hi).all(|(&a, &b)| a > 0.0 && a <= b && b <= 1.0), "{lo:?} {hi:?}");
+}
+
+/// The build stores a level ratio above 0 for every cluster and deterministic level, not all 1; a saved index opens
+/// with the same ratios, and one without its ratio file is refused at the open, naming the file and a rebuild, as an
+/// index without ratios is by the approximate queries.
+#[test]
+fn the_level_ratios_are_stored_and_survive_a_reopen() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("ratios");
+    let edir = tmp.join("encoded");
+    let edir = edir.to_str().unwrap();
+    let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let r = built.lratio.as_ref().unwrap();
+    assert_eq!(r.len(), built.k() * built.meta.ndl());
+    assert!(r.iter().all(|&x| x.is_finite() && x > 0.0) && r.iter().any(|&x| (x - 1.0).abs() > 1e-3), "{r:?}");
+    assert_eq!(r[..], fixture().ix.lratio.as_ref().unwrap()[..], "a saved build measures the ratios the build in memory does");
+    let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(r.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), opened.lratio.as_ref().unwrap().iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+    opened.lratio = None;
+    let e = adaptive::Adaptive::new(&opened, fixed_costs()).map(|_| ()).unwrap_err();
+    assert!(e.contains("level ratios") && e.contains("rebuild"), "{e}");
+    drop((built, opened));
+    let (path, keep) = (format!("{edir}/{}", adaptive::RATIO_FILE), format!("{edir}/kept"));
+    std::fs::rename(&path, &keep).unwrap();
+    let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains(adaptive::RATIO_FILE) && e.contains("rebuild"), "{e}");
+    std::fs::rename(&keep, &path).unwrap();
+    open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+}
+
+/// A cluster read on the index path at the statistical width (each deterministic level at min(1, psi rho r) of its
+/// half-width, r the cluster's stored ratio) sends on from each level no row the certified width would drop: against
+/// the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and the items
+/// it finds above t are among those the certified read finds, each with its own score. Over synth4k's clusters of at
+/// least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels, the width takes
+/// effect, and where psi rho r reaches 1 at every level the read is the certified one.
+#[test]
+fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
+    let f = fixture();
+    let ix = &f.ix;
+    let (nl, ndl) = (ix.meta.nl(), ix.meta.ndl());
+    let e = 64.0 * 2f64.powi(-24);
+    let ratio = ix.lratio.as_ref().unwrap();
+    let big: Vec<usize> = (0..ix.k()).filter(|&c| ix.cl[c].r1 - ix.cl[c].r0 >= 64).collect();
+    assert!(big.len() >= 4, "{} clusters of at least 64 rows", big.len());
+    let (mut capped, mut fewer) = (0, 0);
+    for (qi, q) in f.queries.iter().enumerate() {
+        let pr = prep2(ix, q);
+        // thresholds between two rows' scores, so that no row's product rounds to either side of t
+        let tr = truth(ix, q, None);
+        let t10 = (tr[9].0 + tr[10].0) / 2.0;
+        for &ci in &big {
+            let c = &ix.cl[ci];
+            let gp = &ix.groups[c.g];
+            let mut sc: Vec<f64> = (c.r0..c.r1).map(|r| exact_value2(ix, &pr, r)).collect();
+            sc.sort_by(f64::total_cmp);
+            for t in [t10, (sc[sc.len() / 2] + sc[sc.len() / 2 + 1]) / 2.0] {
+                for plan in [Plan::default(), Plan { int_det: false, gtab: false, repack: false, ..Plan::default() }] {
+                    for psi in [0.5, 2.0, adaptive::PSI, 50.0] {
+                        let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}", plan.int_det);
+                        let read = |width: Option<f64>| {
+                            let mut rd = KnnReader::new(ix, &pr, None, ix.nrows, plan, crate::kernel::Stats::new(nl));
+                            if let Some(p) = width {
+                                rd = rd.with_width(p);
+                            }
+                            rd.prime(t);
+                            rd.visit(ci, KnnPath::Index);
+                            let (ents, st) = rd.finish();
+                            (ents.into_iter().filter(|x| x.1 != u32::MAX).collect::<Vec<_>>(), st)
+                        };
+                        let (fa, sa) = read(Some(psi));
+                        let (fb, sb) = read(None);
+                        assert_eq!(sa.enter[0], sb.enter[0], "{what}: rows on the index path");
+                        for l in 1..=nl {
+                            assert!(sa.enter[l] <= sb.enter[l], "{what}: {} rows enter level {l} at the statistical width, {} at the certified", sa.enter[l], sb.enter[l]);
+                        }
+                        assert!(sa.full_reads <= sb.full_reads, "{what}: {} stored vectors read, {} certified", sa.full_reads, sb.full_reads);
+                        let mut ids: Vec<u32> = fa.iter().map(|x| x.1).collect();
+                        ids.sort_unstable();
+                        ids.dedup();
+                        assert_eq!(ids.len(), fa.len(), "{what}: an item twice");
+                        for &(v, ent) in &fa {
+                            assert!(v > t && (v - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e, "{what}: entity {ent} scored {v}");
+                            assert!(fb.iter().any(|x| x.1 == ent), "{what}: entity {ent} not found by the certified read");
+                        }
+                        if (0..ndl).all(|l| psi * gp.rho[l] as f64 * ratio[ci * ndl + l] as f64 >= 1.0) {
+                            capped += 1;
+                            assert_eq!((&sa.enter, sa.full_reads, &fa), (&sb.enter, sb.full_reads, &fb), "{what}: capped at every level, yet not the certified read");
+                        }
+                        fewer += (sa.enter[ndl] < sb.enter[ndl]) as usize;
+                    }
+                }
+            }
+        }
+    }
+    assert!(capped > 0 && fewer > 0, "{capped} reads capped at every level, {fewer} dropping more rows than the certified width");
+}
+
+/// Study (ignored; run by hand on a fit, which it rebuilds when its saved index is stale, as the bindings do): the level
+/// ratios measured with given training queries, for a check against the replay that chose the rule
+/// (`bench/suite/notes/visit-order/results/stored-correction/check_ratios.py`). DIAG_DIR the fit, DIAG_PREP a directory
+/// with `queries.npy` (corpus rows as queries) and `query_rows.npy` (their entities, each left out of its own
+/// cluster), DIAG_OUT the output prefix: `.study.f32` (k x ndl, from those queries) and `.build.f32` (the build's
+/// own). Also the time of each and of reading the ratios as the reader does (`CQ2::set_width`'s arithmetic over every
+/// cluster).
+#[test]
+#[ignore]
+fn study_level_ratios() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let out = std::env::var("DIAG_OUT").unwrap();
+    let mut log = |s: String| eprintln!("{s}");
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut log) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut log).unwrap(),
+    };
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let ents: Vec<i64> = crate::util::read_npy(&format!("{prep}/query_rows.npy")).i64s();
+    let queries: Vec<(Vec<f32>, Option<usize>)> = ents.iter().enumerate().map(|(i, &e)| {
+        let mut v = vec![0f32; ix.n()];
+        v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]);
+        (v, Some(ix.row_of_ent(e as u32)))
+    }).collect();
+    let t = Timer::new();
+    let r = adaptive::level_ratios(&ix, &queries);
+    eprintln!("{dir}: level ratios from {} given queries in {:.1}s on {} threads", queries.len(), t.s(), rayon::current_num_threads());
+    let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    std::fs::write(format!("{out}.study.f32"), bytes(&r)).unwrap();
+    std::fs::write(format!("{out}.build.f32"), bytes(ix.lratio.as_ref().unwrap())).unwrap();
+    let t = Timer::new();
+    let (reps, ndl) = (1000, ix.meta.ndl());
+    let mut acc = 0f32;
+    for i in 0..reps {
+        let psi = 4.0 + i as f64 * 1e-6;
+        for ci in 0..ix.k() {
+            let gp = &ix.groups[ix.cl[ci].g];
+            let lr = &ix.lratio.as_ref().unwrap()[ci * ndl..(ci + 1) * ndl];
+            for (l, &x) in lr.iter().enumerate() {
+                acc += std::hint::black_box((psi * gp.rho[l] as f64 * x as f64).min(1.0) as f32);
+            }
+        }
+    }
+    eprintln!("reading the ratios as the reader does: {:.1} ns per cluster ({acc})", t.s() * 1e9 / (reps * ix.k()) as f64);
+}
+
+/// The deterministic levels' psi apart from the stop's: unset or equal to psi it is k-NN at psi; any value returns k
+/// visible items, each with its own score, and at psi infinite the exact query.
+#[test]
+fn the_levels_psi_is_psi_unless_set() {
+    let f = fixture();
+    let ix = &f.ix;
+    let e = 64.0 * 2f64.powi(-24);
+    let ad = adaptive::Adaptive::new(ix, cheap_index(fixed_costs())).unwrap();
+    for q in &f.queries {
+        let pr = prep2(ix, q);
+        for psi in [2.0, adaptive::PSI] {
+            let base = ad.knn(ix, q, 10, None, psi, probe_plan()).0.ents;
+            assert_eq!(ad.knn_levels(ix, q, 10, None, psi, Some(psi), probe_plan()).0.ents, base);
+            for lp in [0.0, 1.0, 50.0] {
+                let got = ad.knn_levels(ix, q, 10, None, psi, Some(lp), probe_plan()).0.ents;
+                assert_eq!(got.len(), 10);
+                assert!(got.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e));
+            }
+        }
+        assert_eq!(ad.knn_levels(ix, q, 10, None, f64::INFINITY, Some(1.0), probe_plan()).0.ents, knn2(ix, q, 10, None, probe_plan()).ents);
+    }
 }
 
 /// The approximate k-NN returns k visible items (each once, with its own score) whenever k are visible, under the
