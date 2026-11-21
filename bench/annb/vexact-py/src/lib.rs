@@ -201,8 +201,8 @@ impl Index {
     /// What one approximate query did, as a dict: its path ("probe", "scan", "exact", "sparse", "empty"), the clusters
     /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
     /// costs (the order's, the whole query's, and for a threshold query a scan's); and rows touched,
-    /// full vectors read, clusters on the index path and the time in ms. With `t`, the threshold query at t, else
-    /// k-NN at k.
+    /// full vectors read, clusters on the index path and the time in ms; for k-NN also the rows past the deterministic
+    /// levels (`past_det`). With `t`, the threshold query at t, else k-NN at k.
     #[pyo3(signature = (q, k=10, psi=PSI, t=None))]
     fn explain_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let q = q.as_slice()?;
@@ -222,6 +222,9 @@ impl Index {
         }));
         let ms = tm.elapsed().as_secs_f64() * 1e3;
         let d = info_dict(py, &i)?;
+        if t.is_none() {
+            d.set_item("past_det", st.enter.get(ix.meta.ndl()).copied().unwrap_or(0))?;
+        }
         d.set_item("touched", st.touched)?;
         d.set_item("full_reads", st.full_reads)?;
         d.set_item("clusters_open", st.clusters_open)?;
