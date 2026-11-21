@@ -714,13 +714,6 @@ impl Adaptive {
     /// setup's cost). Returns k items whenever
     /// k are visible. `plan` is the index path's and the exact query's.
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
-        self.knn_levels(ix, q, kk, vis, psi, None, plan)
-    }
-
-    /// `knn` with the deterministic levels' statistical width at its own psi (`level_psi`, psi when None), apart from
-    /// the stop's and the randomised levels': a knob for studies; at psi infinite the exact query whatever it is.
-    #[allow(clippy::too_many_arguments)]
-    pub fn knn_levels(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, level_psi: Option<f64>, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
         assert!(psi >= 0.0, "psi is at least 0 (infinity is the exact query), not {psi}");
         let tm = Timer::new();
@@ -756,7 +749,6 @@ impl Adaptive {
         }
         // scores below are the scaled query's (Prep2::unit), scaled back on the way out
         let mut pr = pr.unit();
-        let lpsi = level_psi.unwrap_or(psi);
         pr.dial = self.dial(psi);
         let tc = tick();
         let qm = self.centres.centre_scores(ix, &pr.q32);
@@ -787,7 +779,7 @@ impl Adaptive {
         // given its clusters read directly are summed (`lost`), and the cluster whose saving takes the sum to the
         // setup's cost sets it up (at most twice the best purchase)
         let mut lost = vec![0f64; ix.groups.len()];
-        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(lpsi);
+        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(psi);
         // each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
         let mut wcoef: Vec<Option<Vec<f32>>> = Vec::new();
         loop {

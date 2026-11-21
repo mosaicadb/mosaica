@@ -170,14 +170,13 @@ impl Index {
     /// best. Each cluster is read by the exact planner's rule in rows (directly when it holds few visible rows, else on
     /// the index path); no cost is modelled. `psi` is the knob, a number of at least 0: larger reads more; 4.5 by
     /// default, the recall it gives to be measured. Returns k ids whenever k items are visible (-1 only where fewer
-    /// are). `level_psi`: the deterministic levels' psi (`Adaptive::knn_levels`), psi when None; a knob for studies.
-    #[pyo3(signature = (q, k, psi=PSI, level_psi=None))]
-    fn knn_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, level_psi: Option<f64>) -> PyResult<Bound<'py, PyArray1<i64>>> {
+    /// are).
+    #[pyo3(signature = (q, k, psi=PSI))]
+    fn knn_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
         let ad = self.adaptive_args(q, Some(k), psi)?;
-        check_level_psi(level_psi)?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
-        let ents = py.detach(|| self.pool.install(|| ad.knn_levels(ix, q, k, vis, psi, level_psi, plan).0.ents));
+        let ents = py.detach(|| self.pool.install(|| ad.knn(ix, q, k, vis, psi, plan).0.ents));
         Ok(ids(py, &ents, k))
     }
 
@@ -203,17 +202,12 @@ impl Index {
     /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
     /// costs (the order's, the whole query's, and for a threshold query a scan's); and rows touched,
     /// full vectors read, clusters on the index path and the time in ms; for k-NN also the rows past the deterministic
-    /// levels (`past_det`). With `t`, the threshold query at t, else k-NN at k; `level_psi` as for `knn_approx`
-    /// (k-NN only).
-    #[pyo3(signature = (q, k=10, psi=PSI, t=None, level_psi=None))]
-    fn explain_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, t: Option<f64>, level_psi: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    /// levels (`past_det`). With `t`, the threshold query at t, else k-NN at k.
+    #[pyo3(signature = (q, k=10, psi=PSI, t=None))]
+    fn explain_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let q = q.as_slice()?;
         let ad = self.adaptive_args(q, if t.is_none() { Some(k) } else { None }, psi)?;
         t.map_or(Ok(()), threshold_ok).map_err(PyValueError::new_err)?;
-        check_level_psi(level_psi)?;
-        if t.is_some() && level_psi.is_some() {
-            return Err(PyValueError::new_err("level_psi is k-NN's; a threshold query takes none"));
-        }
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let tm = std::time::Instant::now();
         let (i, st) = py.detach(|| self.pool.install(|| match t {
@@ -222,7 +216,7 @@ impl Index {
                 (i, r.st)
             }
             None => {
-                let (r, i) = ad.knn_levels(ix, q, k, vis, psi, level_psi, plan);
+                let (r, i) = ad.knn(ix, q, k, vis, psi, plan);
                 (i, r.st)
             }
         }));
@@ -443,13 +437,6 @@ impl Index {
             return Err(PyValueError::new_err(format!("psi is a number of at least 0 (inf reads every cluster), not {psi}")));
         }
         self.adaptive()
-    }
-}
-
-fn check_level_psi(level_psi: Option<f64>) -> PyResult<()> {
-    match level_psi {
-        Some(x) if !(x >= 0.0) => Err(PyValueError::new_err(format!("level_psi is a number of at least 0 (inf: the certified width), not {x}"))),
-        _ => Ok(()),
     }
 }
 

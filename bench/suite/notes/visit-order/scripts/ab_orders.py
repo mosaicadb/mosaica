@@ -10,11 +10,10 @@
 # paths (probe / race / scan / exact), clusters visited, read directly and on the index path, groups set up, spreads
 # computed and modelled cost against a scan's. ab_curves.py interpolates time and rows to a recall.
 # With a build that gives them, a k-NN adaptive line also has the stored vectors read and the rows past the
-# deterministic levels; --level-psi sets the deterministic levels' psi apart from the stop's, --level-psi-offset C
-# to max(0, psi - C) at each psi.
+# deterministic levels.
 # usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
 #        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
-#        [--index DIR] [--level-psi X | --level-psi-offset C]
+#        [--index DIR]
 import argparse
 import os
 import random
@@ -45,10 +44,6 @@ def main():
     ap.add_argument("--core", type=int, default=3)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--nq", type=int, default=0, help="the first this many queries (0: all)")
-    ap.add_argument("--level-psi", type=float, default=None, help="the adaptive k-NN arm's psi at the deterministic levels' "
-                    "statistical width (default: psi)")
-    ap.add_argument("--level-psi-offset", type=float, default=None, help="the adaptive k-NN arm's level psi at each psi: "
-                    "max(0, psi - this)")
     ap.add_argument("--index", default="", help="the index directory (default: the suite's work directory); give each "
                     "build of the library its own copy (`cp -al` of the fit), since a build re-encodes a stale index")
     a = ap.parse_args()
@@ -83,14 +78,9 @@ def main():
                                   lambda q, qi, x=x, p=p: dict(touched=x.explain(q, a.k, p)[0]), want))
             if "adaptive" in ix:
                 x = ix["adaptive"]
-                if a.level_psi is not None and a.level_psi_offset is not None:
-                    sys.exit("give --level-psi or --level-psi-offset, not both")
                 for v in psis:
-                    lp = {} if a.level_psi is None else dict(level_psi=a.level_psi)
-                    if a.level_psi_offset is not None:
-                        lp = dict(level_psi=max(0.0, v - a.level_psi_offset))
-                    cells.append(("adaptive", f"psi={v:g}", lambda q, qi, x=x, v=v, lp=lp: x.knn_approx(q, a.k, v, **lp),
-                                  lambda q, qi, x=x, v=v, lp=lp: x.explain_approx(q, a.k, v, **lp), want))
+                    cells.append(("adaptive", f"psi={v:g}", lambda q, qi, x=x, v=v: x.knn_approx(q, a.k, v),
+                                  lambda q, qi, x=x, v=v: x.explain_approx(q, a.k, v), want))
         else:
             ths = prep.thresholds(f)
             for j, share in enumerate(prep.filter_shares(f)):

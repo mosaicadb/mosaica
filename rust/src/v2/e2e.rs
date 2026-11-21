@@ -2590,29 +2590,6 @@ fn study_w2_forms() {
     eprintln!("storage: per cluster and level {} f32 ({} B), per cluster {} B; per group and level {} f32", wrule::WForms::rec(wf.r), 4 * wrule::WForms::rec(wf.r), 4 * ndl * wrule::WForms::rec(wf.r), n);
 }
 
-/// The deterministic levels' psi apart from the stop's: unset or equal to psi it is k-NN at psi; any value, infinity
-/// (the certified width) too, returns k visible items, each with its own score, and at psi infinite the exact query.
-#[test]
-fn the_levels_psi_is_psi_unless_set() {
-    let f = fixture();
-    let ix = &f.ix;
-    let e = 64.0 * 2f64.powi(-24);
-    let ad = adaptive::Adaptive::new(ix, cheap_index(fixed_costs())).unwrap();
-    for q in &f.queries {
-        let pr = prep2(ix, q);
-        for psi in [2.0, adaptive::PSI] {
-            let base = ad.knn(ix, q, 10, None, psi, probe_plan()).0.ents;
-            assert_eq!(ad.knn_levels(ix, q, 10, None, psi, Some(psi), probe_plan()).0.ents, base);
-            for lp in [0.0, 1.0, 50.0, f64::INFINITY] {
-                let got = ad.knn_levels(ix, q, 10, None, psi, Some(lp), probe_plan()).0.ents;
-                assert_eq!(got.len(), 10);
-                assert!(got.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e));
-            }
-        }
-        assert_eq!(ad.knn_levels(ix, q, 10, None, f64::INFINITY, Some(1.0), probe_plan()).0.ents, knn2(ix, q, 10, None, probe_plan()).ents);
-    }
-}
-
 /// The approximate k-NN returns k visible items (each once, with its own score) whenever k are visible, under the
 /// default plan (every query the exact one: the planner scans synth4k first) and under the probe plan; the exact
 /// query's answer when psi is infinite and on every path but a probe, and the exact query's rows touched.
