@@ -220,6 +220,15 @@ and the list of clusters [36], after Fukunaga and Narendra [37]; Schubert [38] g
 Per-cluster minimum and maximum distances to split points are GNAT's range tables [39]; pivot tables
 originate with LAESA [40]. Tribase [41] applies such bounds to inverted-file indexes.
 
+**Partitioned approximate systems.** ScaNN [30] shares our layout: k-means clusters, residuals
+against the centres, 4-bit codes scored from 16-entry tables, and rescoring at higher precision.
+SOAR [53] gives each item a second cluster whose residual is near orthogonal to the first, and SPANN
+[54] keeps the centres in memory and each cluster's full vectors on disk, copying boundary items into
+several clusters. SPFresh [55] splits and rebalances SPANN's clusters in place as items arrive. These
+systems stop after a fixed number of candidates or clusters and bound no item's score. We read the
+same structures to decide each item by a certified interval, so a poor cluster assignment costs
+reads and never correctness.
+
 **Filtering and access control.** Filtered approximate search [44–49] trades recall against
 selectivity; all treat filtering first and scanning exactly as the correct baseline. Espiritu and
 Cash [52] show that post-filtering over a shared index leaks hidden rows through timing and relevance

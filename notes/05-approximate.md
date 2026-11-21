@@ -119,7 +119,9 @@ E g(V) ≤ E g(V_λ) − λ(E w(V_λ) − E w(V)) ≤ E g(V_λ). ∎
 
 The optimal policy spends more rows on hard queries: it stops when the best remaining p_c falls below λ, which needs
 p_c calibrated across queries. Quake's adaptive partition scanning and learned early termination (LAET, DARTH) are
-instances [cited, unchecked].
+instances [cited, unchecked]. SPANN's query-aware pruning, which reads every list whose centre lies within (1 + ε) of
+the nearest centre's distance, is a static order by centre score with a relative stop that ignores the clusters'
+spread (`lit/REPORT.md` [54]) [cited, unchecked].
 
 Minimising expected rows to reach recall r is, for k > 1, a generalised min-sum set cover with only constant-factor
 greedy guarantees (Feige, Lovász and Tetali 2004 and successors) [cited, unchecked]; a system cannot observe its
@@ -753,7 +755,8 @@ sets does not [proved for the common part by Proposition 5.27; measured for the 
   (doubled glove random-25's reads; reverted).
 - **The key at a statistical width** (Proposition 5.17), **certified bounds against a few shared directions** (the
   remainder term prunes nothing), **sign codes of centres**, **a graph over centres**, **a second assignment of rows**
-  (breaks the exact layout; the spilled copies of `reports/surge2/approx-design.txt`, a design never run), and **a 4 or 8
+  (SOAR [53] and SPANN's copies [54] in `lit/REPORT.md`; breaks the exact layout; the spilled copies of
+  `reports/surge2/approx-design.txt`, a design never run), and **a 4 or 8
   byte first level** (no gain on yahoo at 1M) (`hierarchy/layered.md` §3).
 - **A level of centres over the clusters at 1M, and the groups as that level** (§5.10.5); **sub-clusters** in all three
   layouts at 1M (§5.10.4); **flat finer clusters**, which cost the exact path's per-cluster work 16 times over.

@@ -343,6 +343,10 @@ tr(M⁻¹Σ_R) = tr(P⁻¹B). By Cauchy–Schwarz for the Frobenius inner produc
 tr B^½ = tr(P^½ · P^(−½)B^½) ≤ √(tr P)·√(tr(P⁻¹B)), with equality when P is a multiple of B^½. Finally
 tr B^½ = Σ_i √γ_i. ∎
 
+Proposition 1.13 is Theorem 2 of Bhatia, Jain and Lim (Expo. Math. 2019; arXiv:1712.01504), eq. (16), minimiser
+included, as a referee confirmed from the paper's source (**[cited]**; `program/floors/referee/referee-extensions.md`,
+B1).
+
 *Coordinates.* Let B = VΓVᵀ with V orthogonal and Γ = diag(γ_i), and put V_q = Σ_Q^(−½)VΓ^¼. The pair
 g″ = V_qᵀΔ = Γ^¼VᵀΣ_Q^(−½)Δ and r″ = V_q⁻¹r = Γ^(−¼)VᵀΣ_Q^½r satisfies g″·r″ = Δ·r, ‖g″‖ = ‖Δ‖_M and
 ‖r″‖ = ‖r‖_{M⁻¹} at the optimal M, and E g″g″ᵀ = E r″r″ᵀ = Γ^½. Both sides therefore have uncorrelated coordinates with
@@ -670,6 +674,7 @@ survey read in full is tagged [cited]; one known from an abstract, a summary or 
 | The same | L2AP [19] | [cited, unchecked] |
 | Stored scalars counted as cost | Extended RaBitQ [13] | [cited] |
 | Fitting a code to a query distribution unlike the data | QUIP [31], LeanVec [32], RoarGraph [33]; ScaNN's anisotropic loss [30] uses no query sample | [cited] |
+| Clusters, residuals against the centres, 4-bit codes scored from 16-entry tables, rescoring; with no bound per item | ScaNN [30], SOAR [53], SPANN [54], SPFresh [55] | [cited, unchecked] |
 | The sorted range on a key relative to a reference point | iDistance [34] | [cited] |
 | Covering-radius pruning of clusters | M-tree [35], the list of clusters [36]; cosine form, Schubert [38] | [cited] |
 | The same, origin | Fukunaga and Narendra [37] | [cited, unchecked] |
@@ -706,7 +711,10 @@ citation.
 - The sorted-range lemma does not transfer to non-unit vectors or to L2 distance, where the bound on the part of x
   orthogonal to m̂ changes (`reports/surge/stage2-design.txt` §1.8(b)); the fixed-point definition of similarity on
   stored integers asked for in `review/REPORT.md` §1.10 is covered for unit f16 rows only through x₂.
-- Whether a matrix-geometric-mean metric for certificate bounds appears in prior work has not been searched.
+- Prior art for the matrix-geometric-mean metric has been searched by the program's librarian. Proposition 1.13 is
+  Theorem 2 of Bhatia, Jain and Lim (§1.4, [cited]; `program/floors/referee/referee-extensions.md`, B1), and no
+  search, quantisation or sketching paper was found that uses the metric (`program/library/theory.md`, item 2;
+  [cited, unchecked]; chapter 6 §6.4).
 
 ## Editor's queries
 

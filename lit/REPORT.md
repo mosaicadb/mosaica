@@ -14,7 +14,8 @@ four specific results, not in any headline mechanism.
   incrementally under a randomised bound (Extended RaBitQ); stored norms with Cauchy–Schwarz (LEMP's
   INCR, L2AP, Panorama); exact k-NN by a rising threshold over bounds (VA-file, Fagin's NRA,
   Seidl–Kriegel, LEMP's Row-Top-k); the cluster-level steps (iDistance, M-tree, list of clusters,
-  GNAT); pre-filtered exact search.
+  GNAT); pre-filtered exact search; the partitioned layout of clusters, residual codes in 4-bit
+  fast-scan units and rescoring, with copies and in-place updates (ScaNN, SOAR, SPANN, SPFresh).
 - **Partly new:** one stream with deterministic then randomised certificates (no paper found; the
   ingredients exist separately); weighted Cauchy–Schwarz on a quantised nested code with scalars
   charged in a rate bound; certificate weights fitted to a query/data mixture (QUIP and LeanVec-OOD
@@ -75,6 +76,21 @@ levels (abstract only read).
    commutes with search. Claim result non-interference, not timing non-interference.
 9. **Exact k-NN by rising threshold — published.** VA-file, NRA, Seidl–Kriegel, Kriegel et al., LEMP
    Row-Top-k (seed then threshold), Panorama, Kashyap–Karras.
+10. **Partitioned approximate systems — published; the same layout, a different class.** ScaNN [30]
+   partitions by k-means, codes residuals against the centres in 4-bit units scored by 16-entry tables
+   held in registers (the fast-scan layout of the deterministic levels), and rescores a fixed number of
+   top candidates at higher precision. SOAR [53] adds a second assignment per item, chosen so that its
+   residual is near orthogonal to the first. SPANN [54] keeps only the centres in memory and each
+   cluster's full vectors in one list on disk, balances list sizes by hierarchical clustering, copies
+   boundary items into several lists and reads the lists whose centre lies within (1 + ε) of the
+   nearest. SPFresh [55] updates SPANN in place: an over-long list is split and items near the split
+   are reassigned, so recall does not drift. None gives a bound per item, a threshold query or an exact
+   filter; their stops are a count of candidates or a distance ratio. Measured here: a SOAR second
+   assignment read 12–15% fewer items for the same recall and was no faster, because the copies were
+   scattered rows (`bench/REPORT.md`); SPANN stores copies inside the other lists to keep reads
+   contiguous. Cite SPANN beside the hierarchy of fixed leaves with routing over centres
+   (`hierarchy/layered.md`, approximate-order branch), and SPFresh beside any write path: here a
+   misassigned insert costs reads and never correctness, so rebalancing can be lazy.
 
 **Anything doing most of this together?** No. Nearest: Panorama (deterministic, k-NN inside
 approximate indexes, no filter, no threshold queries, no quantised nested code), Extended RaBitQ
@@ -117,7 +133,7 @@ Verification status noted where weaker than "primary source read".
 27. R. Fagin, A. Lotem, M. Naor. Optimal Aggregation Algorithms for Middleware. J. Comput. Syst. Sci. 66(4):614–656, 2003 (PODS 2001). https://arxiv.org/abs/cs/0204046
 28. Y. Li, J. Wang, B. Pullman, N. Bandeira, Y. Papakonstantinou. Index-Based, High-Dimensional, Cosine Threshold Querying with Optimality Guarantees. ICDT 2019, LIPIcs 127, 11:1–11:20. https://arxiv.org/abs/1812.07695
 29. D. LeJeune, R. G. Baraniuk, R. Heckel. Adaptive Estimation for Approximate k-Nearest-Neighbor Computations. AISTATS 2019, PMLR 89:3099–3107. https://proceedings.mlr.press/v89/lejeune19a.html
-30. R. Guo et al. Accelerating Large-Scale Inference with Anisotropic Vector Quantization. ICML 2020. https://research.google/blog/announcing-scann-efficient-vector-similarity-search/ (author list not verified)
+30. R. Guo, P. Sun, E. Lindgren, Q. Geng, D. Simcha, F. Chern, S. Kumar. Accelerating Large-Scale Inference with Anisotropic Vector Quantization. ICML 2020, PMLR 119:3887–3896. https://arxiv.org/abs/1908.10396 (abstract and bibliographic record; method details from the paper as recalled)
 31. R. Guo, S. Kumar, K. Choromanski, D. Simcha. Quantization Based Fast Inner Product Search. AISTATS 2016. https://research.google/pubs/quantization-based-fast-inner-product-search-2
 32. M. Tepper et al. LeanVec: Searching Vectors Faster by Making Them Fit. arXiv:2312.16335. https://arxiv.org/abs/2312.16335 (venue and authors not verified)
 33. RoarGraph: A Projected Bipartite Graph for Efficient Cross-Modal Approximate Nearest Neighbor Search. PVLDB 17, 2024. https://arxiv.org/abs/2408.08933 (authors not verified)
@@ -140,6 +156,9 @@ Verification status noted where weaker than "primary source read".
 50. Han, Chakraborty, Mehrotra. Don't Stir the Pot! Authorized Vector Data Retrieval via Access-Aware Indexing. arXiv:2605.01342. https://arxiv.org/abs/2605.01342 (secondary description only)
 51. L. S. Yalamarthi, P. Pappachan. Policy-aware Vector Search: A Vision for Fine Grained Access Control in Vector Databases. SeQureDB 2026. https://arxiv.org/abs/2606.19803 (abstract only)
 52. Z. Espiritu, D. Cash. Plaintext Recovery Against Post-Filtering Access Control. USENIX Security 2026, 3753–3772. https://arxiv.org/abs/2608.11730 (abstract only)
+53. P. Sun, D. Simcha, D. Dopson, R. Guo, S. Kumar. SOAR: Improved Indexing for Approximate Nearest Neighbor Search. NeurIPS 2023. https://arxiv.org/abs/2404.00774 (abstract; Table 2 figures in `reports/surge2/literature.txt` item 4)
+54. Q. Chen, B. Zhao, H. Wang, M. Li, C. Liu, Z. Li, M. Yang, J. Wang. SPANN: Highly-efficient Billion-scale Approximate Nearest Neighbor Search. NeurIPS 2021. https://arxiv.org/abs/2111.08566 (abstract; the copy-selection rule and the graph over centres from the paper as recalled)
+55. Y. Xu, H. Liang, J. Li, S. Xu, Q. Chen, Q. Zhang, C. Li, Z. Yang, F. Yang, Y. Yang, P. Cheng, M. Yang. SPFresh: Incremental In-Place Update for Billion-Scale Vector Search. SOSP 2023, 545–561. https://arxiv.org/abs/2410.14452 (abstract and bibliographic record)
 
 Also relevant (abstract only): P. Ciaccia, M. Patella, PAC Nearest Neighbor Queries, ICDE 2000;
 K. Echihabi et al., ProS, VLDB Journal 2022 (https://arxiv.org/abs/2212.13310); W. Equitz, T. Cover,
