@@ -323,7 +323,8 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
             let m: Vec<f64> = one.yy[l].iter().map(|x| x / nc as f64).collect();
-            let nn: Vec<f64> = (0..r * r).map(|i| gq(&bt[i / r], &bt[i % r])).collect();
+            // the upper triangle alone (`pack` reads no other)
+            let nn: Vec<f64> = (0..r * r).map(|i| if i % r >= i / r { gq(&bt[i / r], &bt[i % r]) } else { 0.0 }).collect();
             let (trs, trq) = (one.usq[l].iter().sum::<f64>() / nc as f64, one.qq[l] / nc as f64);
             let den = gd.iter().sum::<f64>() - qb.iter().map(|w| gq(w, w)).sum::<f64>();
             let gamma = if den > 0.0 { ((trs - trq) / den).max(0.0) } else { 0.0 };
