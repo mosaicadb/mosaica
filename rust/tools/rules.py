@@ -10,11 +10,14 @@ def per_cluster(N):
     return 2000 * 2 ** max(0, math.ceil(math.log2(N / 1e6) / 2 - 0.5))
 
 
+KAPPA = 0.5  # items per group in units of n0^2 for by-n (fit::GROUP_KAPPA)
+
+
 def groups_for(rule, N, K, n0):
     """Groups of clusters: by-k8 (enough items per group for a basis, 20 n, at most 64 groups and 8 clusters per group
-    on average), by-n (the same without the 8 clusters per group), or a number (at most K)."""
+    on average; the earlier default), by-n (round(N / (KAPPA n0^2)), from 1 to K), or a number (at most K)."""
     if rule == "by-k8":
         return int(max(1, min(64, K // 8, N // (20 * n0))))
     if rule == "by-n":
-        return int(max(1, min(64, K, N // (20 * n0))))
+        return int(min(max(math.floor(N / (KAPPA * (n0 * n0)) + 0.5), 1), max(K, 1)))
     return max(1, min(int(rule), K))
