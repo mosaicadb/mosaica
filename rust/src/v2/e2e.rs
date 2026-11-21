@@ -2292,8 +2292,8 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
                             win.sort_by(|x, y| by(x, y, &order));
                             assert_eq!(win.first(), Some(&(c as usize)), "read {i} is not the window's largest order key, {what}");
                         }
-                        // lambda is ORDER_C until the moments move it, and the stream is re-keyed each time they do
-                        assert!(info.rekeys > 0 || info.lam_read.iter().chain(&info.lam_priced).all(|&l| l == adaptive::ORDER_C), "{what}: {info:?}");
+                        // the stream's lambda is ORDER_C until the moments first re-key it
+                        assert!(info.rekeys > 0 || info.lam_priced.iter().all(|&l| l == adaptive::ORDER_C), "{what}: {info:?}");
                         if info.read.len() < live.len() && out.ents.len() == kk {
                             stops += 1;
                             let kth = out.ents[kk - 1].0;

@@ -3669,9 +3669,10 @@ pub struct KnnReader<'a> {
     rows_in: Vec<u32>,
     pend: Vec<u32>,
     flat: Vec<u32>,
-    /// with `track_sums`, the sum of the batched direct rows' scores and of their squares since `take_sums`
-    track: bool,
-    sums: (f64, f64),
+    /// the batched clusters whose rows' moments are kept (`visit_z`): first row, end row, mu and sigma
+    zcl: Vec<(usize, usize, f64, f64)>,
+    /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
+    z: (f64, f64, f64),
     pub st: Stats,
 }
 
@@ -3679,7 +3680,7 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), track: false, sums: (0.0, 0.0), st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), st }
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -3689,29 +3690,44 @@ impl<'a> KnnReader<'a> {
         &v.rows[i..i + v.rows[i..].partition_point(|&r| (r as usize) < b)]
     }
 
-    /// The batched directly scored rows, scored in row order (their scores' sums kept when tracked).
+    /// The batched directly scored rows, scored in row order; the rows of the clusters given by `visit_z` (contiguous
+    /// in row order) add their moments.
     fn flush(&mut self) {
         let tf = tick();
         self.flat.sort_unstable();
-        if self.track {
-            let (a, b) = self.top.score_sums::<true>(self.ix, self.pr, &self.flat, &mut self.st);
-            self.sums = (self.sums.0 + a, self.sums.1 + b);
-        } else {
-            self.top.score(self.ix, self.pr, &self.flat, &mut self.st);
+        self.zcl.sort_unstable_by_key(|x| x.0);
+        let mut i = 0;
+        for &(r0, r1, mu, sg) in &self.zcl {
+            let a = i + self.flat[i..].partition_point(|&r| (r as usize) < r0);
+            let b = a + self.flat[a..].partition_point(|&r| (r as usize) < r1);
+            self.top.score(self.ix, self.pr, &self.flat[i..a], &mut self.st);
+            let (s1, s2) = self.top.score_sums::<true>(self.ix, self.pr, &self.flat[a..b], &mut self.st);
+            let n = (b - a) as f64;
+            self.z.0 += n;
+            self.z.1 += (s1 - n * mu) / sg;
+            self.z.2 += (s2 - 2.0 * mu * s1 + n * mu * mu) / (sg * sg);
+            i = b;
         }
+        self.top.score(self.ix, self.pr, &self.flat[i..], &mut self.st);
+        self.zcl.clear();
         self.flat.clear();
         self.st.cyc[P_FULL] += tick() - tf;
     }
 
-    /// Keeps (or, `on` false, stops keeping) the sum of the directly scored rows' scores and of their squares
-    /// (`take_sums`).
-    pub fn track_sums(&mut self, on: bool) {
-        self.track = on;
+    /// The moments of z = (s - mu) / sigma over the rows of the clusters read by `visit_z` and scored since the last
+    /// call (count, sum, sum of squares), and starts them again.
+    pub fn take_z(&mut self) -> (f64, f64, f64) {
+        std::mem::take(&mut self.z)
     }
 
-    /// The sums of the directly scored rows' scores and of their squares since the last call, and starts them again.
-    pub fn take_sums(&mut self) -> (f64, f64) {
-        std::mem::take(&mut self.sums)
+    /// `visit` cluster ci directly, its visible rows' z = (s - mu) / sigma added to the moments (`take_z`) once they are
+    /// scored; mu and sigma are the cluster's centre score and spread along the query.
+    pub fn visit_z(&mut self, ci: usize, mu: f64, sigma: f64) {
+        let c = &self.ix.cl[ci];
+        if sigma > 0.0 {
+            self.zcl.push((c.r0, c.r1, mu, sigma));
+        }
+        self.visit(ci, KnnPath::Direct);
     }
 
     /// Reads cluster ci's visible rows by `path`.

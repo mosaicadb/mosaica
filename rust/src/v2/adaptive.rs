@@ -10,11 +10,13 @@
 //! - k-NN is the exact query (`knn2`) when psi is infinite. Otherwise it reads the clusters in an order that does not
 //!   depend on psi, and psi moves only where it stops. The order is by o_c = mu_c + lambda sigma_c(q), lambda = delta +
 //!   `ORDER_C` rho, where delta and rho are the mean and spread of the visible rows' scores in each cluster's own
-//!   units, z = (s - mu_c) / sigma_c, over the rows scored in full while fewer than k items are held (the clusters read
-//!   directly then): 0 and 1 when the visible rows sit in their clusters as all rows do, other values when the visible
-//!   set favours some part of each cluster. Until two rows have been scored they are 0 and 1, and after k items are
-//!   held they no longer change. The clusters come from a stream by mu_c + lambda rad_c sqrt(q' C q / tr C) (the
-//!   lower cluster first among equal values; re-keyed when lambda changes), rad_c the cluster's RMS radius and C the
+//!   units, z = (s - mu_c) / sigma_c, over the rows of every cluster the probe has read directly so far: 0 and 1 when
+//!   the visible rows sit in their clusters as all rows do, other values when the visible set favours some part of
+//!   each cluster. Until two rows have been scored they are 0 and 1. Under a visible set made of regions the shift
+//!   differs from cluster to cluster, so one cluster's says little of the next's, and the estimate pools them all.
+//!   The clusters come from a stream by mu_c + lambda rad_c sqrt(q' C q / tr C) (the lower cluster first among equal
+//!   values; re-keyed at the current lambda each time the rows behind the estimate have doubled), rad_c the cluster's
+//!   RMS radius and C the
 //!   pooled
 //!   within-cluster covariance (`order::Pooled`, sum_c n_c S_c / N as its top directions and an isotropic rest): the
 //!   spread the cluster would have if it were shaped as the clusters are on average. A part of q along which no
@@ -491,7 +493,7 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 /// (a threshold query that is the exact one from
 /// the start, on a visible set the exact query scans first; nothing else done), "empty". `read`: the clusters the
 /// probe read, in order; `priced`: the clusters given a sigma, in order; k-NN's `lam_read` and `lam_priced`: the order's
-/// lambda when each read was chosen and when each priced cluster left the stream, `rekeys`: the stream's re-keyings,
+/// lambda when each read was chosen and the stream's when each priced cluster left it, `rekeys`: the stream's re-keyings,
 /// `delta` and `rho`: the estimates at the end, `batched`: the clusters of at most r visible rows read straight into the
 /// direct batch (not in `read`). Costs are modelled (`Measured`): `cost`
 /// what the query paid in all; k-NN's `direct_cost`, `index_cost` (its groups' setups included) and `sigma_cost`;
@@ -674,7 +676,7 @@ impl Adaptive {
 
     /// Approximate k-NN with knob `psi` (at least 0; `PSI` by default), as the module's comment says: the exact query
     /// (`knn2`) when psi is infinite; else the clusters in the order of mu + lambda sigma (lambda = delta + `ORDER_C`
-    /// rho, from the rows read directly while fewer than k items are held; the stream by mu + lambda rad s, `LOOKAHEAD`
+    /// rho, from the rows of every cluster read directly so far; the stream by mu + lambda rad s, `LOOKAHEAD`
     /// priced ahead), whatever psi, psi moving only the stop, when the window's largest mu + (delta + psi rho) sigma is
     /// below the running k-th best (a heuristic). A cluster gets its sigma when
     /// that costs less than reading it directly, else rad s stands for it. Each cluster is read directly or on the
@@ -722,12 +724,13 @@ impl Adaptive {
         let ts = tick();
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let mut p = vec![0f32; self.st.r];
-        // the visible rows' scores in their clusters' units, z = (s - mu) / sigma, over the clusters read directly
-        // while fewer than k items are held (count, sum, sum of squares), and from them delta, rho and the order's
-        // lambda (0, 1 and ORDER_C until two rows are in)
+        // the visible rows' scores in their clusters' units, z = (s - mu) / sigma, over every cluster of the window read
+        // directly (count, sum, sum of squares), and from them delta, rho and the order's lambda (0, 1 and ORDER_C until
+        // two rows are in); the stream is re-keyed at the current lambda each time the rows behind it have doubled
         let (mut zn, mut zs, mut zss) = (0f64, 0f64, 0f64);
         let (mut delta, mut rho) = (0.0, 1.0);
         let mut lam = ORDER_C;
+        let (mut lam_stream, mut zn_stream) = (ORDER_C, 0f64);
         // the stream by mu + lambda rad s, s the pooled covariance's share along the query, and the window of priced
         // clusters with their sigmas; the order key mu + lambda sigma, the stop key mu + (delta + psi rho) sigma
         let s = self.stream_scale(&pr.q32, &mut p);
@@ -745,15 +748,25 @@ impl Adaptive {
         // setup's cost sets it up (at most twice the best purchase)
         let mut lost = vec![0f64; ix.groups.len()];
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
-        rd.track_sums(true);
         loop {
             let ts = tick();
-            // the running k-th best (the batched direct rows scored first; their time is the reads'), the stop, the
-            // window filled from the stream, the stop again
+            // the running k-th best (the batched direct rows scored first; their time is the reads'), the moments of
+            // the clusters read directly among them, the stop, the window filled from the stream, the stop again
             let kth = rd.kth();
-            // the moments are taken only while fewer than k items are held
-            if kth > f64::NEG_INFINITY {
-                rd.track_sums(false);
+            let (n, a, b) = rd.take_z();
+            if n > 0.0 {
+                (zn, zs, zss) = (zn + n, zs + a, zss + b);
+                if zn >= 2.0 {
+                    delta = zs / zn;
+                    rho = (zss / zn - delta * delta).max(0.0).sqrt();
+                    lam = delta + ORDER_C * rho;
+                    if zn >= 2.0 * zn_stream && lam != lam_stream {
+                        // the stream re-keyed at the new lambda (a heapify of the clusters left in it)
+                        (lam_stream, zn_stream) = (lam, zn);
+                        stream = stream.into_vec().into_iter().map(|Key(_, Reverse(c))| stream_key(c, lam)).collect();
+                        info.rekeys += 1;
+                    }
+                }
             }
             if !window.is_empty() && kth > stop_key(&window, delta, rho) {
                 rd.st.cyc[P_ORDER] += tick() - ts;
@@ -779,7 +792,7 @@ impl Adaptive {
                     info.spreads += 1;
                     info.sigma_cost += m.sig_us;
                     info.priced.push(ci as u32);
-                    info.lam_priced.push(lam);
+                    info.lam_priced.push(lam_stream);
                     sg
                 } else {
                     self.st.rad[ci] * s
@@ -839,31 +852,11 @@ impl Adaptive {
                 KnnPath::Direct
             };
             rd.st.cyc[P_CHOICE] += tick() - tch;
-            // a cluster read directly while fewer than k items are held (the batch scored first, the small clusters'
-            // reads among it) is scored in full, and alone: its rows' moments
-            let fill = kth == f64::NEG_INFINITY && path == KnnPath::Direct && rd.kth() == f64::NEG_INFINITY;
-            if fill {
-                rd.take_sums();
-            }
-            rd.visit(ci, path);
-            if fill {
-                let to = tick();
-                let ((a, b), n, mu) = (rd.take_sums(), nv as f64, qm[ci]);
-                zn += n;
-                zs += (a - n * mu) / sg;
-                zss += (b - 2.0 * mu * a + n * mu * mu) / (sg * sg);
-                if zn >= 2.0 {
-                    delta = zs / zn;
-                    rho = (zss / zn - delta * delta).max(0.0).sqrt();
-                    let l = delta + ORDER_C * rho;
-                    if l != lam {
-                        // the stream re-keyed at the new lambda (a heapify of the clusters left in it)
-                        lam = l;
-                        stream = stream.into_vec().into_iter().map(|Key(_, Reverse(c))| stream_key(c, lam)).collect();
-                        info.rekeys += 1;
-                    }
-                }
-                rd.st.cyc[P_ORDER] += tick() - to;
+            // a cluster of the window read directly gives its rows' moments once they are scored
+            if path == KnnPath::Direct {
+                rd.visit_z(ci, qm[ci], sg);
+            } else {
+                rd.visit(ci, path);
             }
         }
         (info.delta, info.rho) = (delta, rho);
