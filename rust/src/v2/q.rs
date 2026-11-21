@@ -115,6 +115,8 @@ pub struct Prep2 {
     /// q16 is 2^sh times the query the other fields describe, so this query's scores and thresholds are 2^-sh times
     /// the caller's (0 from prep2; `unit` scales the query).
     pub sh: i32,
+    /// The scaled query (`unit`) of a query left unscaled, made on first use and kept with its group setups.
+    unit_of: OnceLock<Option<Box<Prep2>>>,
 }
 
 /// 2^e, exactly (|e| < 1022).
@@ -159,7 +161,7 @@ impl Prep2 {
         let q64 = q32.iter().map(|&x| x as f64).collect();
         let gq = (0..self.gq.len()).map(|_| OnceLock::new()).collect();
         let (q16, qhi, qlo, dial) = (self.q16.clone(), self.qhi.clone(), self.qlo.clone(), self.dial.clone());
-        Some(Prep2 { q16, q32, q64, qn: self.qn * s, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq, rotating: Default::default(), dial, sh: self.sh + k })
+        Some(Prep2 { q16, q32, q64, qn: self.qn * s, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq, rotating: Default::default(), dial, sh: self.sh + k, unit_of: OnceLock::new() })
     }
     /// The exact scores and intervals of `out`, found for this query, in the caller's units.
     pub fn back(&self, out: &mut ThrOut2) {
@@ -293,7 +295,7 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
     let (qhi, qlo) = halves(q16.iter().map(|&h| f16_fixed(h)));
-    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), rotating: Default::default(), dial: vec![1.0; ix.meta.nl()], sh: 0 }
+    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), rotating: Default::default(), dial: vec![1.0; ix.meta.nl()], sh: 0, unit_of: OnceLock::new() }
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
@@ -3162,14 +3164,19 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, cut_cyc),
     };
-    match pr.scaled() {
-        None => run(pr, t),
-        Some(w) => {
-            let mut out = run(&w, w.thr_w(ix, t));
-            w.back(&mut out);
-            out
+    // the scaled query kept with pr, unless pr's dial has changed since it was made
+    let fresh;
+    let w = match pr.unit_of.get_or_init(|| pr.scaled().map(Box::new)).as_deref() {
+        None => return run(pr, t),
+        Some(w) if w.dial == pr.dial => w,
+        Some(_) => {
+            fresh = pr.scaled().unwrap();
+            &fresh
         }
-    }
+    };
+    let mut out = run(w, w.thr_w(ix, t));
+    w.back(&mut out);
+    out
 }
 
 /// A cluster's per-query setup for a threshold query under plan `pl`, on the integer deterministic levels when `int`.
