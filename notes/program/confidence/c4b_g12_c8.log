@@ -1,0 +1,6 @@
+text, answer 1.00%, kappa 1.0: candidates 65.1% | floor 8.3 B/item | built schedule with built curves and scalars 26.1 | measured 67.0
+text, answer 0.10%, kappa 1.0: candidates 40.9% | floor 2.9 B/item | built schedule with built curves and scalars 9.3 | measured 26.1
+text, answer 0.01%, kappa 1.0: candidates 29.3% | floor 1.5 B/item | built schedule with built curves and scalars 5.0 | measured 20.6
+text, answer 1.00%, kappa 1.742: candidates 87.6% | floor 17.3 B/item | built schedule with built curves and scalars 54.0 | measured 67.0
+text, answer 0.10%, kappa 1.742: candidates 75.1% | floor 8.6 B/item | built schedule with built curves and scalars 24.9 | measured 26.1
+text, answer 0.01%, kappa 1.742: candidates 67.2% | floor 5.8 B/item | built schedule with built curves and scalars 16.5 | measured 20.6

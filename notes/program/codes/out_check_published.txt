@@ -1,0 +1,9 @@
+p = 2, b = 1 (4 points): Lloyd training D 0.3620, tan^2 = D/(1-D) = 0.5675; published 0.571
+p = 2, b = 2 (16 points): Lloyd training D 0.1075, tan^2 = D/(1-D) = 0.1205; published 0.12
+p = 2, b = 3 (64 points): Lloyd training D 0.0291, tan^2 = D/(1-D) = 0.0300; published 0.0306
+p = 3, b = 1 (8 points): Lloyd training D 0.3540, tan^2 = D/(1-D) = 0.5480; published 0.553
+p = 3, b = 2 (64 points): Lloyd training D 0.0992, tan^2 = D/(1-D) = 0.1102; published 0.113
+
+real	0m17.843s
+user	0m32.809s
+sys	0m0.360s

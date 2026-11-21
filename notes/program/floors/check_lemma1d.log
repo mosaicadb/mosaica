@@ -1,0 +1,26 @@
+gap = ln(sqrt(2 pi e) C) - h must be >= 0; equality only for a Gaussian.
+  (a) Gaussian N(0,1^2) on   50 cells: gap 4.206e-03
+  (a) Gaussian N(3,0.2^2) on   50 cells: gap 4.206e-03
+  (a) Gaussian N(-1,5^2) on   50 cells: gap 4.206e-03
+  (a) Gaussian N(0,1^2) on  400 cells: gap 6.665e-05
+  (a) Gaussian N(3,0.2^2) on  400 cells: gap 6.665e-05
+  (a) Gaussian N(-1,5^2) on  400 cells: gap 6.665e-05
+  (a) Gaussian N(0,1^2) on 3200 cells: gap 1.042e-06
+  (a) Gaussian N(3,0.2^2) on 3200 cells: gap 1.042e-06
+  (a) Gaussian N(-1,5^2) on 3200 cells: gap 1.042e-06
+  (b) uniform: gap 0.153426 (exact ln sqrt(e/2) = 0.153426)
+  (c) N(0,1) on [-1, 1]: gap 0.10326
+  (c) N(0,1) on [0, 0.1]: gap 0.15328
+  (c) N(0,1) on [2, 2.5]: gap 0.16445
+  (c) N(0,1) on [-0.5, 4]: gap 0.10908
+  (c) N(0,1) on [3, 9]: gap 0.27510
+  (c) N(0,1) on [-6, 6]: gap 0.00000
+  (d) random piecewise-constant densities (gaps, spikes): 39981 laws so far, smallest gap 3.769e-07 (trunc)
+  (e) two Gaussians +-3    gap 0.40062
+  (e) scale mixture 0.1/3  gap 1.09922
+  (e) Laplace              gap 0.05353
+  (e) Student t3           gap 0.09802
+  (f) adversary on  8 cells of [-4, 4]: smallest gap found 2.392e-02; discretised N(0,1) on that grid 3.653e-02
+  (f) adversary on 20 cells of [-5, 5]: smallest gap found 5.340e-03; discretised N(0,1) on that grid 1.006e-02
+  (f) adversary on 40 cells of [-6, 6]: smallest gap found 1.616e-03; discretised N(0,1) on that grid 3.703e-03
+laws tested: 40003; smallest gap overall: 3.769e-07 (trunc); violations (gap < -1e-9): False

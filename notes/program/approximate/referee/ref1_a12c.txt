@@ -1,0 +1,37 @@
+   K      F     f     r     R(r) fixed T   floor, any adaptive rule (told tau_k)   static optimum   floor/R   static/R
+     500   2000  0.30  0.90         85084          89482                                  92742      1.05      1.09
+     500   2000  0.30  0.99        311515         314372                                 322152      1.01      1.03
+          (mean of Lambda(tau_k) over the draws: 10.000, should be 10)
+     500   2000  0.45  0.90         20735          28318                                  29229      1.37      1.41
+     500   2000  0.45  0.99        104771         120211                                 124154      1.15      1.19
+          (mean of Lambda(tau_k) over the draws: 10.001, should be 10)
+     500   2000  0.60  0.90          4198          11898                                  11984      2.83      2.85
+     500   2000  0.60  0.99         24864          54739                                  46591      2.20      1.87
+          (mean of Lambda(tau_k) over the draws: 9.965, should be 10)
+     339   2000  0.30  0.90         62721          68786                                  71227      1.10      1.14
+     339   2000  0.30  0.99        222449         228330                                 233131      1.03      1.05
+          (mean of Lambda(tau_k) over the draws: 9.999, should be 10)
+     339   2000  0.45  0.90         16092          24884                                  25854      1.55      1.61
+     339   2000  0.45  0.99         78300          95053                                 100291      1.21      1.28
+          (mean of Lambda(tau_k) over the draws: 10.007, should be 10)
+     339   2000  0.60  0.90          3447          10682                                  11059      3.10      3.21
+     339   2000  0.60  0.99         19634          36963                                  39415      1.88      2.01
+          (mean of Lambda(tau_k) over the draws: 10.010, should be 10)
+      28    784  0.30  0.90          4190           5049                                   5199      1.21      1.24
+      28    784  0.30  0.99         11044          11737                                  11791      1.06      1.07
+          (mean of Lambda(tau_k) over the draws: 9.993, should be 10)
+      28    784  0.45  0.90          1681           2907                                   3030      1.73      1.80
+      28    784  0.45  0.99          5723           6838                                   7471      1.19      1.31
+          (mean of Lambda(tau_k) over the draws: 10.027, should be 10)
+      28    784  0.60  0.90           590           1790                                   1849      3.03      3.14
+      28    784  0.60  0.99          2315           4157                                   4456      1.80      1.92
+          (mean of Lambda(tau_k) over the draws: 10.018, should be 10)
+    5400    125  0.30  0.90         62504          51841                                  63066      0.83      1.01
+    5400    125  0.30  0.99        221595         129893                                 221917      0.59      1.00
+          (mean of Lambda(tau_k) over the draws: 10.240, should be 10)
+    5400    125  0.45  0.90         16046          16986                                  17553      1.06      1.09
+    5400    125  0.45  0.99         78040          78683                                  82345      1.01      1.06
+          (mean of Lambda(tau_k) over the draws: 10.004, should be 10)
+    5400    125  0.60  0.90          3439           3998                                   4172      1.16      1.21
+    5400    125  0.60  0.99         19581          19988                                  22150      1.02      1.13
+          (mean of Lambda(tau_k) over the draws: 10.015, should be 10)

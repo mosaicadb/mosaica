@@ -1,0 +1,21 @@
+selftest ok: uniform C, Gaussian C -> 1, product and correlated Gaussian gaps 0.00019
+random densities, both orders: smallest gap 2.182e-01 (3, np.int64(4), np.int64(3))
+  shape disc r=1               gap 0.18840
+  shape disc r=0.3 at (2,1)    gap 0.26215
+  shape annulus 1.5..2         gap 1.32510
+  shape thin tilted strip      gap 0.15331
+  shape triangle               gap 0.34057
+  shape two discs              gap 1.53740
+  shape outside disc r=2       gap 0.93121
+  shape L shape                gap 0.65909
+  shape checkerboard           gap 0.64323
+  shape tilted ellipse         gap 0.17347
+shapes: smallest gap 0.15331 (thin tilted strip)
+adversary 2x2: smallest gap 2.203e-01
+adversary 3x3: smallest gap 1.262e-01
+adversary 4x4: smallest gap 9.826e-02
+adversary 6x3: smallest gap 9.138e-02
+
+real	0m21.367s
+user	0m22.531s
+sys	0m0.118s

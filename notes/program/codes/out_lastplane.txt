@@ -1,0 +1,28 @@
+--- 256:q-1-2 J2: last 1 plane(s) as a stream of one nibble per 4 positions, J = 2; 937 training blocks ---
+  rise 0.25: tan 2.3200; built 2.3200; ratio 1.000; / bound 1.493; built / bound 1.493
+  rise 1: tan 0.7533; built 0.7533; ratio 1.000; / bound 1.305; built / bound 1.305
+  rise 2: tan 0.3609; built 0.3650; ratio 0.989; / bound 1.398; built / bound 1.414
+--- 128:1-3-4 J2: last 1 plane(s) as a stream of one nibble per 4 positions, J = 2; 1875 training blocks ---
+  rise 1: tan 0.7558; built 0.7558; ratio 1.000; / bound 1.309; built / bound 1.309
+  rise 3: tan 0.1942; built 0.1944; ratio 0.999; / bound 1.541; built / bound 1.543
+  rise 4: tan 0.1026; built 0.1023; ratio 1.003; / bound 1.638; built / bound 1.633
+--- 96:2-3-4-7 J2: last 1 plane(s) as a stream of one nibble per 4 positions, J = 2; 2500 training blocks ---
+  rise 2: tan 0.4192; built 0.4195; ratio 0.999; / bound 1.623; built / bound 1.625
+  rise 3: tan 0.2062; built 0.2063; ratio 1.000; / bound 1.637; built / bound 1.638
+  rise 4: tan 0.1024; built 0.1025; ratio 1.000; / bound 1.636; built / bound 1.636
+  rise 7: tan 0.0141; built 0.0140; ratio 1.009; / bound 1.805; built / bound 1.789
+--- 96:2-3-4-7 two planes J2: last 2 plane(s) as a stream of one nibble per 2 positions, J = 2; 1250 training blocks ---
+  rise 2: tan 0.4030; built 0.4195; ratio 0.961; / bound 1.561; built / bound 1.625
+  rise 3: tan 0.1987; built 0.2063; ratio 0.963; / bound 1.577; built / bound 1.638
+  rise 4: tan 0.1003; built 0.1025; ratio 0.979; / bound 1.601; built / bound 1.636
+  rise 7: tan 0.0159; built 0.0140; ratio 1.139; / bound 2.037; built / bound 1.789
+--- 128:2-3 J2: last 1 plane(s) as a stream of one nibble per 4 positions, J = 2; 1875 training blocks ---
+  rise 2: tan 0.3675; built 0.3692; ratio 0.995; / bound 1.423; built / bound 1.430
+  rise 3: tan 0.1943; built 0.1929; ratio 1.007; / bound 1.542; built / bound 1.531
+--- 128:2-4 two planes J2: last 2 plane(s) as a stream of one nibble per 2 positions, J = 2; 937 training blocks ---
+  rise 2: tan 0.3668; built 0.3856; ratio 0.951; / bound 1.421; built / bound 1.493
+  rise 4: tan 0.1045; built 0.1032; ratio 1.013; / bound 1.669; built / bound 1.647
+
+real	0m10.650s
+user	0m21.025s
+sys	0m0.819s

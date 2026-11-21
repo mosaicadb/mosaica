@@ -1,0 +1,14 @@
+--- q12_p1: spread over 500 items ---
+  rise 0.25: tan mean 2.3005 sd of ln tan 0.1040 (built 2.3125, 0.0980); sd of log2(kappa/|y|) 0.1601 (built 0.1187)
+  rise 1: tan mean 0.7508 sd of ln tan 0.0436 (built 0.7530, 0.0466); sd of log2(kappa/|y|) 0.0375 (built 0.0241)
+  rise 2: tan mean 0.3433 sd of ln tan 0.0444 (built 0.3648, 0.0543); sd of log2(kappa/|y|) 0.0306 (built 0.0556)
+--- table of a nibble: range of <w, pulse> over its 16 values, mean over Gaussian w, in units of |w| per position = 1 ---
+  phase 0 (rise index 1): pulse over 4 positions, rms entry 0.8456, mean range 5.6524
+  phase 1 (rise index 2): pulse over 4 positions, rms entry 0.5198, mean range 3.4528
+  built nibble, first bit (+-1/2 of lambda rms) at lambda = 2: 4 positions, mean range 6.4300
+  built nibble, second bit (+-1/4) at lambda = 2: 4 positions, mean range 3.2150
+multiply-adds per nibble table: built 16 x 4; phased 16 x 4
+
+real	0m5.675s
+user	0m9.317s
+sys	0m0.388s

@@ -1,0 +1,46 @@
+--- k = 32 positions per nibble, R = 0.1250 bits per position; Lloyd training D per position 0.8879 (tan2 = D/(1-D) = 7.9236); asymptotic bound tan 2.2990 ---
+  m=96  finite bound 2.5190 | built (4 signs): 3.6416 (1.000) Hadamard-16 rows: 3.1708 (0.871) simplex (15 of k): 3.0316 (0.832) biorthogonal (+-8 Hadamard): 3.1320 (0.860) Lloyd 16-point: 3.0124 (0.827)
+  m=128 finite bound 2.4749 | built (4 signs): 3.6052 (1.000) Hadamard-16 rows: 3.1092 (0.862) simplex (15 of k): 3.0054 (0.834) biorthogonal (+-8 Hadamard): 3.0960 (0.859) Lloyd 16-point: 3.0094 (0.835)
+  m=256 finite bound 2.4019 | built (4 signs): 3.4920 (1.000) Hadamard-16 rows: 3.1070 (0.890) simplex (15 of k): 2.9669 (0.850) biorthogonal (+-8 Hadamard): 3.0474 (0.873) Lloyd 16-point: 2.9761 (0.852)
+  m=288 finite bound 2.3929 | built (4 signs): 3.4713 (1.000) Hadamard-16 rows: 3.0847 (0.889) simplex (15 of k): 2.9611 (0.853) biorthogonal (+-8 Hadamard): 3.0422 (0.876) Lloyd 16-point: 2.9655 (0.854)
+--- k = 24 positions per nibble, R = 0.1667 bits per position; Lloyd training D per position 0.8531 (tan2 = D/(1-D) = 5.8077); asymptotic bound tan 1.9615 ---
+  m=96  finite bound 2.1112 | built (4 signs): 3.0704 (1.000) biorthogonal (+-8 Hadamard): 2.6252 (0.855) Lloyd 16-point: 2.5524 (0.831)
+  m=288 finite bound 2.0258 | built (4 signs): 2.9409 (1.000) biorthogonal (+-8 Hadamard): 2.5848 (0.879) Lloyd 16-point: 2.5053 (0.852)
+--- k = 16 positions per nibble, R = 0.2500 bits per position; Lloyd training D per position 0.7849 (tan2 = D/(1-D) = 3.6487); asymptotic bound tan 1.5538 ---
+  m=96  finite bound 1.6406 | built (4 signs): 2.3646 (1.000) Hadamard-16 rows: 2.0623 (0.872) simplex (15 of k): 1.9761 (0.836) biorthogonal (+-8 Hadamard): 2.0432 (0.864) Lloyd 16-point: 1.9676 (0.832)
+  m=128 finite bound 1.6237 | built (4 signs): 2.3564 (1.000) Hadamard-16 rows: 2.0516 (0.871) simplex (15 of k): 1.9717 (0.837) biorthogonal (+-8 Hadamard): 2.0275 (0.860) Lloyd 16-point: 1.9713 (0.837)
+  m=256 finite bound 1.5949 | built (4 signs): 2.3202 (1.000) Hadamard-16 rows: 2.0533 (0.885) simplex (15 of k): 1.9582 (0.844) biorthogonal (+-8 Hadamard): 2.0208 (0.871) Lloyd 16-point: 1.9620 (0.846)
+  m=288 finite bound 1.5913 | built (4 signs): 2.3195 (1.000) Hadamard-16 rows: 2.0453 (0.882) simplex (15 of k): 1.9556 (0.843) biorthogonal (+-8 Hadamard): 2.0131 (0.868) Lloyd 16-point: 1.9565 (0.844)
+--- k = 12 positions per nibble, R = 0.3333 bits per position; Lloyd training D per position 0.7207 (tan2 = D/(1-D) = 2.5805); asymptotic bound tan 1.3048 ---
+  m=96  finite bound 1.3635 | built (4 signs): 1.9749 (1.000) Lloyd 16-point: 1.6524 (0.837)
+  m=288 finite bound 1.3303 | built (4 signs): 1.9401 (1.000) Lloyd 16-point: 1.6395 (0.845)
+--- k = 8 positions per nibble, R = 0.5000 bits per position; Lloyd training D per position 0.5985 (tan2 = D/(1-D) = 1.4904); asymptotic bound tan 1.0000 ---
+  m=96  finite bound 1.0333 | built (4 signs): 1.4784 (1.000) biorthogonal (+-8 Hadamard): 1.2312 (0.833) Lloyd 16-point: 1.2316 (0.833)
+  m=128 finite bound 1.0270 | built (4 signs): 1.4816 (1.000) biorthogonal (+-8 Hadamard): 1.2343 (0.833) Lloyd 16-point: 1.2343 (0.833)
+  m=256 finite bound 1.0160 | built (4 signs): 1.4705 (1.000) biorthogonal (+-8 Hadamard): 1.2319 (0.838) Lloyd 16-point: 1.2341 (0.839)
+  m=288 finite bound 1.0146 | built (4 signs): 1.4665 (1.000) biorthogonal (+-8 Hadamard): 1.2327 (0.841) Lloyd 16-point: 1.2349 (0.842)
+--- k = 6 positions per nibble, R = 0.6667 bits per position; Lloyd training D per position 0.4979 (tan2 = D/(1-D) = 0.9917); asymptotic bound tan 0.8111 ---
+  m=96  finite bound 0.8330 | built (4 signs): 1.1736 (1.000) Lloyd 16-point: 1.0110 (0.861)
+  m=288 finite bound 0.8208 | built (4 signs): 1.1636 (1.000) Lloyd 16-point: 1.0063 (0.865)
+--- k = 5 positions per nibble, R = 0.8000 bits per position; Lloyd training D per position 0.4267 (tan2 = D/(1-D) = 0.7444); asymptotic bound tan 0.7016 ---
+--- k = 4 positions per nibble, R = 1.0000 bits per position; Lloyd training D per position 0.3406 (tan2 = D/(1-D) = 0.5166); asymptotic bound tan 0.5774 ---
+  m=96  finite bound 0.5887 | built (4 signs): 0.7547 (1.000) Lloyd 16-point: 0.7201 (0.954)
+  m=128 finite bound 0.5867 | built (4 signs): 0.7541 (1.000) Lloyd 16-point: 0.7181 (0.952)
+  m=256 finite bound 0.5830 | built (4 signs): 0.7544 (1.000) Lloyd 16-point: 0.7198 (0.954)
+  m=288 finite bound 0.5825 | built (4 signs): 0.7533 (1.000) Lloyd 16-point: 0.7198 (0.955)
+Traceback (most recent call last):
+  File "/home/joe/code/vexact-theory/notes/program/codes/cand_product.py", line 91, in <module>
+    cbs = codebooks(k)
+  File "/home/joe/code/vexact-theory/notes/program/codes/cand_product.py", line 70, in codebooks
+    out = {"built (4 signs)": built_sub(k)}
+  File "/home/joe/code/vexact-theory/notes/program/codes/cand_product.py", line 65, in built_sub
+    C[i, b] = 1.0 if i >> b & 1 else -1.0
+IndexError: index 3 is out of bounds for axis 1 with size 3
+--- k = 3 positions per nibble, R = 1.3333 bits per position; Lloyd training D per position 0.2315 (tan2 = D/(1-D) = 0.3012); asymptotic bound tan 0.4324 ---
+  m=96  finite bound 0.4389 | built (4 signs): 0.6376 (1.000) Lloyd 16-point: 0.5511 (0.864)
+  m=288 finite bound 0.4355 | built (4 signs): 0.6374 (1.000) Lloyd 16-point: 0.5524 (0.867)
+--- k = 2 positions per nibble, R = 2.0000 bits per position; Lloyd training D per position 0.1064 (tan2 = D/(1-D) = 0.1191); asymptotic bound tan 0.2582 ---
+  m=96  finite bound 0.2605 | built (4 signs): 0.3631 (1.000) Lloyd 16-point: 0.3423 (0.943)
+  m=128 finite bound 0.2602 | built (4 signs): 0.3637 (1.000) Lloyd 16-point: 0.3437 (0.945)
+  m=256 finite bound 0.2596 | built (4 signs): 0.3654 (1.000) Lloyd 16-point: 0.3455 (0.946)
+  m=288 finite bound 0.2595 | built (4 signs): 0.3653 (1.000) Lloyd 16-point: 0.3466 (0.949)

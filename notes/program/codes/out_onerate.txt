@@ -1,0 +1,24 @@
+--- R = 2.0, m = 256: built 0.3665, asymptotic bound 0.2582 ---
+  J=1 add : training D 0.1069 (tan 0.3460); test tan 0.3457; / built 0.943; / bound 1.339
+  J=2 add : training D 0.0923 (tan 0.3188); test tan 0.3188; / built 0.870; / bound 1.235
+  J=2 free: training D 0.0869 (tan 0.3084); test tan 0.3101; / built 0.846; / bound 1.201
+  J=3 add : training D 0.0860 (tan 0.3068); test tan 0.3079; / built 0.840; / bound 1.192
+--- R = 1.0, m = 256: built 0.7550, asymptotic bound 0.5774 ---
+  J=1 add : training D 0.3400 (tan 0.7177); test tan 0.7204; / built 0.954; / bound 1.248
+  J=2 add : training D 0.3243 (tan 0.6928); test tan 0.6995; / built 0.927; / bound 1.212
+  J=2 free: training D 0.3118 (tan 0.6731); test tan 0.6808; / built 0.902; / bound 1.179
+  J=3 add : training D 0.3172 (tan 0.6815); test tan 0.6917; / built 0.916; / bound 1.198
+--- R = 0.5, m = 256: built 1.4653, asymptotic bound 1.0000 ---
+  J=1 add : training D 0.6006 (tan 1.2262); test tan 1.2287; / built 0.839; / bound 1.229
+  J=2 add : training D 0.5975 (tan 1.2185); test tan 1.2303; / built 0.840; / bound 1.230
+  J=2 free: training D 0.5504 (tan 1.1065); test tan 1.1215; / built 0.765; / bound 1.122
+  J=3 add : training D 0.5926 (tan 1.2061); test tan 1.2276; / built 0.838; / bound 1.228
+--- R = 0.25, m = 256: built 2.3174, asymptotic bound 1.5538 ---
+  J=1 add : training D 0.7899 (tan 1.9387); test tan 1.9616; / built 0.846; / bound 1.262
+  J=2 add : training D 0.7872 (tan 1.9236); test tan 1.9588; / built 0.845; / bound 1.261
+  J=2 free: training D 0.7431 (tan 1.7008); test tan 1.7403; / built 0.751; / bound 1.120
+  J=3 add : training D 0.7823 (tan 1.8958); test tan 1.9617; / built 0.846; / bound 1.263
+
+real	2m18.722s
+user	4m15.869s
+sys	0m17.499s

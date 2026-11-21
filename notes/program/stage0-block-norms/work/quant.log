@@ -1,0 +1,14 @@
+[     3s] Lloyd-Max distortions [1.0, 0.36338, 0.11748, 0.03455, 0.00951, 0.00278, 0.00102, 0.00041, 0.00017]
+[    51s] group 0: 23599 items; violations 0; coordinates with bits at 32 B 103
+[    62s] group 1: 5928 items; violations 0; coordinates with bits at 32 B 105
+[   110s] group 2: 26699 items; violations 0; coordinates with bits at 32 B 109
+[   193s] group 3: 50503 items; violations 0; coordinates with bits at 32 B 107
+[   212s] group 4: 10207 items; violations 0; coordinates with bits at 32 B 108
+[   224s] group 5: 5983 items; violations 0; coordinates with bits at 32 B 105
+[   234s] group 6: 4998 items; violations 0; coordinates with bits at 32 B 110
+[   265s] group 7: 18485 items; violations 0; coordinates with bits at 32 B 108
+[   272s] group 8: 3199 items; violations 0; coordinates with bits at 32 B 103
+[   302s] group 9: 18927 items; violations 0; coordinates with bits at 32 B 107
+[   336s] group 10: 20431 items; violations 0; coordinates with bits at 32 B 107
+[   356s] group 11: 11041 items; violations 0; coordinates with bits at 32 B 107
+[   356s] done

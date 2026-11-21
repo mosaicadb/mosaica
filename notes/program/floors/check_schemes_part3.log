@@ -1,0 +1,6 @@
+part 3: 300 codes (grids on a head of 0 to 3 coordinates, shells of the dual norm on the tail, n = 8..48; shell masses from 400000 samples): min E h / max_k V_top-k = 1.0302 at (n, head, H, k) = (48, 0, 1.755, 21); min E h / W = 1.0797
+smallest ratio over everything run: 1.0302; a value below 1 would refute the floor
+
+real	1m19.153s
+user	1m9.635s
+sys	0m9.990s

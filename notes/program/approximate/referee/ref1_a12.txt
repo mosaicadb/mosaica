@@ -1,0 +1,35 @@
+Part 1. Fixed T: adaptive rules against the claimed frontier (K parents x F leaves)
+   M 100000, f 0.5, L 10, z_T 3.719, 12000 trees; found is a mean count of targets
+   threshold on parent, a = 0.6 zT f                                              E|Q|    5742.7  E found  9.497 +- 0.101  frontier at that E|Q|  9.546  excess -0.049
+   parents in descending Y, stop at 9 found                                       E|Q|   60419.2  E found  6.236 +- 0.026  frontier at that E|Q| 10.000  excess -3.764
+   parents in descending Y, stop at 9 found or 15 parents                         E|Q|    5116.4  E found  6.048 +- 0.027  frontier at that E|Q|  9.465  excess -3.417
+   descending Y; leave a parent after 150 leaves with none found                  E|Q|    2353.9  E found  6.847 +- 0.098  frontier at that E|Q|  8.693  excess -1.846
+   descending Y; stop when next parent's p*F < 0.02 unless last parent held >= 2  E|Q|    9414.0  E found  9.757 +- 0.101  frontier at that E|Q|  9.800  excess -0.043
+   random parents until 5 found (a bad rule, for scale)                           E|Q|   66451.3  E found  6.671 +- 0.070  frontier at that E|Q| 10.000  excess -3.329
+
+Part 2. The k best: least expected rows given every parent value, against R(r) at the fixed level
+   K      F     f     k   r     R(r) fixed T   k-best, one price over trees   k-best, each tree to r   ratio (one price / R)   sd of tau_k* over trees (units of sqrt v)
+     500   2000  0.30   10  0.90         85084          91086                          92700              1.07                  0.084
+     500   2000  0.30   10  0.99        311515         322422                         323010              1.04                  0.092
+     500   2000  0.45   10  0.90         20735          28852                          31484              1.39                  0.151
+     500   2000  0.45   10  0.99        104771         134059                         136216              1.28                  0.163
+     500   2000  0.60   10  0.90          4198          11861                          13814              2.83                  0.203
+     500   2000  0.60   10  0.99         24864          45677                          48004              1.84                  0.204
+     339   2000  0.30   10  0.90         62721          71684                          73157              1.14                  0.096
+     339   2000  0.30   10  0.99        222449         233777                         234213              1.05                  0.088
+     339   2000  0.45   10  0.90         16092          25282                          27462              1.57                  0.175
+     339   2000  0.45   10  0.99         78300          98970                         100397              1.26                  0.163
+     339   2000  0.60   10  0.90          3447          10497                          12204              3.05                  0.225
+     339   2000  0.60   10  0.99         19634          37862                          40102              1.93                  0.242
+      28    784  0.30   10  0.90          4190           5297                           5503              1.26                  0.185
+      28    784  0.30   10  0.99         11044          11841                          11995              1.07                  0.198
+      28    784  0.45   10  0.90          1681           2942                           3272              1.75                  0.280
+      28    784  0.45   10  0.99          5723           7164                           7376              1.25                  0.277
+      28    784  0.60   10  0.90           590           1873                           2171              3.18                  0.328
+      28    784  0.60   10  0.99          2315           4662                           4918              2.01                  0.329
+    5400    125  0.30   10  0.90         62504          62559                          62659              1.00                  0.027
+    5400    125  0.30   10  0.99        221595         221603                         221633              1.00                  0.031
+    5400    125  0.45   10  0.90         16046          16506                          16860              1.03                  0.070
+    5400    125  0.45   10  0.99         78040          79564                          79778              1.02                  0.062
+    5400    125  0.60   10  0.90          3439           4194                           4474              1.22                  0.106
+    5400    125  0.60   10  0.99         19581          22585                          22983              1.15                  0.115

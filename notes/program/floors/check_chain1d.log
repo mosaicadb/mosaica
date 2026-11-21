@@ -1,0 +1,4 @@
+  example (kind 0): H = 1.634 nats, C_bar = 0.2272, e^-H = 0.1952, E h = 0.3309
+  example (kind 1): H = 2.475 nats, C_bar = 0.1156, e^-H = 0.0841, E h = 0.1749
+  example (kind 2): H = 0.120 nats, C_bar = 0.9148, e^-H = 0.8867, E h = 1.8079
+160 interval partitions: min C_bar * e^H = 1.0001 (>= 1 required by F1's step 4); min E h / C_bar = 1.4145 (>= 1, the coupling step)

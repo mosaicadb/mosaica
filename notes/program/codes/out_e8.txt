@@ -1,0 +1,47 @@
+(a) E8 + 1/4: 65536 points of least norm (largest norm^2 11.500; 83776 points enumerated)
+    2 bits per position: MSE 0.0905 at codebook scale 0.95; with the best gain 0.0904; published E8P 0.089; Lloyd-Max 0.1175; D(R) 0.0625
+    blocks of 256: tan 0.3146; built 0.3670; ratio 0.857; / bound 1.219
+(b) m=96 E8: 2Z^8 + Hamming nibble, 2 planes, R = 1.5: tan 0.4674; built at the same rate (mixed depths) 0.5739; ratio 0.814; / bound 1.237; built / bound 1.518
+(b) m=96 E8: 2Z^8 + Hamming nibble, 3 planes, R = 2.5: tan 0.2403; built at the same rate (mixed depths) 0.2879; ratio 0.835; / bound 1.338; built / bound 1.603
+(b) m=96 E8: 2Z^8 + Hamming nibble, 4 planes, R = 3.5: tan 0.1278; built at the same rate (mixed depths) 0.1524; ratio 0.838; / bound 1.440; built / bound 1.718
+(b) m=96 E8: 2Z^8 + Hamming nibble, 5 planes, R = 4.5: tan 0.0663; built at the same rate (mixed depths) 0.0788; ratio 0.841; / bound 1.499; built / bound 1.782
+(b) m=96 D4: 2Z^4 + even-weight 3 bits, 2 planes, R = 1.75: tan 0.4077; built at the same rate (mixed depths) 0.4745; ratio 0.859; / bound 1.309; built / bound 1.524
+(b) m=96 D4: 2Z^4 + even-weight 3 bits, 3 planes, R = 2.75: tan 0.2129; built at the same rate (mixed depths) 0.2441; ratio 0.872; / bound 1.416; built / bound 1.624
+(b) m=96 D4: 2Z^4 + even-weight 3 bits, 4 planes, R = 3.75: tan 0.1123; built at the same rate (mixed depths) 0.1290; ratio 0.871; / bound 1.507; built / bound 1.730
+(b) m=96 D4: 2Z^4 + even-weight 3 bits, 5 planes, R = 4.75: tan 0.0581; built at the same rate (mixed depths) 0.0666; ratio 0.873; / bound 1.563; built / bound 1.790
+(b) m=256 E8: 2Z^8 + Hamming nibble, 2 planes, R = 1.5: tan 0.4704; built at the same rate (mixed depths) 0.5760; ratio 0.817; / bound 1.245; built / bound 1.524
+(b) m=256 E8: 2Z^8 + Hamming nibble, 3 planes, R = 2.5: tan 0.2449; built at the same rate (mixed depths) 0.2921; ratio 0.838; / bound 1.364; built / bound 1.626
+(b) m=256 E8: 2Z^8 + Hamming nibble, 4 planes, R = 3.5: tan 0.1328; built at the same rate (mixed depths) 0.1574; ratio 0.844; / bound 1.496; built / bound 1.774
+(b) m=256 E8: 2Z^8 + Hamming nibble, 5 planes, R = 4.5: tan 0.0713; built at the same rate (mixed depths) 0.0848; ratio 0.841; / bound 1.612; built / bound 1.917
+(b) m=256 D4: 2Z^4 + even-weight 3 bits, 2 planes, R = 1.75: tan 0.4115; built at the same rate (mixed depths) 0.4773; ratio 0.862; / bound 1.322; built / bound 1.533
+(b) m=256 D4: 2Z^4 + even-weight 3 bits, 3 planes, R = 2.75: tan 0.2176; built at the same rate (mixed depths) 0.2485; ratio 0.876; / bound 1.447; built / bound 1.653
+(b) m=256 D4: 2Z^4 + even-weight 3 bits, 4 planes, R = 3.75: tan 0.1177; built at the same rate (mixed depths) 0.1344; ratio 0.876; / bound 1.579; built / bound 1.803
+(b) m=256 D4: 2Z^4 + even-weight 3 bits, 5 planes, R = 4.75: tan 0.0628; built at the same rate (mixed depths) 0.0720; ratio 0.872; / bound 1.688; built / bound 1.935
+
+real	0m5.496s
+user	0m4.872s
+sys	0m1.145s
+(d) m=96 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 1): tan 0.4807 / 0.2596; each rise alone 0.4660 / 0.2399; nesting loss 1.031 / 1.082; / bound 1.272 / 1.445
+(d) m=96 nested E8 plane code, rises 1.5 and 2.5, emphasis (3, 1): tan 0.4722 / 0.2649; each rise alone 0.4660 / 0.2399; nesting loss 1.013 / 1.104; / bound 1.249 / 1.475
+(d) m=96 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 3): tan 0.4907 / 0.2573; each rise alone 0.4660 / 0.2399; nesting loss 1.053 / 1.073; / bound 1.298 / 1.432
+(d) m=96 nested E8 plane code, rises 1.5 and 2.5, emphasis (10, 1): tan 0.4688 / 0.2700; each rise alone 0.4660 / 0.2399; nesting loss 1.006 / 1.126; / bound 1.240 / 1.503
+(d) m=96 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 10): tan 0.4993 / 0.2564; each rise alone 0.4660 / 0.2399; nesting loss 1.071 / 1.069; / bound 1.321 / 1.428
+(d) m=96 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 1): tan 0.2487 / 0.1396; each rise alone 0.2399 / 0.1275; nesting loss 1.037 / 1.095; / bound 1.385 / 1.574
+(d) m=96 nested E8 plane code, rises 2.5 and 3.5, emphasis (3, 1): tan 0.2441 / 0.1428; each rise alone 0.2399 / 0.1275; nesting loss 1.018 / 1.120; / bound 1.359 / 1.610
+(d) m=96 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 3): tan 0.2534 / 0.1384; each rise alone 0.2399 / 0.1275; nesting loss 1.057 / 1.086; / bound 1.411 / 1.559
+(d) m=96 nested E8 plane code, rises 2.5 and 3.5, emphasis (10, 1): tan 0.2419 / 0.1463; each rise alone 0.2399 / 0.1275; nesting loss 1.008 / 1.148; / bound 1.347 / 1.649
+(d) m=96 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 10): tan 0.2567 / 0.1383; each rise alone 0.2399 / 0.1275; nesting loss 1.070 / 1.085; / bound 1.429 / 1.558
+(d) m=256 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 1): tan 0.4861 / 0.2648; each rise alone 0.4722 / 0.2459; nesting loss 1.029 / 1.077; / bound 1.286 / 1.474
+(d) m=256 nested E8 plane code, rises 1.5 and 2.5, emphasis (3, 1): tan 0.4777 / 0.2698; each rise alone 0.4722 / 0.2459; nesting loss 1.012 / 1.097; / bound 1.264 / 1.502
+(d) m=256 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 3): tan 0.4977 / 0.2625; each rise alone 0.4722 / 0.2459; nesting loss 1.054 / 1.067; / bound 1.317 / 1.461
+(d) m=256 nested E8 plane code, rises 1.5 and 2.5, emphasis (10, 1): tan 0.4740 / 0.2754; each rise alone 0.4722 / 0.2459; nesting loss 1.004 / 1.120; / bound 1.254 / 1.533
+(d) m=256 nested E8 plane code, rises 1.5 and 2.5, emphasis (1, 10): tan 0.5060 / 0.2617; each rise alone 0.4722 / 0.2459; nesting loss 1.072 / 1.064; / bound 1.339 / 1.457
+(d) m=256 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 1): tan 0.2541 / 0.1452; each rise alone 0.2459 / 0.1338; nesting loss 1.033 / 1.085; / bound 1.415 / 1.636
+(d) m=256 nested E8 plane code, rises 2.5 and 3.5, emphasis (3, 1): tan 0.2491 / 0.1486; each rise alone 0.2459 / 0.1338; nesting loss 1.013 / 1.111; / bound 1.387 / 1.675
+(d) m=256 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 3): tan 0.2596 / 0.1438; each rise alone 0.2459 / 0.1338; nesting loss 1.056 / 1.075; / bound 1.446 / 1.621
+(d) m=256 nested E8 plane code, rises 2.5 and 3.5, emphasis (10, 1): tan 0.2472 / 0.1521; each rise alone 0.2459 / 0.1338; nesting loss 1.005 / 1.137; / bound 1.376 / 1.715
+(d) m=256 nested E8 plane code, rises 2.5 and 3.5, emphasis (1, 10): tan 0.2632 / 0.1436; each rise alone 0.2459 / 0.1338; nesting loss 1.070 / 1.073; / bound 1.465 / 1.618
+
+real	3m8.657s
+user	3m4.315s
+sys	0m0.811s

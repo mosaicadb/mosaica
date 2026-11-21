@@ -1,0 +1,13 @@
+[   125s] group 0: 25 clusters, 23599 items; identity error 1.44e-15; violations 0; text mean h at k=32: a 0.2289 cvar4 0.2133 d 0.1357
+[   158s] group 1: 11 clusters, 5928 items; identity error 1.33e-15; violations 0; text mean h at k=32: a 0.1606 cvar4 0.1515 d 0.0962
+[   304s] group 2: 20 clusters, 26699 items; identity error 1.44e-15; violations 0; text mean h at k=32: a 0.1864 cvar4 0.1739 d 0.1106
+[   634s] group 3: 39 clusters, 50503 items; identity error 1.94e-15; violations 0; text mean h at k=32: a 0.1242 cvar4 0.1165 d 0.0739
+[   689s] group 4: 11 clusters, 10207 items; identity error 1.33e-15; violations 0; text mean h at k=32: a 0.1903 cvar4 0.1781 d 0.1131
+[   722s] group 5: 8 clusters, 5983 items; identity error 1.44e-15; violations 0; text mean h at k=32: a 0.2252 cvar4 0.2114 d 0.1345
+[   751s] group 6: 7 clusters, 4998 items; identity error 1.33e-15; violations 0; text mean h at k=32: a 0.2451 cvar4 0.2308 d 0.1468
+[   852s] group 7: 18 clusters, 18485 items; identity error 1.55e-15; violations 0; text mean h at k=32: a 0.1732 cvar4 0.1610 d 0.1024
+[   852s] group 8 done before; skipped
+[   966s] group 9: 23 clusters, 18927 items; identity error 1.67e-15; violations 0; text mean h at k=32: a 0.1263 cvar4 0.1184 d 0.0752
+[  1082s] group 10: 21 clusters, 20431 items; identity error 1.55e-15; violations 0; text mean h at k=32: a 0.2269 cvar4 0.2138 d 0.1356
+[  1144s] group 11: 12 clusters, 11041 items; identity error 1.44e-15; violations 0; text mean h at k=32: a 0.2324 cvar4 0.2167 d 0.1378
+[  1144s] done

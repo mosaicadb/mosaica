@@ -1,0 +1,9 @@
+--- 12_q1: m = 256, rises [1, 2], streams [('ph', 2, [0, 1], [1.0, 0.5], [1, 0], 3)], emphasis None, 781 training blocks, scales (1.0,) ---
+  rise 1: stream code tan 0.7530; built nested 0.7538; ratio 0.999; stream / bound 1.304; built / bound 1.306
+  rise 2: stream code tan 0.3328; built nested 0.3653; ratio 0.911; stream / bound 1.289; built / bound 1.415
+--- q12_q1: m = 256, rises [0.25, 1, 2], streams [('ph', 2, [1, 2], [1.0, 0.5], [1, 0], 3, (256, 1))], emphasis None, 781 training blocks, scales (1.0,) ---
+  rise 0.25: stream code tan 2.3049; built nested 2.3236; ratio 0.992; stream / bound 1.483; built / bound 1.495
+  rise 1: stream code tan 0.7478; built nested 0.7538; ratio 0.992; stream / bound 1.295; built / bound 1.306
+  rise 2: stream code tan 0.3346; built nested 0.3653; ratio 0.916; stream / bound 1.296; built / bound 1.415
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:15.46
+	Maximum resident set size (kbytes): 178972

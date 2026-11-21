@@ -1,0 +1,55 @@
+groups: sizes [23599, 5928, 26699, 50503, 10207, 5983, 4998, 18485, 3199, 18927, 20431, 11041]
+  group  0 done: F(item fit) 0.3527, F(text fit) 0.3222, F(mix) 0.3558, delta 0.1097
+  group  1 done: F(item fit) 0.2596, F(text fit) 0.2314, F(mix) 0.2599, delta 0.1170
+  group  2 done: F(item fit) 0.2896, F(text fit) 0.2586, F(mix) 0.2901, delta 0.1173
+  group  3 done: F(item fit) 0.2083, F(text fit) 0.1872, F(mix) 0.2098, delta 0.1229
+  group  4 done: F(item fit) 0.3007, F(text fit) 0.2683, F(mix) 0.3008, delta 0.1150
+  group  5 done: F(item fit) 0.3352, F(text fit) 0.3108, F(mix) 0.3411, delta 0.1144
+  group  6 done: F(item fit) 0.3595, F(text fit) 0.3365, F(mix) 0.3679, delta 0.1168
+  group  7 done: F(item fit) 0.2758, F(text fit) 0.2468, F(mix) 0.2761, delta 0.1135
+  group  8 done: F(item fit) 0.3232, F(text fit) 0.2985, F(mix) 0.3283, delta 0.1138
+  group  9 done: F(item fit) 0.2088, F(text fit) 0.1895, F(mix) 0.2112, delta 0.1222
+  group 10 done: F(item fit) 0.3368, F(text fit) 0.3070, F(mix) 0.3407, delta 0.1185
+  group 11 done: F(item fit) 0.3579, F(text fit) 0.3215, F(mix) 0.3587, delta 0.1125
+
+second-moment prediction of the mean half-width (all groups, weighted by size) against the measurement; k = 0 / 32 / 256
+  text held-out            a: predicted [0.3104, 0.1878, 0.0282] measured [0.2968, 0.1779, 0.0256]
+                           b2/a (mixed basis): predicted [0.787, 0.732, 0.669] measured [0.788, 0.732, 0.672]
+                           b1/a (text weights, data basis): predicted [0.907, 0.935, 0.97] measured [0.907, 0.938, 0.977]
+  text in-sample species   a: predicted [0.2598, 0.1395, 0.0182] measured [0.2492, 0.1332, 0.0173]
+                           b2/a (mixed basis): predicted [0.991, 1.011, 0.986] measured [0.991, 1.011, 0.988]
+                           b1/a (text weights, data basis): predicted [1.034, 0.997, 0.987] measured [1.03, 0.997, 0.988]
+  items                    a: predicted [0.2091, 0.0942, 0.0085] measured [0.1982, 0.0862, 0.0077]
+                           b2/a (mixed basis): predicted [1.052, 1.08, 1.179] measured [1.055, 1.084, 1.195]
+                           b1/a (text weights, data basis): predicted [1.157, 1.058, 1.03] measured [1.163, 1.058, 1.026]
+
+the trade-off: basis fitted on (1-w) item + w text (trace-normalised); predicted width / width of the data-only basis (w = 0), k = 0 / 32 / 256,
+and at k = 0 the regret against the family's own optimum F(test second moment, Sigma_R)
+  w = 0.00:  text 1.000/1.000/1.000 (regret 1.635)  species 1.000/1.000/1.000 (regret 1.395)  items 1.000/1.000/1.000 (regret 1.358)
+  w = 0.05:  text 0.900/0.871/0.798 (regret 1.471)  species 0.990/0.990/0.975 (regret 1.380)  items 1.003/1.003/1.013 (regret 1.361)
+  w = 0.10:  text 0.868/0.830/0.756 (regret 1.419)  species 0.986/0.988/0.970 (regret 1.375)  items 1.007/1.009/1.029 (regret 1.367)
+  w = 0.20:  text 0.834/0.788/0.715 (regret 1.363)  species 0.983/0.990/0.969 (regret 1.372)  items 1.016/1.023/1.065 (regret 1.379)
+  w = 0.35:  text 0.805/0.753/0.685 (regret 1.316)  species 0.985/0.999/0.975 (regret 1.374)  items 1.032/1.049/1.119 (regret 1.401)
+  w = 0.50:  text 0.787/0.732/0.669 (regret 1.286)  species 0.991/1.011/0.986 (regret 1.383)  items 1.052/1.080/1.179 (regret 1.428)
+  w = 0.70:  text 0.772/0.714/0.655 (regret 1.262)  species 1.006/1.035/1.008 (regret 1.404)  items 1.089/1.134/1.279 (regret 1.478)
+  w = 0.85:  text 0.766/0.706/0.650 (regret 1.252)  species 1.026/1.063/1.036 (regret 1.431)  items 1.131/1.202/1.389 (regret 1.535)
+  w = 1.00:  text 0.767/0.705/0.651 (regret 1.254)  species 1.064/1.122/1.104 (regret 1.484)  items 1.229/1.402/1.719 (regret 1.668)
+
+the same from the two fits alone (no test query): width on the item fit and on the text fit / width at w = 0, k = 0 / 32 / 256,
+and at k = 0 the regret against F(fit, Sigma_R)
+  w = 0.00:  item fit 1.000/1.000/1.000 (regret 1.001)  text fit 1.000/1.000/1.000 (regret 1.462)
+  w = 0.05:  item fit 1.003/1.007/1.026 (regret 1.004)  text fit 0.866/0.837/0.707 (regret 1.266)
+  w = 0.10:  item fit 1.007/1.015/1.052 (regret 1.008)  text fit 0.827/0.791/0.649 (regret 1.210)
+  w = 0.20:  item fit 1.017/1.034/1.103 (regret 1.018)  text fit 0.785/0.742/0.589 (regret 1.148)
+  w = 0.35:  item fit 1.033/1.064/1.177 (regret 1.034)  text fit 0.749/0.701/0.542 (regret 1.095)
+  w = 0.50:  item fit 1.054/1.099/1.257 (regret 1.055)  text fit 0.725/0.676/0.513 (regret 1.061)
+  w = 0.70:  item fit 1.090/1.161/1.387 (regret 1.091)  text fit 0.704/0.652/0.486 (regret 1.029)
+  w = 0.85:  item fit 1.132/1.236/1.528 (regret 1.133)  text fit 0.692/0.638/0.471 (regret 1.012)
+  w = 1.00:  item fit 1.228/1.431/1.900 (regret 1.229)  text fit 0.685/0.629/0.459 (regret 1.002)
+
+angle between the fitted families, delta = (F_mix^2 - F_1^2/2 - F_2^2/2)/(F_1 F_2) in [0, 1]: min 0.1097, size-weighted mean 0.1175, max 0.1229
+mean-square price of one basis for the equal mixture, F_mix^2 / (F_1^2/2 + F_2^2/2): min 1.1092, mean 1.1169, max 1.1222 (bounds 1 and 2)
+
+block norms on the data-only basis, items, k = 0: Gaussian model against the measurement (cvar J: .98 / .96 / .94 / .89; d: .63)
+  n_eff of the groups (data-only gamma): min 67, median 73, max 85
+  predicted per-coordinate limit / one norm: 0.641;  J = 2 / 4 / 8 / 16 equal-share blocks / one norm: 0.994 / 0.981 / 0.958 / 0.916

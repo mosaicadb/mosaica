@@ -1,0 +1,47 @@
+eps=1.00 grid    (0.6,0.6) order=0 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=1.00 grid    (0.6,0.6) order=1 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=1.00 hex     (0.6,0.52) order=0 cells=367 H=4.028  (a) min width/corr=1.3827  (b) min L2 gap=0.2621  (c) slack=0.2710  Cbar=(0.1554, 0.1503)  sum ln(1/Cbar)=3.7567 <= H
+eps=1.00 hex     (0.6,0.52) order=1 cells=367 H=4.028  (a) min width/corr=1.3827  (b) min L2 gap=0.2643  (c) slack=0.2732  Cbar=(0.1501, 0.1560)  sum ln(1/Cbar)=3.7544 <= H
+eps=1.00 hex     (1.2,1) order=0 cells=105 H=2.748  (a) min width/corr=1.3953  (b) min L2 gap=0.2435  (c) slack=0.2647  Cbar=(0.3021, 0.2765)  sum ln(1/Cbar)=2.4826 <= H
+eps=1.00 hex     (1.2,1) order=1 cells=105 H=2.748  (a) min width/corr=1.4015  (b) min L2 gap=0.2360  (c) slack=0.2551  Cbar=(0.2920, 0.2833)  sum ln(1/Cbar)=2.4921 <= H
+eps=1.00 voronoi (25,1) order=0 cells=25 H=2.971  (a) min width/corr=1.4673  (b) min L2 gap=0.2204  (c) slack=0.4329  Cbar=(0.3157, 0.2504)  sum ln(1/Cbar)=2.5376 <= H
+eps=1.00 voronoi (25,1) order=1 cells=25 H=2.971  (a) min width/corr=1.4369  (b) min L2 gap=0.2475  (c) slack=0.4406  Cbar=(0.2814, 0.2831)  sum ln(1/Cbar)=2.5299 <= H
+eps=1.00 voronoi (60,0.2) order=0 cells=60 H=3.947  (a) min width/corr=1.4096  (b) min L2 gap=0.2299  (c) slack=0.4682  Cbar=(0.1318, 0.2342)  sum ln(1/Cbar)=3.4780 <= H
+eps=1.00 voronoi (60,0.2) order=1 cells=60 H=3.947  (a) min width/corr=1.4125  (b) min L2 gap=0.2370  (c) slack=0.4659  Cbar=(0.1139, 0.2704)  sum ln(1/Cbar)=3.4803 <= H
+eps=1.00 voronoi (6,1) order=0 cells=6 H=1.545  (a) min width/corr=1.8898  (b) min L2 gap=0.1863  (c) slack=0.2413  Cbar=(0.5954, 0.4565)  sum ln(1/Cbar)=1.3026 <= H
+eps=1.00 voronoi (6,1) order=1 cells=6 H=1.545  (a) min width/corr=1.9112  (b) min L2 gap=0.1800  (c) slack=0.2500  Cbar=(0.5117, 0.5359)  sum ln(1/Cbar)=1.2939 <= H
+eps=1.00 strips  (0.4,2) order=0 cells=75 H=2.558  (a) min width/corr=1.7744  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+eps=1.00 strips  (0.4,2) order=1 cells=75 H=2.558  (a) min width/corr=1.7744  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+eps=0.30 grid    (0.6,0.6) order=0 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=0.30 grid    (0.6,0.6) order=1 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=0.30 hex     (0.6,0.52) order=0 cells=367 H=4.028  (a) min width/corr=1.4163  (b) min L2 gap=0.2621  (c) slack=0.2710  Cbar=(0.1554, 0.1503)  sum ln(1/Cbar)=3.7567 <= H
+eps=0.30 hex     (0.6,0.52) order=1 cells=367 H=4.028  (a) min width/corr=1.4163  (b) min L2 gap=0.2643  (c) slack=0.2732  Cbar=(0.1501, 0.1560)  sum ln(1/Cbar)=3.7544 <= H
+eps=0.30 hex     (1.2,1) order=0 cells=105 H=2.748  (a) min width/corr=1.4506  (b) min L2 gap=0.2435  (c) slack=0.2647  Cbar=(0.3021, 0.2765)  sum ln(1/Cbar)=2.4826 <= H
+eps=0.30 hex     (1.2,1) order=1 cells=105 H=2.748  (a) min width/corr=1.4506  (b) min L2 gap=0.2360  (c) slack=0.2551  Cbar=(0.2920, 0.2833)  sum ln(1/Cbar)=2.4921 <= H
+eps=0.30 voronoi (25,1) order=0 cells=25 H=2.929  (a) min width/corr=1.4534  (b) min L2 gap=0.2512  (c) slack=0.3393  Cbar=(0.3185, 0.2358)  sum ln(1/Cbar)=2.5891 <= H
+eps=0.30 voronoi (25,1) order=1 cells=25 H=2.929  (a) min width/corr=1.5138  (b) min L2 gap=0.2241  (c) slack=0.3285  Cbar=(0.2835, 0.2620)  sum ln(1/Cbar)=2.6000 <= H
+eps=0.30 voronoi (60,0.2) order=0 cells=60 H=3.918  (a) min width/corr=1.4268  (b) min L2 gap=0.2454  (c) slack=0.4884  Cbar=(0.1347, 0.2408)  sum ln(1/Cbar)=3.4286 <= H
+eps=0.30 voronoi (60,0.2) order=1 cells=60 H=3.918  (a) min width/corr=1.4396  (b) min L2 gap=0.2247  (c) slack=0.4945  Cbar=(0.1144, 0.2851)  sum ln(1/Cbar)=3.4225 <= H
+eps=0.30 voronoi (6,1) order=0 cells=6 H=1.604  (a) min width/corr=1.7338  (b) min L2 gap=0.1793  (c) slack=0.4489  Cbar=(0.6058, 0.5205)  sum ln(1/Cbar)=1.1541 <= H
+eps=0.30 voronoi (6,1) order=1 cells=6 H=1.604  (a) min width/corr=2.0440  (b) min L2 gap=0.1723  (c) slack=0.3945  Cbar=(0.5243, 0.5696)  sum ln(1/Cbar)=1.2085 <= H
+eps=0.30 strips  (0.4,2) order=0 cells=75 H=2.558  (a) min width/corr=1.6993  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+eps=0.30 strips  (0.4,2) order=1 cells=75 H=2.558  (a) min width/corr=1.6993  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+eps=0.05 grid    (0.6,0.6) order=0 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=0.05 grid    (0.6,0.6) order=1 cells=289 H=3.889  (a) min width/corr=1.4206  (b) min L2 gap=0.2980  (c) slack=0.3061  Cbar=(0.1668, 0.1668)  sum ln(1/Cbar)=3.5822 <= H
+eps=0.05 hex     (0.6,0.52) order=0 cells=367 H=4.028  (a) min width/corr=1.4165  (b) min L2 gap=0.2621  (c) slack=0.2710  Cbar=(0.1554, 0.1503)  sum ln(1/Cbar)=3.7567 <= H
+eps=0.05 hex     (0.6,0.52) order=1 cells=367 H=4.028  (a) min width/corr=1.4165  (b) min L2 gap=0.2643  (c) slack=0.2732  Cbar=(0.1501, 0.1560)  sum ln(1/Cbar)=3.7544 <= H
+eps=0.05 hex     (1.2,1) order=0 cells=105 H=2.748  (a) min width/corr=1.4495  (b) min L2 gap=0.2435  (c) slack=0.2647  Cbar=(0.3021, 0.2765)  sum ln(1/Cbar)=2.4826 <= H
+eps=0.05 hex     (1.2,1) order=1 cells=105 H=2.748  (a) min width/corr=1.4495  (b) min L2 gap=0.2360  (c) slack=0.2551  Cbar=(0.2920, 0.2833)  sum ln(1/Cbar)=2.4921 <= H
+eps=0.05 voronoi (25,1) order=0 cells=25 H=3.009  (a) min width/corr=1.4780  (b) min L2 gap=0.2010  (c) slack=0.4376  Cbar=(0.2841, 0.2692)  sum ln(1/Cbar)=2.5708 <= H
+eps=0.05 voronoi (25,1) order=1 cells=25 H=3.009  (a) min width/corr=1.6372  (b) min L2 gap=0.2449  (c) slack=0.4355  Cbar=(0.2488, 0.3067)  sum ln(1/Cbar)=2.5729 <= H
+eps=0.05 voronoi (60,0.2) order=0 cells=60 H=3.859  (a) min width/corr=1.4174  (b) min L2 gap=0.2373  (c) slack=0.4959  Cbar=(0.1381, 0.2509)  sum ln(1/Cbar)=3.3624 <= H
+eps=0.05 voronoi (60,0.2) order=1 cells=60 H=3.859  (a) min width/corr=1.5173  (b) min L2 gap=0.2425  (c) slack=0.4991  Cbar=(0.1193, 0.2915)  sum ln(1/Cbar)=3.3591 <= H
+eps=0.05 voronoi (6,1) order=0 cells=6 H=1.624  (a) min width/corr=1.8223  (b) min L2 gap=0.1955  (c) slack=0.2628  Cbar=(0.5502, 0.4665)  sum ln(1/Cbar)=1.3599 <= H
+eps=0.05 voronoi (6,1) order=1 cells=6 H=1.624  (a) min width/corr=2.4240  (b) min L2 gap=0.2027  (c) slack=0.2696  Cbar=(0.4672, 0.5531)  sum ln(1/Cbar)=1.3531 <= H
+eps=0.05 strips  (0.4,2) order=0 cells=75 H=2.558  (a) min width/corr=1.5296  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+eps=0.05 strips  (0.4,2) order=1 cells=75 H=2.558  (a) min width/corr=1.5296  (b) min L2 gap=0.1795  (c) slack=0.2083  Cbar=(0.1121, 0.8510)  sum ln(1/Cbar)=2.3493 <= H
+worst: (a) 1.3827 (needs >= 1)   (b) 0.1723 (>= 0)   (c) 0.2083 (>= 0)   (d) 0.14980 (>= 0)
+
+real	0m2.061s
+user	0m2.089s
+sys	0m0.058s

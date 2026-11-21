@@ -1,0 +1,22 @@
+B1: 300 non-commuting pairs: max relative error of M SQ M = SR and tr(M SQ) = tr(M^-1 SR) = F: 8.7e-14; min over random M' of sqrt(tr(M'SQ) tr(M'^-1 SR))/F = 1.0014 (>= 1); max correlation of a random coupling / F = 0.7484 (<= 1)
+B2: 240 random norms (|Ax|_p with dual, and ellipsoids), n in {1,2,3,5,8}, 200000 sample pairs each: soundness margin min -6.06e-15 (>= 0); min sqrt(E|D|_K^2 E|r|_K*^2)/F = 0.9947 (>= 1 up to sampling); min [E|D|_K E|r|_K*] / [E|D|_M E|r|_M^-1] = 1.0000 (>= 1 up to sampling; ellipsoids only: 1.0000)
+    n =  1, n_eff =   1.0: (E|g''|)^2 / F = 0.6372; lower bound (1 - 1/n_eff)^2 = 0.0000; 1/(1 + cv^2) = 0.6371
+    n =  2, n_eff =   2.0: (E|g''|)^2 / F = 0.7844; lower bound (1 - 1/n_eff)^2 = 0.2497; 1/(1 + cv^2) = 0.7856
+    n =  8, n_eff =   7.9: (E|g''|)^2 / F = 0.9392; lower bound (1 - 1/n_eff)^2 = 0.7628; 1/(1 + cv^2) = 0.9390
+    n = 64, n_eff =  36.9: (E|g''|)^2 / F = 0.9872; lower bound (1 - 1/n_eff)^2 = 0.9465; 1/(1 + cv^2) = 0.9867
+B3: Gaussian offsets, residual = s * Gaussian with a lognormal scale s (E s^2 = 1), spectrum of group 12 (n_eff = 76).
+    sigma^2 (kurtosis) | lower bound on max-cov / F = E s | upper bound = comonotone norms / F | Gelbrich gap between | product-form mean / F
+    0.000 (3.0)        | 1.0000                           | 0.9998                             | 0.0002 .. 0.0000     | 0.9934
+    0.046 (3.6)        | 0.9775                           | 0.9883                             | 0.0117 .. 0.0225     | 0.9703
+    0.112 (4.7)        | 0.9454                           | 0.9666                             | 0.0334 .. 0.0546     | 0.9402
+    0.133 (5.1)        | 0.9358                           | 0.9562                             | 0.0438 .. 0.0642     | 0.9280
+    0.280 (9.2)        | 0.8693                           | 0.8992                             | 0.1008 .. 0.1307     | 0.8608
+B4a: 200 random block structures: |value at d_j^2 = |e_j|/|Delta_j|  -  sum_j |Delta_j||e_j|| / sum <= 3.8e-16; no random block-constant D below the sum
+B4b: 400 random triples: min [F(mix) - mix of F] = 7.25e-04 (>= 0), min [F(mix)^2 - mix of F^2] = 1.03e-03 (>= 0), max F(S1+S2)/(F(S1)+F(S2)) = 0.9137 (<= 1)
+B4c: 40 families of 3 query covariances: max relative gap between max_a regret^2 at M* and max_w F(S_w, SR)^2 = 1.2e-03; regret (width ratio) between 1.0155 and 1.2131 (bounds 1 and sqrt 3 = 1.732); min over random M of its worst regret^2 / the value = 1.0122 (>= 1)
+B4d: 400 random mixtures: price^2 = F(mixture)^2 / sum_a w_a F_a^2 between 1.0004 and 1.5332 (bounds 1 and the number of families); two orthogonal rank-one families, equal weights: 2.0000 (the bound 2 is attained)
+B5: rule 1's rho^-2 = (sum a)^2 / sum a^2, a_c = sqrt(pi_c v_c), against n_eff(SQ, SE) = F^2 / tr(SQ SE):
+    non-commuting pairs in a fixed orthonormal basis: min (sum a)/F = 1.0001 (>= 1); one example: rho^-2 = 6.235, n_eff = 3.743, (sum a)/F = 1.313, sum a^2 / tr(SQ SE) = 1.035
+    both diagonal in the basis: rho^-2 = 4.922896, n_eff = 4.922896
+    a non-commuting pair in its dual basis: off-diagonal mass 9.0e-15; rho^-2 = 2.585975, n_eff = 2.585975
+    M diagonal in the basis, SQ not: (sum a)/F = 1.000000, sum a^2 / tr(SQ SE) = 0.6337 (< 1), rho^-2 = 3.989 against n_eff = 2.528

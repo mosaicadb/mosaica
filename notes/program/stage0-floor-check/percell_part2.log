@@ -1,0 +1,3 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+4. aligned ellipsoids {sum z_i^2/e_i^2 <= 1}: E h = E||diag(e sqrt gam) g||, ln P by Laplace inversion (gaussq.py)

@@ -1,0 +1,18 @@
+laion-clip-512-normalized  level 16 B: rho_g under water-filling, min / median / max over groups: 0.0485 / 0.0526 / 0.0572;  1/sqrt(n) 0.0442
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.818 / 0.921 / 0.988; rms 0.915
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.899 / 1.004 / 1.064; rms 0.996
+laion-clip-512-normalized  level 32 B: rho_g under water-filling, min / median / max over groups: 0.0462 / 0.0487 / 0.0514;  1/sqrt(n) 0.0442
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.889 / 0.951 / 0.997; rms 0.948
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.940 / 1.003 / 1.036; rms 0.999
+yahoo-minilm-384-normalized  level 16 B: rho_g under water-filling, min / median / max over groups: 0.0573 / 0.0606 / 0.0624;  1/sqrt(n) 0.0510
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.957 / 0.995 / 1.022; rms 0.993
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.962 / 1.002 / 1.026; rms 0.999
+yahoo-minilm-384-normalized  level 32 B: rho_g under water-filling, min / median / max over groups: 0.0550 / 0.0570 / 0.0579;  1/sqrt(n) 0.0510
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.972 / 0.998 / 1.013; rms 0.995
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.976 / 1.001 / 1.016; rms 1.000
+glove-100-angular  level 16 B: rho_g under water-filling, min / median / max over groups: 0.1000 / 0.1000 / 0.1007;  1/sqrt(n) 0.0884
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 1.000 / 1.000 / 1.001; rms 1.000
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 0.999 / 1.000 / 1.001; rms 1.000
+glove-100-angular  level 32 B: rho_g under water-filling, min / median / max over groups: 0.1000 / 0.1000 / 0.1000;  1/sqrt(n) 0.0884
+   test queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 1.000 / 1.000 / 1.000; rms 1.000
+   corpus rows as queries: rho(q,c)/rho_g over (query, its 10 best clusters by centre score): 5 / 50 / 95 pct 1.000 / 1.000 / 1.000; rms 1.000

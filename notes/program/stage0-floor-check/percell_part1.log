@@ -1,0 +1,36 @@
+# percell.py: numpy 2.2.6, scipy 1.15.3
+
+1. aligned boxes: E h = sum sqrt(gam_i)(b_i - a_i)/sqrt(2 pi); ln P = sum ln P[a_i <= Z <= b_i]
+   n =   1: min R = 1.648721  (flat; centred, widths 1.103e-10 gam^-0.130)
+   n =   2: min R = 1.648721  (flat; centred, widths 2.728e-11 gam^0.063)
+   n =   5: min R = 1.648721  (flat; centred, widths 6.095e-12 gam^645.838)
+   n =  20: min R = 1.648721  (flat; centred, widths 2.102e-12 gam^-0.154)
+   n = 100: min R = 1.648721  (flat; centred, widths 1.636e-12 gam^0.072)
+   n = 1 narrow-interval limit sqrt(e) = 1.648721
+
+2. misaligned boxes (Haar rotation R): E h = sum_j w_j sqrt((R^T Gam R)_jj)/sqrt(2 pi); P as for the unrotated box
+   n =   2: min R = 1.648721  (flat; Haar rotation, widths 3.19e-09 d^-0.219)
+   n =   5: min R = 1.648721  (flat; slight rotation, widths 5.156e-22 d^-0.574)
+   n =  20: min R = 1.648721  (flat; Haar rotation, widths 2.691e-20 d^-0.518)
+   n = 100: min R = 1.648721  (flat; Haar rotation, widths 1.185e-17 d^-0.455)
+
+3. balls {||z - c|| <= rho}: E h = rho E||Gam^1/2 g||, ln P = ln ncx2.cdf(rho^2; n, ||c||^2)
+   n =   1: min R = 1.648754  (flat; rho=0.02 (rho/sqrt n=0.020), |centre|=0)
+   n =   2: min R = 1.461160  (flat; rho=0.02 (rho/sqrt n=0.014), |centre|=0)
+   n =   5: min R = 1.261592  (flat; rho=0.02 (rho/sqrt n=0.009), |centre|=0)
+   n =  20: min R = 1.095745  (flat; rho=0.02 (rho/sqrt n=0.004), |centre|=0)
+   n = 100: min R = 1.026614  (flat; rho=0.02 (rho/sqrt n=0.002), |centre|=0)
+   isotropic centred ball, R against rho/sqrt(n) at n = 100:
+     rho/sqrt n 0.10: P 1.789e-80  R 1.026802
+     rho/sqrt n 0.30: P 1.833e-34  R 1.028404
+     rho/sqrt n 0.50: P 1.135e-15  R 1.032259
+     rho/sqrt n 0.70: P 4.101e-06  R 1.040495
+     rho/sqrt n 0.80: P 1.934e-03  R 1.048121
+     rho/sqrt n 0.90: P 8.203e-02  R 1.060846
+     rho/sqrt n 0.95: P 2.528e-01  R 1.070621
+     rho/sqrt n 1.00: P 5.188e-01  R 1.084106
+     rho/sqrt n 1.05: P 7.728e-01  R 1.102884
+     rho/sqrt n 1.20: P 9.974e-01  R 1.203172
+
+4. aligned ellipsoids {sum z_i^2/e_i^2 <= 1}: E h = E||diag(e sqrt gam) g||, ln P by Laplace inversion (gaussq.py)
+exit 143

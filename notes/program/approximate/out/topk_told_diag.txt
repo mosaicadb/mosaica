@@ -1,0 +1,6 @@
+seed 1 r 0.9: told 29512  static 29576  told/static 0.998   mean Lambda(tau_k) 9.966   draws off the grid 0
+seed 1 r 0.95: told 51731  static 50809  told/static 1.018   mean Lambda(tau_k) 9.966   draws off the grid 0
+seed 2 r 0.9: told 28527  static 30159  told/static 0.946   mean Lambda(tau_k) 10.036   draws off the grid 0
+seed 2 r 0.95: told 48232  static 51832  told/static 0.931   mean Lambda(tau_k) 10.036   draws off the grid 0
+seed 3 r 0.9: told 29596  static 30828  told/static 0.960   mean Lambda(tau_k) 10.017   draws off the grid 0
+seed 3 r 0.95: told 50111  static 52611  told/static 0.952   mean Lambda(tau_k) 10.017   draws off the grid 0

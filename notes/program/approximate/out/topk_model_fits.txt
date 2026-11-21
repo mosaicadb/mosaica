@@ -1,0 +1,28 @@
+Model T at the sizes of the fits, k = 10 (rows; the finest cells' values are the keys):
+   yahoo clusters                     cells    339 x  1998  f 0.423  r 0.90:  R     20808  told     29349  static     29597  same count     33189   told/R 1.41  static/R 1.42  count/R 1.59   share of rows: static 4.37%  same count 4.90%
+   yahoo clusters                     cells    339 x  1998  f 0.423  r 0.95:  R     37790  told     49526  static     49477  same count     55253   told/R 1.31  static/R 1.31  count/R 1.46   share of rows: static 7.30%  same count 8.16%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.167
+   yahoo clusters, a4, a16            cells   5424 x   125  f 0.528  r 0.90:  R      7397  told     10682  static     12529  same count     13499   told/R 1.44  static/R 1.69  count/R 1.82   share of rows: static 1.85%  same count 1.99%
+   yahoo clusters, a4, a16            cells   5424 x   125  f 0.528  r 0.95:  R     14027  told     17216  static     21773  same count     23932   told/R 1.23  static/R 1.55  count/R 1.71   share of rows: static 3.21%  same count 3.53%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.153
+   yahoo clusters, a4, a16, a64       cells  21696 x    31  f 0.577  r 0.90:  R      4403  told      6630  static      6087  same count      6596   told/R 1.51  static/R 1.38  count/R 1.50   share of rows: static 0.90%  same count 0.98%
+   yahoo clusters, a4, a16, a64       cells  21696 x    31  f 0.577  r 0.95:  R      8430  told     13080  static     11024  same count     12287   told/R 1.55  static/R 1.31  count/R 1.46   share of rows: static 1.64%  same count 1.83%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.186
+   laion clusters                     cells    500 x  2001  f 0.454  r 0.90:  R     19927  told     31061  static     29910  same count     33554   told/R 1.56  static/R 1.50  count/R 1.68   share of rows: static 2.99%  same count 3.35%
+   laion clusters                     cells    500 x  2001  f 0.454  r 0.95:  R     37261  told     55146  static     50901  same count     57417   told/R 1.48  static/R 1.37  count/R 1.54   share of rows: static 5.09%  same count 5.74%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.169
+   laion clusters, a4, a16            cells   8000 x   125  f 0.549  r 0.90:  R      7389  told     13525  static     13869  same count     14837   told/R 1.83  static/R 1.88  count/R 2.01   share of rows: static 1.39%  same count 1.48%
+   laion clusters, a4, a16            cells   8000 x   125  f 0.549  r 0.95:  R     14278  told     23520  static     24317  same count     26301   told/R 1.65  static/R 1.70  count/R 1.84   share of rows: static 2.43%  same count 2.63%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.157
+   laion clusters, a4, a16, a64       cells  32000 x    31  f 0.593  r 0.90:  R      4525  told      8155  static      7942  same count      8694   told/R 1.80  static/R 1.76  count/R 1.92   share of rows: static 0.80%  same count 0.88%
+   laion clusters, a4, a16, a64       cells  32000 x    31  f 0.593  r 0.95:  R      8799  told     15188  static     14300  same count     16047   told/R 1.73  static/R 1.63  count/R 1.82   share of rows: static 1.44%  same count 1.62%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.179
+   glove clusters                     cells    592 x  1999  f 0.358  r 0.90:  R     56969  told     63676  static     67713  same count     72664   told/R 1.12  static/R 1.19  count/R 1.28   share of rows: static 5.72%  same count 6.14%
+   glove clusters                     cells    592 x  1999  f 0.358  r 0.95:  R    101092  told    106039  static    115090  same count    123311   told/R 1.05  static/R 1.14  count/R 1.22   share of rows: static 9.73%  same count 10.42%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.133
+   glove clusters, a4, a16            cells   9472 x   125  f 0.445  r 0.90:  R     24352  told     31800  static     31752  same count     33398   told/R 1.31  static/R 1.30  count/R 1.37   share of rows: static 2.68%  same count 2.82%
+   glove clusters, a4, a16            cells   9472 x   125  f 0.445  r 0.95:  R     45597  told     57224  static     56268  same count     59659   told/R 1.26  static/R 1.23  count/R 1.31   share of rows: static 4.75%  same count 5.04%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.124
+   glove clusters, a4, a16, a64       cells  37888 x    31  f 0.487  r 0.90:  R     15723  told     22695  static     22124  same count     22960   told/R 1.44  static/R 1.41  count/R 1.46   share of rows: static 1.88%  same count 1.95%
+   glove clusters, a4, a16, a64       cells  37888 x    31  f 0.487  r 0.95:  R     29986  told     42075  static     39613  same count     41388   told/R 1.40  static/R 1.32  count/R 1.38   share of rows: static 3.37%  same count 3.52%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.115

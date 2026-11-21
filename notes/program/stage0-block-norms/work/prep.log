@@ -1,0 +1,13 @@
+[     2s] k-means iteration 0 empty 0
+[     4s] k-means iteration 1 empty 0
+[     5s] k-means iteration 2 empty 0
+[     7s] k-means iteration 3 empty 0
+[     8s] k-means iteration 4 empty 0
+[    10s] k-means iteration 5 empty 0
+[    12s] k-means iteration 6 empty 0
+[    13s] k-means iteration 7 empty 0
+[    15s] cluster sizes min/median/max 159 861 3692
+[    15s] group sizes [23599, 5928, 26699, 50503, 10207, 5983, 4998, 18485, 3199, 18927, 20431, 11041]
+[    22s] Sigma_Q traces item / text 0.5178 0.73
+[    32s] thresholds, mean by kind [[0.6179999709129333, 0.5920000076293945, 0.5659999847412109, 0.5450000166893005], [0.7689999938011169, 0.7429999709129333, 0.7059999704360962, 0.6650000214576721], [0.9139999747276306, 0.8899999856948853, 0.8510000109672546, 0.8019999861717224]]
+[    32s] done

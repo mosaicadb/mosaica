@@ -1,0 +1,15 @@
+A. A2.1 in model M3, K 300 clusters of 100 to 400 rows, k 10, stop at the first read with M_used < 1
+   scores normal stop's tail normal order static: clusters read   2.4;  E X 0.439 +- 0.018  E M(true tail) 0.412  E M_used 0.412;  E Miss 0.412;  recall 0.9588;  share of queries with recall < 0.9: 0.073
+        lower half of M at the stop: E X 0.148, E M 0.139;  upper half: E X 0.731, E M 0.684
+   scores normal stop's tail normal order gap   : clusters read   2.4;  E X 0.423 +- 0.018  E M(true tail) 0.417  E M_used 0.417;  E Miss 0.391;  recall 0.9609;  share of queries with recall < 0.9: 0.071
+        lower half of M at the stop: E X 0.156, E M 0.141;  upper half: E X 0.691, E M 0.694
+   scores t5     stop's tail t5     order static: clusters read  51.3;  E X 0.943 +- 0.025  E M(true tail) 0.978  E M_used 0.978;  E Miss 0.909;  recall 0.9091;  share of queries with recall < 0.9: 0.233
+        lower half of M at the stop: E X 0.960, E M 0.962;  upper half: E X 0.927, E M 0.995
+   scores t5     stop's tail t5     order gap   : clusters read  43.4;  E X 0.995 +- 0.026  E M(true tail) 0.981  E M_used 0.981;  E Miss 0.937;  recall 0.9063;  share of queries with recall < 0.9: 0.239
+        lower half of M at the stop: E X 0.992, E M 0.969;  upper half: E X 0.999, E M 0.994
+   scores t5     stop's tail normal order static: clusters read   2.2;  E X 7.950 +- 0.122  E M(true tail) 7.900  E M_used 0.362;  E Miss 4.868;  recall 0.5132;  share of queries with recall < 0.9: 0.933
+        lower half of M at the stop: E X 4.913, E M 4.844;  upper half: E X 10.987, E M 10.956
+        kappa as the largest G/G_hat over unread clusters: median 6.48e+197, 10th pct 2.25e+142;  kappa as M/M_hat: mean 3036711309.89, median 27.33, 90th pct 301.19;  bound 1 - E[M/M_hat * M_hat]/k = 0.210
+
+B. A2.2: least value of E min(k, Bin(W, m/W)) / ((1/2) min(k, m)) over a grid
+   least ratio 1.2642 at (k, W, m) = (1, 100000, 1.0)  (the claim needs it to be at least 1)

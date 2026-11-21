@@ -1,0 +1,36 @@
+A. leaf floor: exact against closed form (v = 1; f the share explained by the last internal level)
+   M        L     f     r     rows exact   rows closed form   ratio   local exponent in M (exact) | 1 - f
+   1e+06    10  0.3  0.90        85084       103159         0.82   0.783 | 0.7
+   1e+06    10  0.3  0.99       311515       348411         0.89   0.863 | 0.7
+   1e+06    10  0.5  0.90        12442        17449         0.71   0.603 | 0.5
+   1e+06    10  0.5  0.99        67565        85225         0.79   0.699 | 0.5
+   1e+06    10  0.7  0.90         1284         2076         0.62   0.400 | 0.3
+   1e+06    10  0.7  0.99         7596        10893         0.70   0.493 | 0.3
+   1e+06   100  0.3  0.90       139042       167331         0.83   0.788 | 0.7
+   1e+06   100  0.3  0.99       419447       463895         0.90   0.873 | 0.7
+   1e+06   100  0.5  0.90        30642        42395         0.72   0.610 | 0.5
+   1e+06   100  0.5  0.99       131259       162370         0.81   0.715 | 0.5
+   1e+06   100  0.7  0.90         5032         7985         0.63   0.408 | 0.3
+   1e+06   100  0.7  0.99        23659        33078         0.72   0.510 | 0.3
+   1e+09    10  0.3  0.90     18404751     22664062         0.81   0.772 | 0.7
+   1e+09    10  0.3  0.99    113188550    129774571         0.87   0.841 | 0.7
+   1e+09    10  0.5  0.90       762862      1098986         0.69   0.587 | 0.5
+   1e+09    10  0.5  0.99      7675999     10081312         0.76   0.667 | 0.5
+   1e+09    10  0.7  0.90        19393        32566         0.60   0.384 | 0.3
+   1e+09    10  0.7  0.99       206501       311792         0.66   0.459 | 0.3
+   1e+09   100  0.3  0.90     30913280     37901785         0.82   0.775 | 0.7
+   1e+09   100  0.3  0.99    161351217    183679283         0.88   0.847 | 0.7
+   1e+09   100  0.5  0.90      1958185      2800294         0.70   0.591 | 0.5
+   1e+09   100  0.5  0.99     16249159     21101617         0.77   0.676 | 0.5
+   1e+09   100  0.7  0.90        79454       132071         0.60   0.388 | 0.3
+   1e+09   100  0.7  0.99       704987      1049395         0.67   0.469 | 0.3
+
+B. tree law where a level explains more than its share of the entropy (F 28, shares 0.6/0.25/0.15, top 64 of 21,952)
+   annealed level z_T 2.757; realised top-64 level: mean 2.667, median 2.633, p10 2.244, p90 3.057
+   level 1 (28 nodes, f 0.60, g 0.33): pooled 99th pct rank 10; mean of per-trial 99th pct 6.6; law at the annealed level 7.1; law at each trial's realised level, mean 7.9
+   level 2 (784 nodes, f 0.85, g 0.67): pooled 99th pct rank 53; mean of per-trial 99th pct 40.2; law at the annealed level 39.5; law at each trial's realised level, mean 52.9
+
+C. work exponent of a beam, eta = max_j (g_j - x^2 f_{j-1}); and positions that equalise the terms for A(t) piecewise linear
+   homogeneous A(t) = t: sup_t (t - A(t)) = 0.000;  D=2: eta 0.500  D=3: eta 0.333  D=4: eta 0.250  D=6: eta 0.167  D=10: eta 0.100
+   A(t) = t^2 (weak, convex): sup_t (t - A(t)) = 0.250;  D=2: eta 0.618  D=3: eta 0.484  D=4: eta 0.416  D=6: eta 0.349  D=10: eta 0.299
+   A(t) = sqrt t (strong, concave): sup_t (t - A(t)) = 0.000;  D=2: eta 0.382  D=3: eta 0.198  D=4: eta 0.114  D=6: eta 0.042  D=10: eta 0.007

@@ -1,0 +1,25 @@
+The build rule K ~ sqrt N with f = A(1/2) held fixed: local exponent of the static optimum and of R, N to 16 N
+   yahoo-like N 1e6                   cells    500 x  2000  f 0.455  r 0.90:  R     19721  told     29209  static     29625  same count     33319   told/R 1.48  static/R 1.50  count/R 1.69   share of rows: static 2.96%  same count 3.33%
+   yahoo-like N 1e6                   cells    500 x  2000  f 0.455  r 0.95:  R     36893  told     50565  static     50885  same count     57295   told/R 1.37  static/R 1.38  count/R 1.55   share of rows: static 5.09%  same count 5.73%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.164
+   yahoo-like N 1.6e7                 cells   2000 x  8000  f 0.455  r 0.90:  R    117387  told    205983  static    196976  same count    217920   told/R 1.75  static/R 1.68  count/R 1.86   share of rows: static 1.23%  same count 1.36%
+   yahoo-like N 1.6e7                 cells   2000 x  8000  f 0.455  r 0.95:  R    240484  told    402787  static    366332  same count    406445   told/R 1.67  static/R 1.52  count/R 1.69   share of rows: static 2.29%  same count 2.54%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.141
+      yahoo r 0.9: d ln rows / d ln N:  R 0.643   told 0.705   static 0.683   same count 0.677
+      yahoo r 0.95: d ln rows / d ln N:  R 0.676   told 0.748   static 0.712   same count 0.707
+   laion-like N 1e6                   cells    500 x  2000  f 0.480  r 0.90:  R     15300  told     25804  static     24730  same count     28331   told/R 1.69  static/R 1.62  count/R 1.85   share of rows: static 2.47%  same count 2.83%
+   laion-like N 1e6                   cells    500 x  2000  f 0.480  r 0.95:  R     28938  told     46498  static     42488  same count     48898   told/R 1.61  static/R 1.47  count/R 1.69   share of rows: static 4.25%  same count 4.89%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.167
+   laion-like N 1.6e7                 cells   2000 x  8000  f 0.480  r 0.90:  R     85323  told    150209  static    139664  same count    157453   told/R 1.76  static/R 1.64  count/R 1.85   share of rows: static 0.87%  same count 0.98%
+   laion-like N 1.6e7                 cells   2000 x  8000  f 0.480  r 0.95:  R    176882  told    301194  static    261711  same count    297683   told/R 1.70  static/R 1.48  count/R 1.68   share of rows: static 1.64%  same count 1.86%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.155
+      laion r 0.9: d ln rows / d ln N:  R 0.620   told 0.635   static 0.624   same count 0.619
+      laion r 0.95: d ln rows / d ln N:  R 0.653   told 0.674   static 0.656   same count 0.651
+   glove-like N 1e6                   cells    500 x  2000  f 0.380  r 0.90:  R     40970  told     52575  static     52213  same count     56195   told/R 1.28  static/R 1.27  count/R 1.37   share of rows: static 5.22%  same count 5.62%
+   glove-like N 1e6                   cells    500 x  2000  f 0.380  r 0.95:  R     73434  told     91132  static     88309  same count     95112   told/R 1.24  static/R 1.20  count/R 1.30   share of rows: static 8.83%  same count 9.51%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.132
+   glove-like N 1.6e7                 cells   2000 x  8000  f 0.380  r 0.90:  R    294947  told    352551  static    357385  same count    387541   told/R 1.20  static/R 1.21  count/R 1.31   share of rows: static 2.23%  same count 2.42%
+   glove-like N 1.6e7                 cells   2000 x  8000  f 0.380  r 0.95:  R    576366  told    655183  static    660648  same count    716609   told/R 1.14  static/R 1.15  count/R 1.24   share of rows: static 4.13%  same count 4.48%
+      sd of tau_k over trees and draws, in units of sqrt v: 0.132
+      glove r 0.9: d ln rows / d ln N:  R 0.712   told 0.686   static 0.694   same count 0.696
+      glove r 0.95: d ln rows / d ln N:  R 0.743   told 0.711   static 0.726   same count 0.728

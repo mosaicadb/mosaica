@@ -1,0 +1,114 @@
+# f12.py: numpy 2.2.6, scipy 1.15.3
+
+Checks of the exact formulas:
+  E_norm_pos vs MC: 1.168360 vs 1.166285 +- 0.001758
+  W at H=0 = 1.863950 (sum sqrt gam 1.863950); F2 with S = all at H=2: 1.170851, Theorem 1 k=3 term 1.170851
+
+0. ECSQ on every coordinate: steps common or shaped w_i = min(w0 sqrt(gam_1/gam_i), 6); E h = sum_j w_j sqrt((R^T Gam R)_jj)/sqrt(2 pi)
+    flat2          n=  2  H=   1.721 nats  E h=1.5958  W=0.84604  F2=1.2362 (k=2)  Phi=0.5316  | E h/W=1.8862  E h/F2=1.2909  E h/Phi=3.0018  aligned, common w0=2.0 off=0.5
+    flat2          n=  2  H=   5.616 nats  E h=0.19947  W=0.12067  F2=0.17632 (k=2)  Phi=0.07324  | E h/W=1.6530  E h/F2=1.1313  E h/Phi=2.7235  aligned, common w0=0.25 off=0.5
+    flat100        n=100  H=  86.033 nats  E h=79.788  W=42.302  F2=43.428 (k=100)  Phi=26.58  | E h/W=1.8862  E h/F2=1.8373  E h/Phi=3.0018  aligned, common w0=2.0 off=0.5
+    flat100        n=100  H= 280.783 nats  E h=9.9736  W=6.0336  F2=6.1942 (k=100)  Phi=3.662  | E h/W=1.6530  E h/F2=1.6102  E h/Phi=2.7235  aligned, common w0=0.25 off=0.5
+    1x1+99x0.0001  n=100  H=  86.033 nats  E h=1.5878  W=0.44296  F2=0.45475 (k=100)  Phi=0.27923  | E h/W=3.5845  E h/F2=3.4916  E h/Phi=5.6863  aligned, common w0=2.0 off=0.5
+    1x1+99x0.0001  n=100  H= 280.783 nats  E h=0.19847  W=0.063179  F2=0.064861 (k=100)  Phi=0.038348  | E h/W=3.1414  E h/F2=3.0600  E h/Phi=5.1756  aligned, common w0=0.25 off=0.5
+   smallest E h/W   = 1.64878  (flat20, n=20, H=98.511 nats, Haar, shaped w0=0.03 off=0.0)
+   smallest E h/F2  = 1.12842  (flat2, n=2, H=9.851 nats, Haar, shaped w0=0.03 off=0.0, F2 best k=2)
+   smallest E h/Phi = 2.71836  (flat100, n=100, H=492.553 nats, Haar, common w0=0.03 off=0.5)
+
+A. ECSQ (step w in whitened units) on the k leading coordinates; tail: (i) uncoded -> E h = inf, not evaluated;
+   (ii) whitened norm shells, (iii) dual-weighted norm shells M = gam^{1/4}, (iv) coarse midtread ECSQ per tail coordinate
+   smallest E h/W   = 1.03949  (flat100, n=100, H=3.830 nats, k=1 w=2.0 off=0.5; tail whitened norm uni0.15)
+   smallest E h/F2  = 1.01255  (flat100, n=100, H=3.830 nats, k=1 w=2.0 off=0.5; tail whitened norm uni0.15, F2 best k=100)
+   smallest E h/Phi = 1.20875  (flat100, n=100, H=2.645 nats, k=1 w=2.0 off=0.5; tail whitened norm uni0.5)
+
+B. norm only (message = shell index of ||M z||): M = I, gam^{1/4} (dual weights), gam^{-1/4}; geometric and uniform radial grids
+    flat100        n=100  H=   0.722 nats  E h=109.36  W=99.281  F2=101.92 (k=100)  Phi=91.63  | E h/W=1.1016  E h/F2=1.0730  E h/Phi=1.1935  M=I, grid uni 2.0
+    flat100        n=100  H=   1.148 nats  E h=104.49  W=98.858  F2=101.49 (k=100)  Phi=89.483  | E h/W=1.0570  E h/F2=1.0296  E h/Phi=1.1677  M=I, grid uni 1.0
+    flat100        n=100  H=   1.784 nats  E h=102  W=98.231  F2=100.85 (k=100)  Phi=86.953  | E h/W=1.0383  E h/F2=1.0114  E h/Phi=1.1730  M=I, grid uni 0.5
+    flat100        n=100  H=   2.683 nats  E h=100.5  W=97.352  F2=99.943 (k=100)  Phi=84.091  | E h/W=1.0323  E h/F2=1.0056  E h/Phi=1.1951  M=I, grid uni 0.2
+    flat100        n=100  H=   4.067 nats  E h=99.751  W=96.015  F2=98.57 (k=100)  Phi=80.559  | E h/W=1.0389  E h/F2=1.0120  E h/Phi=1.2382  M=I, grid uni 0.05
+    flat100        n=100  H=   0.722 nats  E h=109.36  W=99.281  F2=101.92 (k=100)  Phi=91.63  | E h/W=1.1016  E h/F2=1.0730  E h/Phi=1.1935  M=gam^1/4, grid uni 2.0
+    flat100        n=100  H=   1.148 nats  E h=104.49  W=98.858  F2=101.49 (k=100)  Phi=89.483  | E h/W=1.0570  E h/F2=1.0296  E h/Phi=1.1677  M=gam^1/4, grid uni 1.0
+    flat100        n=100  H=   1.784 nats  E h=102  W=98.231  F2=100.85 (k=100)  Phi=86.953  | E h/W=1.0383  E h/F2=1.0114  E h/Phi=1.1730  M=gam^1/4, grid uni 0.5
+    flat100        n=100  H=   2.683 nats  E h=100.5  W=97.352  F2=99.943 (k=100)  Phi=84.091  | E h/W=1.0323  E h/F2=1.0056  E h/Phi=1.1951  M=gam^1/4, grid uni 0.2
+    flat100        n=100  H=   0.722 nats  E h=109.36  W=99.281  F2=101.92 (k=100)  Phi=91.63  | E h/W=1.1016  E h/F2=1.0730  E h/Phi=1.1935  M=gam^-1/4, grid uni 2.0
+    flat100        n=100  H=   1.148 nats  E h=104.49  W=98.858  F2=101.49 (k=100)  Phi=89.483  | E h/W=1.0570  E h/F2=1.0296  E h/Phi=1.1677  M=gam^-1/4, grid uni 1.0
+    flat100        n=100  H=   1.784 nats  E h=102  W=98.231  F2=100.85 (k=100)  Phi=86.953  | E h/W=1.0383  E h/F2=1.0114  E h/Phi=1.1730  M=gam^-1/4, grid uni 0.5
+    flat100        n=100  H=   2.683 nats  E h=100.5  W=97.352  F2=99.943 (k=100)  Phi=84.091  | E h/W=1.0323  E h/F2=1.0056  E h/Phi=1.1951  M=gam^-1/4, grid uni 0.2
+    1x1+99x0.0001  n=100  H=   0.722 nats  E h=8.9019  W=1.476  F2=1.7913 (k=1)  Phi=1.2921  | E h/W=6.0310  E h/F2=4.9695  E h/Phi=6.8894  M=I, grid uni 2.0
+    1x1+99x0.0001  n=100  H=   1.148 nats  E h=8.505  W=1.3072  F2=1.513 (k=1)  Phi=1.1745  | E h/W=6.5061  E h/F2=5.6212  E h/Phi=7.2416  M=I, grid uni 1.0
+    1x1+99x0.0001  n=100  H=   1.784 nats  E h=8.3021  W=1.1579  F2=1.2668 (k=1)  Phi=1.0709  | E h/W=7.1699  E h/F2=6.5534  E h/Phi=7.7528  M=I, grid uni 0.5
+    1x1+99x0.0001  n=100  H=   2.683 nats  E h=8.1803  W=1.0583  F2=1.1027 (k=1)  Phi=0.98898  | E h/W=7.7295  E h/F2=7.4187  E h/Phi=8.2714  M=I, grid uni 0.2
+    1x1+99x0.0001  n=100  H=   4.067 nats  E h=8.1194  W=1.0071  F2=1.0322 (k=100)  Phi=0.91685  | E h/W=8.0619  E h/F2=7.8664  E h/Phi=8.8558  M=I, grid uni 0.05
+    1x1+99x0.0001  n=100  H=   1.559 nats  E h=2.0048  W=1.2002  F2=1.3366 (k=1)  Phi=1.101  | E h/W=1.6703  E h/F2=1.4999  E h/Phi=1.8208  M=gam^1/4, grid uni 2.0
+    1x1+99x0.0001  n=100  H=   2.202 nats  E h=1.9155  W=1.1006  F2=1.1723 (k=1)  Phi=1.0269  | E h/W=1.7404  E h/F2=1.6339  E h/Phi=1.8652  M=gam^1/4, grid uni 1.0
+    1x1+99x0.0001  n=100  H=   2.872 nats  E h=1.8678  W=1.0466  F2=1.0833 (k=1)  Phi=0.97663  | E h/W=1.7847  E h/F2=1.7242  E h/Phi=1.9125  M=gam^1/4, grid uni 0.5
+    1x1+99x0.0001  n=100  H=   3.781 nats  E h=1.84  W=1.0128  F2=1.0351 (k=100)  Phi=0.92898  | E h/W=1.8167  E h/F2=1.7776  E h/Phi=1.9806  M=gam^1/4, grid uni 0.2
+    1x1+99x0.0001  n=100  H=   0.723 nats  E h=87.068  W=1.4755  F2=1.7905 (k=1)  Phi=1.2917  | E h/W=59.0093  E h/F2=48.6292  E h/Phi=67.4039  M=gam^-1/4, grid uni 2.0
+    1x1+99x0.0001  n=100  H=   1.152 nats  E h=83.186  W=1.3059  F2=1.5108 (k=1)  Phi=1.1736  | E h/W=63.6997  E h/F2=55.0593  E h/Phi=70.8829  M=gam^-1/4, grid uni 1.0
+    1x1+99x0.0001  n=100  H=   1.789 nats  E h=81.201  W=1.1571  F2=1.2655 (k=1)  Phi=1.0703  | E h/W=70.1749  E h/F2=64.1632  E h/Phi=75.8689  M=gam^-1/4, grid uni 0.5
+    1x1+99x0.0001  n=100  H=   2.688 nats  E h=80.009  W=1.058  F2=1.1021 (k=1)  Phi=0.98865  | E h/W=75.6237  E h/F2=72.5970  E h/Phi=80.9280  M=gam^-1/4, grid uni 0.2
+   smallest E h/W   = 1.03232  (flat100, n=100, H=2.683 nats, M=I, grid uni 0.2)
+   smallest E h/F2  = 1.00556  (flat100, n=100, H=2.683 nats, M=I, grid uni 0.2, F2 best k=100)
+   smallest E h/Phi = 1.16769  (flat100, n=100, H=1.148 nats, M=I, grid uni 1.0)
+
+C. sign of the k leading coordinates + shell of ||M z|| (cells: orthant-part x shell, not products)
+   h = rho_{j+1} ||(M^-1 y) with head entries positive-parted||, y = Gam^1/2 g; when k = n and y is all negative the
+   support is -rho_j min_i |y_i|/m_i (included exactly); P = 2^-k P(shell)
+   smallest E h/W   = 1.03786  (flat100, n=100, H=2.975 nats, k=1 signs, M=I, grid uni 0.3)
+   smallest E h/F2  = 1.01095  (flat100, n=100, H=2.975 nats, k=1 signs, M=I, grid uni 0.3, F2 best k=100)
+   smallest E h/Phi = 1.20142  (flat100, n=100, H=1.841 nats, k=1 signs, M=I, grid uni 1.0)
+
+D. 2-D lattice quantisers (whitened coordinates): cells = Voronoi cells of T L, L hexagonal or square, T = s * rot * diag(1, r)
+   E h = perimeter(Gam^1/2 T V)/(2 sqrt(2 pi)) for every cell (exact); H = -sum P ln P over all cells with P > 1e-16 (exact quadrature)
+   check: hexagon area 0.866025 (expected sqrt(3)/2 = 0.866025), measure of a cell = 0.01232769 via quadrature
+   smallest E h/W   = 1.54082  ((1,1), n=2, H=5.090 nats, hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000)
+   smallest E h/F2  = 1.05453  ((1,1), n=2, H=5.090 nats, hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000, F2 best k=2)
+   smallest E h/Phi = 2.53750  ((1,1), n=2, H=5.090 nats, hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000)
+
+E. D4 lattice quantisers in 4-D: lattice points T*Z with Z in D4 (integer, even sum); Voronoi cell = 24-cell, vertices
+   (+-1,0,0,0) and (+-1/2,...) up to permutation; T = s diag(a); E h by Monte Carlo (max over 24 vertices, s.e. given);
+   P per cell = vol(TV) * mean of phi over 4,000 uniform points in the cell (quadrature error by halving)
+   uniform points in the 24-cell: 4639; volume check 16 * acceptance = 2.0618 (should be 2)
+    flat4            isotropic s=2.0  H=2.8679 +- 6.2e-04  E h=3.36479 +- 0.00620  E h/W=1.7230  E h/F2=1.3221
+    flat4            isotropic s=1.2  H=4.5433 +- 6.2e-04  E h=2.01888 +- 0.00372  E h/W=1.5716  E h/F2=1.2059
+    flat4            isotropic s=0.8  H=6.0093 +- 3.0e-04  E h=1.34592 +- 0.00248  E h/W=1.5115  E h/F2=1.1598
+    flat4            dual      s=2.0  H=2.8679 +- 6.2e-04  E h=3.36479 +- 0.00620  E h/W=1.7230  E h/F2=1.3221
+    flat4            dual      s=1.2  H=4.5433 +- 6.2e-04  E h=2.01888 +- 0.00372  E h/W=1.5716  E h/F2=1.2059
+    flat4            dual      s=0.8  H=6.0093 +- 3.0e-04  E h=1.34592 +- 0.00248  E h/W=1.5115  E h/F2=1.1598
+    (1,1,.1,.1)      isotropic s=2.0  H=2.8679 +- 6.2e-04  E h=2.41574 +- 0.00560  E h/W=2.1997  E h/F2=1.6879
+    (1,1,.1,.1)      isotropic s=1.2  H=4.5433 +- 6.2e-04  E h=1.44944 +- 0.00336  E h/W=2.0064  E h/F2=1.5396
+    (1,1,.1,.1)      isotropic s=0.8  H=6.0093 +- 3.0e-04  E h=0.96629 +- 0.00224  E h/W=1.9297  E h/F2=1.4808
+    (1,1,.1,.1)      dual      s=2.0  H=1.9195 +- 5.9e-03  E h=2.69576 +- 0.00543  E h/W=1.9277  E h/F2=1.4860
+    (1,1,.1,.1)      dual      s=1.2  H=3.6316 +- 3.0e-04  E h=1.61745 +- 0.00326  E h/W=1.7827  E h/F2=1.3679
+    (1,1,.1,.1)      dual      s=0.8  H=4.9904 +- 2.2e-04  E h=1.07830 +- 0.00217  E h/W=1.6692  E h/F2=1.2808
+    (1,.01,.01,.01)  isotropic s=2.0  H=2.8679 +- 6.2e-04  E h=1.61316 +- 0.00582  E h/W=4.6451  E h/F2=3.5644
+    (1,.01,.01,.01)  isotropic s=1.2  H=4.5433 +- 6.2e-04  E h=0.96790 +- 0.00349  E h/W=4.2369  E h/F2=3.2511
+    (1,.01,.01,.01)  isotropic s=0.8  H=6.0093 +- 3.0e-04  E h=0.64526 +- 0.00233  E h/W=4.0750  E h/F2=3.1269
+    (1,.01,.01,.01)  dual      s=2.0  H=0.7336 +- 5.3e-02  E h=1.85070 +- 0.00509  E h/W=2.3722  E h/F2=1.6953
+    (1,.01,.01,.01)  dual      s=1.2  H=1.9819 +- 1.5e-02  E h=1.11042 +- 0.00305  E h/W=2.5364  E h/F2=1.9661
+    (1,.01,.01,.01)  dual      s=0.8  H=3.1664 +- 2.9e-03  E h=0.74028 +- 0.00203  E h/W=2.2968  E h/F2=1.7624
+   smallest E h/W   = 1.51150 +- 0.00278 (flat4, n=4, H=6.009 nats, isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04)
+   smallest E h/F2  = 1.15984 +- 0.00214 (flat4, n=4, H=6.009 nats, isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04, F2 best k=4)
+   smallest E h/Phi = 2.46901 +- 0.00455 (flat4, n=4, H=6.009 nats, isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04)
+
+Summary: smallest E h / bound per family (W = F1; F2 = max over the top-k sets tested; Phi = the stage-0 conjecture)
+   0: ECSQ every coordinate     /W   1.64878  +- 0.0e+00   flat20 n=20 H=98.511  Haar, shaped w0=0.03 off=0.0
+   0: ECSQ every coordinate     /F2  1.12842  +- 0.0e+00   flat2 n=2 H=9.851  Haar, shaped w0=0.03 off=0.0, F2 best k=2
+   0: ECSQ every coordinate     /Phi  2.71836  +- 0.0e+00   flat100 n=100 H=492.553  Haar, common w0=0.03 off=0.5
+   A: ECSQ head + bounded tail  /W   1.03949  +- 0.0e+00   flat100 n=100 H=3.830  k=1 w=2.0 off=0.5; tail whitened norm uni0.15
+   A: ECSQ head + bounded tail  /F2  1.01255  +- 0.0e+00   flat100 n=100 H=3.830  k=1 w=2.0 off=0.5; tail whitened norm uni0.15, F2 best k=100
+   A: ECSQ head + bounded tail  /Phi  1.20875  +- 0.0e+00   flat100 n=100 H=2.645  k=1 w=2.0 off=0.5; tail whitened norm uni0.5
+   B: norm only                 /W   1.03232  +- 0.0e+00   flat100 n=100 H=2.683  M=I, grid uni 0.2
+   B: norm only                 /F2  1.00556  +- 0.0e+00   flat100 n=100 H=2.683  M=I, grid uni 0.2, F2 best k=100
+   B: norm only                 /Phi  1.16769  +- 0.0e+00   flat100 n=100 H=1.148  M=I, grid uni 1.0
+   C: sign + norm               /W   1.03786  +- 0.0e+00   flat100 n=100 H=2.975  k=1 signs, M=I, grid uni 0.3
+   C: sign + norm               /F2  1.01095  +- 0.0e+00   flat100 n=100 H=2.975  k=1 signs, M=I, grid uni 0.3, F2 best k=100
+   C: sign + norm               /Phi  1.20142  +- 0.0e+00   flat100 n=100 H=1.841  k=1 signs, M=I, grid uni 1.0
+   D: 2-D lattice               /W   1.54082  +- 0.0e+00   (1,1) n=2 H=5.090  hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000
+   D: 2-D lattice               /F2  1.05453  +- 0.0e+00   (1,1) n=2 H=5.090  hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000, F2 best k=2
+   D: 2-D lattice               /Phi  2.53750  +- 0.0e+00   (1,1) n=2 H=5.090  hex, angle 0.000, aspect 1.000, scale 0.35; mass covered 1.000000000000
+   E: D4 lattice                /W   1.51150  +- 2.8e-03   flat4 n=4 H=6.009  isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04
+   E: D4 lattice                /F2  1.15984  +- 2.1e-03   flat4 n=4 H=6.009  isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04, F2 best k=4
+   E: D4 lattice                /Phi  2.46901  +- 4.5e-03   flat4 n=4 H=6.009  isotropic, scale 0.8; mass 1.000000; H +- 3.0e-04
+exit 0

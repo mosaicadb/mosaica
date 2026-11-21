@@ -1,0 +1,2 @@
+part 1: 2500 product codes, n <= 5, all subsets S: smallest E h / max_S V_S = 1.000040 at (n, S, H) = (1, (0,), 4.895388245636946); smallest with n >= 2: 1.129861 at (2, (0, 1), 6.403); smallest E h / W = 1.6488
+smallest ratio over everything run: 1.0000; a value below 1 would refute the floor

@@ -1,0 +1,4 @@
+notes/program/**/work/
+notes/program/**/__pycache__/
+*.npz
+*.npy

@@ -1,0 +1,27 @@
+A. cascade against W (F 28, D 3, L 64, eps 0.01, 400 trees); counts are means per tree
+   shares (0.33, 0.33, 0.33): W     4508 = 28 + 487 + 3993;  cascade scored     4333 = 28 + 487 + 3819;  level-2 nodes above their cut 141.7 (B_2 142.6), of which with parent kept 136.4;  targets reached 0.9889 (floor 0.98)
+   shares (0.15, 0.25, 0.6): W    12187 = 28 + 674 + 11486;  cascade scored    11785 = 28 + 676 + 11081;  level-2 nodes above their cut 410.3 (B_2 410.2), of which with parent kept 395.8;  targets reached 0.9888 (floor 0.98)
+   shares (0.2, 0.3, 0.5): W     9006 = 28 + 629 + 8349;  cascade scored     8656 = 28 + 625 + 8003;  level-2 nodes above their cut 297.6 (B_2 298.2), of which with parent kept 285.8;  targets reached 0.9878 (floor 0.98)
+   shares (0.6, 0.25, 0.15): W     1333 = 28 + 199 + 1106;  cascade scored     1246 = 28 + 197 + 1021;  level-2 nodes above their cut 38.0 (B_2 39.5), of which with parent kept 36.5;  targets reached 0.9910 (floor 0.98)
+
+B. the terms of W at the sizes of A1.9 (L 10, total miss 0.1 split over the pruning levels)
+   yahoo clusters, rows                 terms, count (ln count/ln N | g_j - f_(j-1)):       322 (0.43 | 0.43);     28258 (0.76 | 0.58);  largest by count: level 2, by exponent: level 2
+   yahoo groups, clusters, rows         terms, count (ln count/ln N | g_j - f_(j-1)):        64 (0.31 | 0.31);        67 (0.31 | 0.15);     49391 (0.80 | 0.58);  largest by count: level 3, by exponent: level 3
+   yahoo clusters, a16, rows            terms, count (ln count/ln N | g_j - f_(j-1)):       322 (0.43 | 0.43);       393 (0.44 | 0.22);     18866 (0.73 | 0.47);  largest by count: level 3, by exponent: level 3
+   yahoo clusters, a4, a16, a64, rows   terms, count (ln count/ln N | g_j - f_(j-1)):       322 (0.43 | 0.43);       158 (0.38 | 0.12);       374 (0.44 | 0.16);       925 (0.51 | 0.21);     18968 (0.73 | 0.42);  largest by count: level 5, by exponent: level 1
+   LAION clusters, rows                 terms, count (ln count/ln N | g_j - f_(j-1)):       501 (0.45 | 0.45);     28039 (0.74 | 0.55);  largest by count: level 2, by exponent: level 2
+   LAION groups, clusters, rows         terms, count (ln count/ln N | g_j - f_(j-1)):        63 (0.30 | 0.30);        98 (0.33 | 0.17);     50402 (0.78 | 0.55);  largest by count: level 3, by exponent: level 3
+   LAION clusters, a16, rows            terms, count (ln count/ln N | g_j - f_(j-1)):       501 (0.45 | 0.45);       400 (0.43 | 0.20);     19727 (0.72 | 0.45);  largest by count: level 3, by exponent: level 1
+   LAION clusters, a4, a16, a64, rows   terms, count (ln count/ln N | g_j - f_(j-1)):       501 (0.45 | 0.45);       159 (0.37 | 0.10);       374 (0.43 | 0.14);      1021 (0.50 | 0.20);     21649 (0.72 | 0.41);  largest by count: level 5, by exponent: level 1
+   glove clusters, rows                 terms, count (ln count/ln N | g_j - f_(j-1)):       622 (0.46 | 0.46);     70813 (0.80 | 0.64);  largest by count: level 2, by exponent: level 2
+   glove groups, clusters, rows         terms, count (ln count/ln N | g_j - f_(j-1)):        66 (0.30 | 0.30);       202 (0.38 | 0.26);    121713 (0.84 | 0.64);  largest by count: level 3, by exponent: level 3
+   glove clusters, a16, rows            terms, count (ln count/ln N | g_j - f_(j-1)):       622 (0.46 | 0.46);      1048 (0.50 | 0.30);     56609 (0.78 | 0.55);  largest by count: level 3, by exponent: level 3
+   glove clusters, a4, a16, a64, rows   terms, count (ln count/ln N | g_j - f_(j-1)):       622 (0.46 | 0.46);       391 (0.43 | 0.20);      1078 (0.50 | 0.25);      2727 (0.57 | 0.30);     63301 (0.79 | 0.51);  largest by count: level 5, by exponent: level 5
+
+C. realised top-L level over z_REM(L), against sum over the hull of sqrt(df dg) (F 28, D 3, 200 trees)
+   shares (0.6, 0.25, 0.15): hull sum 0.959, sum over the levels 0.959;  L=1: 0.901  L=8: 0.933  L=64: 0.966  L=512: 0.999
+   shares (0.8, 0.15, 0.05): hull sum 0.869, sum over the levels 0.869;  L=1: 0.803  L=8: 0.849  L=64: 0.911  L=512: 0.978
+   shares (0.9, 0.07, 0.03): hull sum 0.800, sum over the levels 0.800;  L=1: 0.724  L=8: 0.781  L=64: 0.862  L=512: 0.976
+   shares (0.34, 0.33, 0.33): hull sum 1.000, sum over the levels 1.000;  L=1: 0.988  L=8: 0.983  L=64: 0.990  L=512: 0.996
+   shares (0.15, 0.25, 0.6): hull sum 1.000, sum over the levels 0.959;  L=1: 1.016  L=8: 0.997  L=64: 0.995  L=512: 0.995
+   shares (0.6, 0.07, 0.33): hull sum 0.964, sum over the levels 0.932;  L=1: 0.929  L=8: 0.930  L=64: 0.953  L=512: 0.980

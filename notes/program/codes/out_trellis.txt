@@ -1,0 +1,14 @@
+R=1 L=1  states 1     training D 0.3649 (4.38 dB); test tan 0.7546; / built 1.000; / bound 1.307; one 16-entry lookup per position
+R=1 L=4  states 8     training D 0.3200 (4.95 dB); test tan 0.6868; / built 0.910; / bound 1.190; one 16-entry lookup per position
+R=1 L=6  states 32    training D 0.2925 (5.34 dB); test tan 0.6429; / built 0.852; / bound 1.114; a 64-entry table per position
+R=1 L=8  states 128   training D 0.2754 (5.60 dB); test tan 0.6302; / built 0.835; / bound 1.092; a 256-entry table per position
+R=1 L=10 states 512   training D 0.2612 (5.83 dB); test tan 0.6141; / built 0.814; / bound 1.064; a 1024-entry table per position
+R=2 L=2  states 1     training D 0.1178 (9.29 dB); test tan 0.3650; / built 0.995; / bound 1.414; one 16-entry lookup per position
+R=2 L=4  states 4     training D 0.1027 (9.89 dB); test tan 0.3407; / built 0.928; / bound 1.319; one 16-entry lookup per position
+R=2 L=6  states 16    training D 0.0862 (10.64 dB); test tan 0.3108; / built 0.847; / bound 1.204; a 64-entry table per position
+R=2 L=8  states 64    training D 0.0772 (11.12 dB); test tan 0.2937; / built 0.800; / bound 1.137; a 256-entry table per position
+R=2 L=10 states 256   training D 0.0714 (11.46 dB); test tan 0.2847; / built 0.776; / bound 1.103; a 1024-entry table per position
+
+real	0m39.810s
+user	0m40.102s
+sys	0m0.206s

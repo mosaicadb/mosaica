@@ -1,0 +1,20 @@
+seed 1
+--- 12_p1: m = 256, rises [1, 2], streams [('ph', 2, [0, 1], [1.0, 0.5], [1, 0])], emphasis None, 781 training blocks, s
+  rise 1: stream code tan 0.7547; built nested 0.7538; ratio 1.001; stream / bound 1.307; built / bound 1.306
+  rise 2: stream code tan 0.3407; built nested 0.3653; ratio 0.933; stream / bound 1.320; built / bound 1.415
+seed 1
+--- q12_p1: m = 256, rises [0.25, 1, 2], streams [('ph', 2, [1, 2], [1.0, 0.5], [1, 0], 2, (256, 1))], emphasis None, 78
+  rise 0.25: stream code tan 2.3111; built nested 2.3236; ratio 0.995; stream / bound 1.487; built / bound 1.495
+  rise 1: stream code tan 0.7508; built nested 0.7538; ratio 0.996; stream / bound 1.300; built / bound 1.306
+  rise 2: stream code tan 0.3423; built nested 0.3653; ratio 0.937; stream / bound 1.326; built / bound 1.415
+seed 2
+--- 12_p1: m = 256, rises [1, 2], streams [('ph', 2, [0, 1], [1.0, 0.5], [1, 0])], emphasis None, 781 training blocks, s
+  rise 1: stream code tan 0.7551; built nested 0.7538; ratio 1.002; stream / bound 1.308; built / bound 1.306
+  rise 2: stream code tan 0.3407; built nested 0.3653; ratio 0.933; stream / bound 1.320; built / bound 1.415
+seed 2
+--- q12_p1: m = 256, rises [0.25, 1, 2], streams [('ph', 2, [1, 2], [1.0, 0.5], [1, 0], 2, (256, 1))], emphasis None, 78
+  rise 0.25: stream code tan 2.3122; built nested 2.3236; ratio 0.995; stream / bound 1.488; built / bound 1.495
+  rise 1: stream code tan 0.7513; built nested 0.7538; ratio 0.997; stream / bound 1.301; built / bound 1.306
+  rise 2: stream code tan 0.3421; built nested 0.3653; ratio 0.936; stream / bound 1.325; built / bound 1.415
+        print('seed', s); e.run(n, seed=s)
+	Maximum resident set size (kbytes): 105808

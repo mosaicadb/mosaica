@@ -1,0 +1,43 @@
+# measured.py: numpy 2.2.6, scipy 1.15.3
+
+group 12 (spec_v1, 49674 items, n = 768, sum sqrt(gamma) = 0.0728)
+| code bytes | bits B | Thm 1 | Thm 2 | Thm 3 | best proved | Phi(B ln 2) | Phi/Thm 3 | Phi/best proved | W = conjectured floor = F1 | Phi/W | F2 (best k) | Thm 3 head + Phi tail (conditional) | uniform code width | escape code width | escape/Phi | escape/W | escape/F2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 48 | 0.0318 | 0.0092 | 0.0237 | 0.0318 | 0.0361 | 1.52 | 1.135 | 0.0453 | 0.797 | 0.0462 (48) | 0.0361 | 0.0724 | 0.0724 | 2.01 | 1.60 | 1.57 |
+| 4 | 80 | 0.0278 | 0.0037 | 0.0186 | 0.0278 | 0.0295 | 1.58 | 1.060 | 0.0379 | 0.778 | 0.0386 (64) | 0.0295 | 0.0534 | 0.0539 | 1.83 | 1.42 | 1.40 |
+| 8 | 112 | 0.0247 | 0.0014 | 0.0156 | 0.0247 | 0.0250 | 1.60 | 1.014 | 0.0327 | 0.765 | 0.0332 (80) | 0.0250 | 0.0446 | 0.0445 | 1.78 | 1.36 | 1.34 |
+| 16 | 176 | 0.0204 | 0.0000 | 0.0123 | 0.0204 | 0.0193 | 1.56 | 0.946 | 0.0258 | 0.748 | 0.0261 (108) | 0.0193 | 0.0344 | 0.0339 | 1.76 | 1.31 | 1.30 |
+| 32 | 304 | 0.0150 | 0.0000 | 0.0091 | 0.0150 | 0.0130 | 1.43 | 0.866 | 0.0180 | 0.723 | 0.0181 (167) | 0.0130 | 0.0238 | 0.0229 | 1.76 | 1.28 | 1.26 |
+| 96 | 816 | 0.0063 | 0.0000 | 0.0038 | 0.0063 | 0.0046 | 1.20 | 0.729 | 0.0068 | 0.674 | 0.0068 (337) | 0.0046 | 0.0095 | 0.0087 | 1.90 | 1.28 | 1.27 |
+
+group 2 (spec_v1, 34396 items, n = 768, sum sqrt(gamma) = 0.1523)
+| code bytes | bits B | Thm 1 | Thm 2 | Thm 3 | best proved | Phi(B ln 2) | Phi/Thm 3 | Phi/best proved | W = conjectured floor = F1 | Phi/W | F2 (best k) | Thm 3 head + Phi tail (conditional) | uniform code width | escape code width | escape/Phi | escape/W | escape/F2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 48 | 0.0671 | 0.0166 | 0.0483 | 0.0671 | 0.0739 | 1.53 | 1.102 | 0.0934 | 0.791 | 0.0955 (48) | 0.0739 | 0.1520 | 0.1520 | 2.06 | 1.63 | 1.59 |
+| 4 | 80 | 0.0577 | 0.0057 | 0.0381 | 0.0577 | 0.0599 | 1.57 | 1.036 | 0.0775 | 0.772 | 0.0790 (64) | 0.0599 | 0.1115 | 0.1128 | 1.88 | 1.45 | 1.43 |
+| 8 | 112 | 0.0509 | 0.0015 | 0.0317 | 0.0509 | 0.0505 | 1.59 | 0.994 | 0.0666 | 0.759 | 0.0676 (78) | 0.0505 | 0.0928 | 0.0924 | 1.83 | 1.39 | 1.37 |
+| 16 | 176 | 0.0412 | 0.0000 | 0.0249 | 0.0412 | 0.0385 | 1.54 | 0.934 | 0.0518 | 0.742 | 0.0525 (107) | 0.0385 | 0.0707 | 0.0694 | 1.80 | 1.34 | 1.32 |
+| 32 | 304 | 0.0295 | 0.0000 | 0.0178 | 0.0295 | 0.0254 | 1.42 | 0.860 | 0.0352 | 0.720 | 0.0356 (161) | 0.0254 | 0.0479 | 0.0459 | 1.81 | 1.30 | 1.29 |
+| 96 | 816 | 0.0115 | 0.0000 | 0.0070 | 0.0115 | 0.0085 | 1.22 | 0.739 | 0.0126 | 0.675 | 0.0127 (320) | 0.0085 | 0.0180 | 0.0164 | 1.93 | 1.30 | 1.29 |
+
+Scan over code bytes 0..96 (B = 8 bytes + 48) on every group of the three spectrum files:
+  file             groups  min over groups and 4..32 B of Phi/Thm3   max of Phi/Thm1 at 4 B   first byte count where Phi < Thm1 (range over groups)
+  spec_v1.json        16    1.326                                     1.073 (min 0.950)          1..11 bytes
+  spec2_v2.json       16    1.326                                     1.073 (min 0.950)          1..11 bytes
+  spec2_n128.json     16    1.003                                     0.812 (min 0.737)          0..0 bytes
+
+Where Phi stands against Theorem 1 at high rate (one group, spec_v1 group 12):
+     0 B: Phi/Thm1 1.135  Phi/Thm3 1.523  Phi/conj 0.797  best proved/conj 0.702  max(Phi, best proved)/conj 0.797
+     4 B: Phi/Thm1 1.060  Phi/Thm3 1.582  Phi/conj 0.778  best proved/conj 0.733  max(Phi, best proved)/conj 0.778
+     8 B: Phi/Thm1 1.014  Phi/Thm3 1.601  Phi/conj 0.765  best proved/conj 0.755  max(Phi, best proved)/conj 0.765
+    12 B: Phi/Thm1 0.978  Phi/Thm3 1.617  Phi/conj 0.756  best proved/conj 0.773  max(Phi, best proved)/conj 0.773
+    16 B: Phi/Thm1 0.946  Phi/Thm3 1.564  Phi/conj 0.748  best proved/conj 0.790  max(Phi, best proved)/conj 0.790
+    24 B: Phi/Thm1 0.900  Phi/Thm3 1.488  Phi/conj 0.734  best proved/conj 0.816  max(Phi, best proved)/conj 0.816
+    32 B: Phi/Thm1 0.866  Phi/Thm3 1.431  Phi/conj 0.723  best proved/conj 0.835  max(Phi, best proved)/conj 0.835
+    48 B: Phi/Thm1 0.817  Phi/Thm3 1.349  Phi/conj 0.707  best proved/conj 0.865  max(Phi, best proved)/conj 0.865
+    64 B: Phi/Thm1 0.781  Phi/Thm3 1.290  Phi/conj 0.693  best proved/conj 0.888  max(Phi, best proved)/conj 0.888
+    96 B: Phi/Thm1 0.729  Phi/Thm3 1.204  Phi/conj 0.674  best proved/conj 0.924  max(Phi, best proved)/conj 0.924
+   192 B: Phi/Thm1 0.673  Phi/Thm3 1.111  Phi/conj 0.642  best proved/conj 0.954  max(Phi, best proved)/conj 0.954
+   384 B: Phi/Thm1 0.654  Phi/Thm3 1.079  Phi/conj 0.633  best proved/conj 0.968  max(Phi, best proved)/conj 0.968
+   576 B: Phi/Thm1 0.618  Phi/Thm3 1.020  Phi/conj 0.617  best proved/conj 0.998  max(Phi, best proved)/conj 0.998
+exit 0

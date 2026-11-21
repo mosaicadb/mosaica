@@ -1,0 +1,17 @@
+eps=1 start=grid(0.625,0.625) iters=150000 seed=7 | start: H=3.810 Eh=0.4987 ratio=1.1466 | end: cells=289 H=3.811 Eh=0.4983 W=0.2975 V1=0.3819 V2=0.3819 V12=0.4346  Eh/W=1.6750  Eh/maxV=1.1464  accepted=660
+eps=1 start=hex(0.625,0.54) iters=150000 seed=7 | start: H=3.968 Eh=0.4554 ratio=1.1330 | end: cells=313 H=3.974 Eh=0.4533 W=0.2742 V1=0.3521 V2=0.3521 V12=0.4006  Eh/W=1.6531  Eh/maxV=1.1314  accepted=334
+eps=1 start=hex(1.25,1.08) iters=150000 seed=7 | start: H=2.633 Eh=0.8996 ratio=1.1486 | end: cells=93 H=2.623 Eh=0.8982 W=0.5388 V1=0.6918 V2=0.6918 V12=0.7872  Eh/W=1.6672  Eh/maxV=1.1410  accepted=1646
+eps=1 start=voronoi(40,1) iters=150000 seed=7 | start: H=3.510 Eh=0.9673 ratio=1.9143 | end: cells=34 H=3.116 Eh=0.7773 W=0.4212 V1=0.5408 V2=0.5408 V12=0.6154  Eh/W=1.8455  Eh/maxV=1.2630  accepted=1276
+eps=0.3 start=grid(0.47,1.25) iters=150000 seed=7 | start: H=3.372 Eh=0.3519 ratio=1.1868 | end: cells=189 H=3.317 Eh=0.3572 W=0.2086 V1=0.2678 V2=0.2678 V12=0.3047  Eh/W=1.7126  Eh/maxV=1.1721  accepted=989
+eps=0.3 start=hex(0.47,1.25) iters=150000 seed=7 | start: H=3.422 Eh=0.3371 ratio=1.1658 | end: cells=193 H=3.380 Eh=0.3406 W=0.2021 V1=0.2595 V2=0.2595 V12=0.2953  Eh/W=1.6855  Eh/maxV=1.1536  accepted=1165
+eps=0.3 start=strips(0.47,2) iters=150000 seed=7 | start: H=2.319 Eh=0.6830 ratio=1.3607 | end: cells=63 H=2.519 Eh=0.5774 W=0.3109 V1=0.3992 V2=0.3992 V12=0.4542  Eh/W=1.8574  Eh/maxV=1.2712  accepted=1242
+eps=0.05 start=strips(0.3125,2.5) iters=150000 seed=11 | start: H=2.662 Eh=0.2238 ratio=1.2959 | end: cells=99 H=2.789 Eh=0.2050 W=0.1115 V1=0.1513 V2=0.1424 V12=0.1620  Eh/W=1.8389  Eh/maxV=1.2652  accepted=421
+eps=0.05 start=strips(0.625,2) iters=150000 seed=11 | start: H=2.109 Eh=0.3295 ratio=1.3176 | end: cells=51 H=1.966 Eh=0.3465 W=0.1900 V1=0.2809 V2=0.2225 V12=0.2445  Eh/W=1.8236  Eh/maxV=1.2338  accepted=546
+eps=0.05 start=strips(0.15625,3) iters=150000 seed=11 | start: H=3.299 Eh=0.1805 ratio=1.4377 | end: cells=192 H=3.534 Eh=0.1377 W=0.0764 V1=0.0981 V2=0.0981 V12=0.1117  Eh/W=1.8024  Eh/maxV=1.2336  accepted=2719
+eps=0.05 start=grid(0.3125,2.5) iters=150000 seed=11 | start: H=3.250 Eh=0.1745 ratio=1.3562 | end: cells=165 H=2.827 Eh=0.2001 W=0.1092 V1=0.1476 V2=0.1397 V12=0.1590  Eh/W=1.8325  Eh/maxV=1.2586  accepted=1419
+eps=0.05 start=hex(0.3125,2.5) iters=150000 seed=11 | start: H=3.250 Eh=0.1745 ratio=1.3562 | end: cells=163 H=2.859 Eh=0.1970 W=0.1073 V1=0.1445 V2=0.1375 V12=0.1564  Eh/W=1.8355  Eh/maxV=1.2592  accepted=1426
+eps=0.1 start=strips(0.3125,2.5) iters=150000 seed=11 | start: H=2.662 Eh=0.3229 ratio=1.3222 | end: cells=99 H=2.912 Eh=0.2624 W=0.1475 V1=0.1894 V2=0.1894 V12=0.2155  Eh/W=1.7791  Eh/maxV=1.2176  accepted=1551
+eps=0.1 start=hex(0.3125,1.6) iters=150000 seed=11 | start: H=3.651 Eh=0.1871 ratio=1.2564 | end: cells=227 H=3.158 Eh=0.2279 W=0.1304 V1=0.1674 V2=0.1674 V12=0.1905  Eh/W=1.7476  Eh/maxV=1.1961  accepted=1642
+eps=0.05 start=voronoi(30,0.02) iters=150000 seed=11 | start: H=3.139 Eh=0.3271 ratio=2.4043 | end: cells=28 H=2.551 Eh=0.2988 W=0.1280 V1=0.1786 V2=0.1603 V12=0.1825  Eh/W=2.3346  Eh/maxV=1.6374  accepted=735
+eps=0.3 start=voronoi(12,0.3) iters=150000 seed=11 | start: H=2.325 Eh=1.3158 ratio=2.6282 | end: cells=11 H=1.718 Eh=1.0097 W=0.4639 V1=0.5957 V2=0.5957 V12=0.6779  Eh/W=2.1765  Eh/maxV=1.4896  accepted=906
+eps=1 start=voronoi(8,1) iters=150000 seed=11 | start: H=1.875 Eh=3.0379 ratio=2.6540 | end: cells=8 H=1.251 Eh=2.1417 W=1.0699 V1=1.3738 V2=1.3738 V12=1.5633  Eh/W=2.0018  Eh/maxV=1.3700  accepted=1261

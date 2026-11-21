@@ -1,0 +1,18 @@
+B2 example: l1/l_inf mean certificate = 0.7071 (1/sqrt2 = 0.7071), soundness margin 0.0e+00; 20000 random ellipsoids: least mean product 1.0000, least rms product 1.0000
+B4b.3: two rank-one families on orthogonal supports e1, e2, Sigma_R = [[1,c],[c,1]], c = 0.0: price^2 = 2.0000 (bound 2); e1^T Sigma_R e2 = 0.0
+B4b.3: two rank-one families on orthogonal supports e1, e2, Sigma_R = [[1,c],[c,1]], c = 0.3: price^2 = 1.9539 (bound 2); e1^T Sigma_R e2 = 0.3
+B4b.3: two rank-one families on orthogonal supports e1, e2, Sigma_R = [[1,c],[c,1]], c = 0.6: price^2 = 1.8000 (bound 2); e1^T Sigma_R e2 = 0.6
+B4b.3: two rank-one families on orthogonal supports e1, e2, Sigma_R = [[1,c],[c,1]], c = 0.9: price^2 = 1.4359 (bound 2); e1^T Sigma_R e2 = 0.9
+       u^T Sigma_R v = 0.0e+00, u.v = -0.938, equalised w F^2: price^2 = 2.0000
+B4b remark: 3000 random pairs of metrics: max [f(M0 #_t M1) - chord]/chord = -1.328e-04 (geodesically convex if <= 0); max [f((1-t)M0 + tM1) - chord]/chord = 1.276e+00 (Euclidean convexity fails if > 0)
+       example: least mean width over 6 starts 5.601115 .. 5.601115; at the mean-square metric M_w: 5.602267; sum_a w_a F_a = 5.548268
+       12 instances, 6 random starts each: largest relative spread of the minima found = 1.59e-16
+B4b.6: eps | omega_a(M_eps)^2/F_a^2 - 1 | [omega_b(M_0)^2 - omega_b(M_eps)^2]/F_b^2
+       0.2000 | 2.070e-02 | 8.259e-01
+       0.1000 | 7.309e-03 | 5.605e-01
+       0.0500 | 2.377e-03 | 3.490e-01
+       0.0250 | 7.065e-04 | 2.009e-01
+       0.0125 | 1.957e-04 | 1.091e-01
+B4b.7: 15 instances: max [max_a reg^2 at the metric of the least favourable mixture - max_w F(S_w)^2] / value = 8.21e-09; max [dual value - best primal found by direct minimisation] / value = 2.64e-15 (weak duality needs <= 0); least value 1.0118 (>= 1); largest value / A = 0.6469 (<= 1)
+B5 example (n = 3, Gaussian, independent): rule 1's rho^2 = 0.3900; E(D.e)^2/E h^2 = 0.3972 (sample 0.3975); 1/n_eff = 0.4140; mean of (D.e)^2/h^2 over pairs = 0.3574
+B5: 200 pairs: rho^2/true = sum pi v / tr(SQ SE) and true * n_eff = (F/sum a)^2 hold to 4.4e-16

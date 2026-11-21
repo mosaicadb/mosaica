@@ -1,0 +1,5 @@
+Leaves sampled (no Poisson form): the A1.2b floor for the k best against R(r)
+   28 x 784, f 0.45: R 1681   floor 2943   floor/R 1.75   (mean of the sum of p' over a tree's leaves 10.010, should be 10)
+   28 x 784, f 0.3: R 4190   floor 5262   floor/R 1.26   (mean of the sum of p' over a tree's leaves 9.918, should be 10)
+   100 x 500, f 0.45: R 2902   floor 4282   floor/R 1.48   (mean of the sum of p' over a tree's leaves 9.940, should be 10)
+   100 x 500, f 0.6: R 905   floor 2214   floor/R 2.45   (mean of the sum of p' over a tree's leaves 9.933, should be 10)
