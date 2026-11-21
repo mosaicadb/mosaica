@@ -2574,6 +2574,60 @@ fn study_w_unit() {
     }
 }
 
+/// Study (ignored; run by hand on a fit, rebuilt when stale; pin it to one core): the W2 width's work per index-path
+/// cluster at query time. For the benchmark queries' first DIAG_M clusters by the probe's window key, each query at the
+/// scale k-NN reads it (`Prep2::unit`): the group setup, alr and the coefficients a are formed first, then DIAG_REPS
+/// passes over every (query, cluster) time `w2_tau2` alone and `OrderState::coefs_of` alone. DIAG_DIR, DIAG_PREP
+/// (queries.npy), DIAG_M, DIAG_REPS.
+#[test]
+#[ignore]
+fn study_w2_cost() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let m: usize = std::env::var("DIAG_M").ok().map_or(20, |s| s.parse().unwrap());
+    let reps: usize = std::env::var("DIAG_REPS").ok().map_or(20, |s| s.parse().unwrap());
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut |_| {}) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut |_| {}).unwrap(),
+    };
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let (n, k) = (ix.n(), ix.k());
+    let st = ix.order.as_ref().unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let mut cases = Vec::new();
+    for qi in 0..qs.len() / d {
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let ok = ad.z_keys(&ix, &q, None, true);
+        let mut o: Vec<usize> = (0..k).filter(|&c| ix.cl[c].r1 > ix.cl[c].r0).collect();
+        o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+        let pr = prep2(&ix, &q).unit();
+        for &c in o.iter().take(m) {
+            let gq = group_q2r(&ix, ix.cl[c].g, &pr, false);
+            let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
+            let a = st.coefs_of(c, n, &pr.q32);
+            cases.push((c, gq, alr, a, pr.q32.clone()));
+        }
+    }
+    let (mut sink, t) = (0f64, Timer::new());
+    for _ in 0..reps {
+        for (c, gq, alr, a, _) in &cases {
+            sink += std::hint::black_box(w2_tau2(&ix, *c, &gq.qv, *alr, a))[0];
+        }
+    }
+    let tw = t.s();
+    let t = Timer::new();
+    for _ in 0..reps {
+        for (c, _, _, _, q32) in &cases {
+            sink += std::hint::black_box(st.coefs_of(*c, n, q32))[0] as f64;
+        }
+    }
+    let tc = t.s();
+    let calls = (reps * cases.len()) as f64;
+    eprintln!("{dir}: {} (query, cluster) cases x {reps}: w2_tau2 {:.3} us per call, coefs_of {:.3} us per call ({sink:.3e})", cases.len(), tw / calls * 1e6, tc / calls * 1e6);
+}
+
 /// Study (ignored; run by hand on a fit, rebuilt when stale): W2 with the centre's term taken off, against W2 as built.
 /// The reader's score error is (qv - alr mv) . (z - z^) (alr the cluster's `CQ2::alr`, mv = V_q^T m its centre's
 /// coordinates), where W2 takes D = qv d_l and a = P'q; the variant takes D' = (qv - alr mv) d_l, T' = D'GD' and a' = a -
