@@ -69,8 +69,10 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
   derived width's error comes from"): a ratio stored per cluster and level, measured at build with corpus rows as
   queries and read with no sample, passes the fewest rows. The visit-order session reports that the owner chose to
   build that into the reader, and it is replaying beside it the PI's rule from Proposition 5.29 (the cluster's error
-  second moment in the 16 directions σ_c(q) uses; unrefereed, untested). Untested: filters, and the randomised
-  levels' dial.
+  second moment in the 16 directions σ_c(q) uses; unrefereed). In that replay the rule passes fewer rows than the
+  stored ratio and needs no query set (`LOG-2026-11-21.md`, "The query-dependent width W, replayed"). The owner's
+  decision (21 November): finish and time the stored ratio first, then decide whether to build the free form of the
+  rule. Untested: filters, and the randomised levels' dial.
 
 ## Rules for agents on this machine
 

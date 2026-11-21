@@ -631,6 +631,16 @@ with the cluster's second moment in the 16 directions that σ_c(q) projects on, 
 1.73 and 2.62 to 1.13 and 1.14. So the off-diagonal part carries the upper tail, the mean nothing, and the largest
 part at 12 groups is one this section does not name: the build's model of ρ against the group's measured diagonal.
 
+A width built on this [measured, by the visit-order session; a replay, unfiltered, rows counted, not timed]
+(`program/LOG-2026-11-21.md`, "The query-dependent width W, replayed"). Per cluster and level the build stores the
+error's second moment in those 16 directions, the group's diagonal in them, and the ratio γ of what the cluster and
+the group leave outside them; the reader forms the spread τ for its query from the coefficients it already holds and
+multiplies the derived width by τ over the cluster's rms derived width. There is no sample and no query set. It keeps
+0.9 of the true ten at ψ between 4.1 and 4.8 on the five indexes, where the derived width needs 4.3 to 12.1 and a
+ratio stored per cluster from corpus rows 3.9 to 5.7, and it passes 4 to 15% fewer rows than that ratio (13 to 21%
+fewer in the form that projects in the weighted coordinates). The rule is the PI's and is unrefereed; whether the
+cluster's rms derived width can be stored, filters and time are open.
+
 ### 5.9a.2 A neighbour's error is not a typical row's
 
 A row with s ≥ t is kept by a width Y if and only if e ≤ Y + (s − t), since â = s − e [proved, refereed]
