@@ -1345,8 +1345,13 @@ fn keys_clamped_past_da_are_allowed_for() {
         ths.extend(thresholds(&t));
         for th in ths {
             for (pname, plan) in plans() {
-                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: true, plan });
                 assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "nusort {}, plan {pname}, t {th}", o.nusort);
+                // the f32 intervals returned with the rows taken in (which exact k-NN selects by) hold their scores
+                for &(row, lb, ub, lv) in &r.iv {
+                    let v = exact_value2(&ix, &pr, row as usize);
+                    assert!(lb as f64 <= v && v <= ub as f64, "row {row} level {lv}: {v} outside [{lb}, {ub}], nusort {}, plan {pname}, t {th}", o.nusort);
+                }
             }
         }
         // the bounds each row's key gives hold its score

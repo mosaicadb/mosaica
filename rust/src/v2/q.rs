@@ -3043,6 +3043,12 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     Planned::Run { pre, use_idx, cut_cyc }
 }
 
+/// An interval [lb, ub] as f32, rounded outward.
+fn f32_outward(lb: f64, ub: f64) -> (f32, f32) {
+    use crate::query::next_up_if_below as up;
+    (-up(-lb as f32, -lb), up(ub as f32, ub))
+}
+
 /// Refuses a NaN threshold, which no score reaches and which the paths' comparisons would not all treat alike.
 pub fn check_threshold(t: f64) {
     assert!(!t.is_nan(), "the threshold is NaN; give a number (+inf for an empty answer, -inf for every visible item)");
@@ -3114,7 +3120,8 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                 each(r0, r1, &mut |r| {
                     acc.rows.push(r as u32);
                     if let Some(x) = iv {
-                        acc.iv.push((r as u32, x.0 as f32, x.1 as f32, 255));
+                        let (lb, ub) = f32_outward(x.0, x.1);
+                        acc.iv.push((r as u32, lb, ub, 255));
                     }
                 });
             };
@@ -3130,22 +3137,22 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     if o.want_iv && !ix.nukey.is_empty() {
                         let qm = pr.qm(ix, ci);
                         let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
+                        let (lb, ub) = f32_outward(lb, ub);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
-                            x.1 = lb as f32;
-                            x.2 = ub as f32;
+                            (x.1, x.2) = (lb, ub);
                         }
                     } else if o.want_iv {
                         // interval from the table alone
                         let Anc { a, beta: b, rho } = pr.anc(ix);
                         let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
                         let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
+                        let (lb, ub) = f32_outward(bl - rho * rr, bh + rho * rr);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
-                            x.1 = (bl - rho * rr) as f32;
-                            x.2 = (bh + rho * rr) as f32;
+                            (x.1, x.2) = (lb, ub);
                         }
                     }
                 }
@@ -3175,7 +3182,8 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                                 Some(nc) => nc.bounds(nc.nu_of(ix.nukey[r])),
                                 None => key_interval2(ix, cu.as_ref().unwrap(), r),
                             };
-                            acc.iv.push((r as u32, lb as f32, ub as f32, 254));
+                            let (lb, ub) = f32_outward(lb, ub);
+                            acc.iv.push((r as u32, lb, ub, 254));
                         };
                         each(u0, d0, &mut take);
                         each(d1, u1, &mut take);
