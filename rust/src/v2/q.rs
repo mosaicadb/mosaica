@@ -1196,9 +1196,10 @@ pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; N
         let h1 = wf.h(n, ndl, g, (l + 1).min(ndl - 1));
         (t[l], t[(l + 1).min(NDL_MAX - 1)]) = unsafe { centred_sq2(&gq.qv32, mv, alr as f32, wf.h(n, ndl, g, l), h1) };
     }
+    let o = super::wrule::outer(&a);
     let mut tau2 = [0f64; NDL_MAX];
     for (l, x) in tau2.iter_mut().enumerate().take(ndl) {
-        *x = wf.tau2(ndl, ci, l, &a, t[l]);
+        *x = wf.tau2_outer(ndl, ci, l, &o, t[l]);
     }
     tau2
 }

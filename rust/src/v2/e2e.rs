@@ -2356,7 +2356,8 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
         for l in 0..ndl {
             let x = w.of(ndl, c, l);
             let rp = wr * (wr + 1) / 2;
-            assert!(wrule::packed_quad(&x[..rp], &a) >= -1e-9 && wrule::packed_quad(&x[rp..2 * rp], &a) >= -1e-9 && x[2 * rp] >= 0.0 && x[2 * rp + 1] > 0.0, "cluster {c}, level {l}");
+            let o = wrule::outer(&a);
+            assert!(wrule::quad(&x[..rp], &o[..rp]) >= -1e-9 && wrule::quad(&x[rp..2 * rp], &o[..rp]) >= -1e-9 && x[2 * rp] >= 0.0 && x[2 * rp + 1] > 0.0, "cluster {c}, level {l}");
         }
     }
     let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();

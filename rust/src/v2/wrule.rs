@@ -8,7 +8,7 @@
 //! S_c = mean u u' over cluster c's rows (uncentred), G the group's diagonal of it over all its rows. p_j are the cluster's r order directions (int8 rows
 //! times their scales, as the order state holds them) and b_j = (V_q^T p_j) d_l their images; B~ = B (P'P)^-1, so that
 //! B~ a is the image of a vector's part in the directions' span, a = P'x its coefficients. Stored per cluster and level:
-//! M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed), gamma = tr(S_c outside span B) / tr(G outside span B)
+//! M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed, off-diagonals doubled), gamma = tr(S_c outside span B) / tr(G outside span B)
 //! (the complement orthogonal in these coordinates), and U = mean over the cluster's rows of the squared stored norm
 //! (`q::det_norm`, the code term of the row's half-width per unit of `CQ2::dwa`); per cluster, P'm. At query time
 //! a = P'q - alr P'm (the coefficients the reader holds, less the centre's), T = D'GD, tau^2 = a'Ma + gamma max(0, T -
@@ -46,10 +46,15 @@ impl WForms {
     }
 
     /// Cluster ci's predicted spread squared at level l for the coefficients `a` (r values, the centre's taken off) and
-    /// T: a'Ma + gamma max(0, T - a'Na).
+    /// T: a'Ma + gamma max(0, T - a'Na) (`tau2_outer` of a's `outer`).
     pub fn tau2(&self, ndl: usize, ci: usize, l: usize, a: &[f32], t: f64) -> f64 {
+        self.tau2_outer(ndl, ci, l, &outer(a), t)
+    }
+
+    /// `tau2` from a's packed outer product `o` (`outer`), formed once for every level of a cluster.
+    pub fn tau2_outer(&self, ndl: usize, ci: usize, l: usize, o: &[f32], t: f64) -> f64 {
         let (rec, rp) = (self.of(ndl, ci, l), self.r * (self.r + 1) / 2);
-        packed_quad(&rec[..rp], a) + rec[2 * rp] as f64 * (t - packed_quad(&rec[rp..2 * rp], a)).max(0.0)
+        quad(&rec[..rp], &o[..rp]) + rec[2 * rp] as f64 * (t - quad(&rec[rp..2 * rp], &o[..rp])).max(0.0)
     }
 
     /// Cluster ci's mean squared stored row norm at level l, U.
@@ -84,25 +89,30 @@ pub fn factor(psi: f64, tau2: f64, dwa: f64, u: f64) -> f32 {
     if tau2 >= 0.0 && f < 1.0 { f as f32 } else { 1.0 }
 }
 
-/// a'Xa for X symmetric r x r, packed as its upper triangle row by row.
-#[inline]
-pub fn packed_quad(x: &[f32], a: &[f32]) -> f64 {
-    let r = a.len();
-    let (mut s, mut k) = (0f64, 0);
-    for i in 0..r {
-        let ai = a[i] as f64;
-        let mut row = x[k] as f64 * ai;
-        for j in i + 1..r {
-            row += 2.0 * x[k + j - i] as f64 * a[j] as f64;
+/// The most values a packed r x r symmetric matrix holds (r at most `order::R_MAX`).
+pub const RP_MAX: usize = super::order::R_MAX * (super::order::R_MAX + 1) / 2;
+
+/// The packed outer product of `a` (r values): a_i a_j for i <= j, row by row (the first r(r + 1) / 2 values).
+pub fn outer(a: &[f32]) -> [f32; RP_MAX] {
+    let (mut o, mut k) = ([0f32; RP_MAX], 0);
+    for i in 0..a.len() {
+        for &aj in &a[i..] {
+            o[k] = a[i] * aj;
+            k += 1;
         }
-        s += ai * row;
-        k += r - i;
     }
-    s
+    o
 }
 
+/// a'Xa for X symmetric, stored packed with its off-diagonals doubled (`pack`), from a's packed outer product `o`.
+#[inline]
+pub fn quad(x: &[f32], o: &[f32]) -> f64 {
+    unsafe { dot32(o, x) }
+}
+
+/// X symmetric r x r packed as its upper triangle row by row, the off-diagonals doubled (each stands for X_ij and X_ji).
 fn pack(m: &[f64], r: usize) -> impl Iterator<Item = f32> + '_ {
-    (0..r).flat_map(move |i| (i..r).map(move |j| m[i * r + j] as f32))
+    (0..r).flat_map(move |i| (i..r).map(move |j| (if i == j { m[i * r + j] } else { 2.0 * m[i * r + j] }) as f32))
 }
 
 /// One level's B~ (r vectors of n) and orthonormal basis of span B (`dual_dirs`).
