@@ -181,15 +181,15 @@ fn transpose_times_z(x: &[f32], n: usize, z: &[f32], y: &mut [f32]) {
 /// fewer rows or dimensions than the block) and becomes zero.
 fn orthonormal(y: &[f32], n: usize) -> Vec<f32> {
     let y: Vec<f64> = y.iter().map(|&v| v as f64).collect();
-    orthonormal64(&y, n).iter().map(|&v| v as f32).collect()
+    orthonormal64(&y, n, BLOCK).iter().map(|&v| v as f32).collect()
 }
 
-/// `orthonormal` of an f64 matrix, in f64.
-fn orthonormal64(y: &[f64], n: usize) -> Vec<f64> {
-    let mut cols: Vec<Vec<f64>> = (0..BLOCK).map(|c| (0..n).map(|j| y[j * BLOCK + c]).collect()).collect();
+/// `orthonormal` of an f64 n x m matrix, in f64.
+pub(super) fn orthonormal64(y: &[f64], n: usize, m: usize) -> Vec<f64> {
+    let mut cols: Vec<Vec<f64>> = (0..m).map(|c| (0..n).map(|j| y[j * m + c]).collect()).collect();
     let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
     let top = cols.iter().map(|c| norm(c)).fold(0f64, f64::max);
-    for k in 0..BLOCK {
+    for k in 0..m {
         let (done, rest) = cols.split_at_mut(k);
         let v = &mut rest[0];
         for _ in 0..2 {
@@ -205,10 +205,10 @@ fn orthonormal64(y: &[f64], n: usize) -> Vec<f64> {
             v.fill(0.0);
         }
     }
-    let mut q = vec![0f64; n * BLOCK];
+    let mut q = vec![0f64; n * m];
     for (c, col) in cols.iter().enumerate() {
         for (j, &v) in col.iter().enumerate() {
-            q[j * BLOCK + c] = v;
+            q[j * m + c] = v;
         }
     }
     q
@@ -293,6 +293,23 @@ impl OrderState {
             cluster(c.r1 - c.r0, &row, ix.centre(ci), r, SAMPLE, PASSES, ci as u64)
         }).collect();
         OrderState::from_clusters(parts, r, spanned(&ix.centres32, n))
+    }
+
+    /// Cluster ci's coefficients on its directions, a_j = p_j . q, from the products `p` of its int8 rows with the query
+    /// (`kernel::gemv_i8`): each times its direction's scale, in the first r values.
+    pub fn coefs(&self, ci: usize, p: &[f32]) -> [f32; R_MAX] {
+        let mut a = [0f32; R_MAX];
+        for ((x, &pj), &d) in a.iter_mut().zip(p).zip(&self.dsc[ci * self.r..(ci + 1) * self.r]) {
+            *x = pj * d;
+        }
+        a
+    }
+
+    /// `coefs` for the query's f32 values `q32` (n of them).
+    pub fn coefs_of(&self, ci: usize, n: usize, q32: &[f32]) -> [f32; R_MAX] {
+        let mut p = [0f32; R_MAX];
+        unsafe { crate::kernel::gemv_i8(q32, self.dirs(ci, self.r, n), n, &mut p[..self.r]) };
+        self.coefs(ci, &p[..self.r])
     }
 
     /// Cluster ci's first `r` directions as int8 rows (r x n).
@@ -380,7 +397,7 @@ impl Pooled {
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
         let mut x: Vec<f64> = (0..n * BLOCK).map(|_| if rng.gen::<bool>() { 1.0 } else { -1.0 }).collect();
         for _ in 0..POOL_PASSES {
-            x = orthonormal64(&times(&x), n);
+            x = orthonormal64(&times(&x), n, BLOCK);
         }
         let y = times(&x);
         let mut b = vec![0f64; BLOCK * BLOCK];

@@ -1,0 +1,203 @@
+The W2 width rule, built as a second mode and timed against d999606 and the stored ratio (99b033c)
+===============================================================================================
+
+The build (6f86a1c, branch research/w-rule off the reviewed stored-correction head cbb7c4ec2)
+-------------------------------------------------------------------------------------------
+- The build stores, from every row's coding error:
+  - per group and level: G;
+  - per cluster and level: M = B~'S_c B~ and N = B~'G B~ (16 x 16, packed), gamma and U.
+  The errors are replayed with the replay's own code (errs, order_dirs and orthonormal, moved from study_w_rule into
+  v2/wrule.rs). B~ = B (P'P)^-1 is taken against the coefficients the reader holds, a = P'q with P the stored int8
+  directions times their scales. A direction the order state left zero gets a zero column.
+- k-NN under WidthRule::W2 reads each index-path cluster's deterministic levels at min(1, psi tau / (dwa sqrt U)),
+  where tau^2 = a'Ma + gamma max(0, T - a'Na). The window's sigma supplies a (the reader computes it for a cluster
+  without one), and T = D'GD is computed once per group.
+- Adaptive::rule picks derived, ratio (the default) or w2; the bindings' set_width_rule and ab_orders.py --width-rule
+  set it.
+- Store format 13; the forms are in the store hash.
+
+U, the theory session's point 2 (u_check.*)
+-------------------------------------------
+- Over the 100 benchmark queries' first 20 clusters, rms(h) / |D| at a (cluster, level) varies across queries:
+
+  | dataset | CV median | CV p90 | p90 / p10 |
+  |---|---|---|---|
+  | iNaturalist | 3.5% | 7.2% | 1.08 |
+  | yahoo | 1.3% | 3.3% | 1.03 |
+  | LAION | 0.3% | 0.7% | 1.006 |
+
+- All of it is dwa / |D| (dwa the reader's query factor, `CQ2::dwa`, a norm of D less the cluster's centre term).
+- rms(h) / (dwa rms(r)), with r the stored row norms, is constant to 1e-4 on all three: the half-width is entirely its
+  code term.
+- So U is the mean squared stored row norm, and the width is psi tau h_row / rms(h) exactly: the replay's form, with
+  no query-dependent U.
+
+The forms reproduce the replay (forms_check.*)
+---------------------------------------------
+- On the replay's 4,000 (query, cluster, level) lines per index, iNaturalist, LAION and yahoo, the stored forms give
+  its W2 tau^2 and its gamma to 1e-4 (min and max ratio 1.0000).
+
+Tests
+-----
+cargo test --release --no-fail-fast: 119 passed, 4 failed, 13 ignored; the second binary 4 passed.
+- The 4 failures are the known synth4k ones.
+- The exact-path hash is f1f482ad11b64d9e and knn2_fast's 90d7892d504ef425, both unchanged.
+- New or extended tests:
+  - the cap under W2: no level sends on a row the certified width drops, and at psi 50 some reads equal the certified
+    read;
+  - the stored forms survive a reopen, and a missing forms file is refused;
+  - every rule returns k items with their own scores;
+  - the forms do not depend on the threads that build them;
+  - an index with a zero row builds and opens with finite ratios and forms.
+
+Costs
+-----
+Build time, on 8 threads with the machine otherwise idle (the timing run's own rebuilds, open-*.err):
+
+| dataset | W2 forms | level ratios | build with W2 | build at 99b033c |
+|---|---|---|---|---|
+| iNaturalist | 23.2 s | 5.6 s | 162 s | 144 s |
+| LAION | 3.8 s | 1.1 s | 34 s | 30 s |
+| arxiv | 10.2 s | | | |
+| yahoo | 1.7 s | | | |
+
+Storage:
+- per cluster: 1,096 B per level, 2,192 B at two levels;
+- per group and level: n f32;
+- iNaturalist 548 KB + 197 KB; LAION 1.1 MB + 262 KB.
+
+Query time: from the phase profile on core 11, unfiltered, psi 5 and 6 (profile-*.txt). The same W2 index is read
+under the stored ratio and under W2, so the constants and paths are the same.
+- A cluster's setup on the index path (CLSETUP: its tables and its width) costs:
+  - iNaturalist: 3.7 us under W2 against 2.6 under the ratio;
+  - LAION: 3.0 to 3.2 against 1.9 to 2.1.
+- About 1.1 us more per index-path cluster, so:
+  - iNaturalist: 13 to 23 us per query, about 0.5% (12 to 22 clusters);
+  - LAION: 31 to 83 us, about 2% (28 to 75 clusters).
+
+The timed runs (run_w.sh, run.log; table.txt, counts.txt)
+---------------------------------------------------------
+Setup:
+- each build on its own hard-linked copy of the suite's fit, opened once on cores 0-7, with its constants timed alone
+  on core 11;
+- ab_orders.py with psi 2 to 9, 3 reps, core 11, 100 queries, k 10, arms back to back per dataset;
+- nothing else ran on the machine.
+
+Arms:
+- d999606: start of day;
+- 99b033c: the stored ratio;
+- W2: 6f86a1c under --width-rule w2.
+
+Time to recall 0.9 / 0.95 / 0.99 as a share of spread's time in the same run ("-": not reached):
+
+  dataset / filter         d999606           99b033c (ratio)   W2
+  iNaturalist none         0.50/0.66/0.91    0.66/0.70/1.01    0.59/0.66/0.86
+              random-1     1.20/1.15/1.12    1.23/1.25/1.26    1.26/1.24/1.22
+              random-25    0.20/0.23/0.39    0.19/0.23/0.41    0.20/0.23/0.38
+              region-1     0.18/0.22/0.22    0.20/0.22/0.24    0.19/0.21/0.22
+              region-25    0.29/0.48/1.41    0.33/0.47/1.01    0.33/0.45/1.01
+  LAION       none         0.67/0.64/1.14    0.51/0.47/0.57    0.59/0.50/0.59
+              random-1     0.84/0.94/0.96    0.94/0.89/0.77    0.94/0.89/0.78
+              random-25    0.25/0.33/0.47    0.29/0.35/0.36    0.29/0.34/0.37
+              region-1     0.30/0.34/0.34    0.31/0.32/0.36    0.30/0.32/0.34
+              region-25    0.72/0.98/1.32    0.41/0.44/0.58    0.43/0.42/0.59
+  yahoo       none         0.69/0.74/0.59    0.54/0.53/0.41    0.55/0.55/0.45
+              random-1     0.97/0.89/0.81    0.99/0.90/0.77    1.03/0.92/0.81
+              random-25    0.29/0.32/0.37    0.29/0.31/0.39    0.27/0.32/0.39
+              region-1     0.26/0.27/0.30    0.30/0.32/0.41    0.30/0.32/0.41
+              region-25    0.47/0.57/-       0.40/0.37/0.44    0.42/0.38/0.44
+  arxiv       none         0.77/0.84/1.21    0.69/0.70/0.81    0.64/0.65/0.69
+              random-1     0.96/0.94/0.85    0.98/1.00/0.74    1.02/1.04/0.81
+              random-25    0.35/0.38/0.77    0.35/0.37/0.65    0.34/0.36/0.65
+              region-1     0.42/0.38/0.37    0.41/0.38/0.37    0.41/0.39/0.37
+              region-25    0.50/0.58/1.56    0.38/0.38/0.53    0.37/0.37/0.51
+
+Unfiltered, recall at psi 4 / 5 / 6 and, at psi 5, the rows past the deterministic levels / stored vectors read per
+query. Every filter is in counts.txt. Stored vectors include the rows of clusters read directly; d999606's bindings
+do not report the counts.
+
+  dataset        d999606              99b033c (ratio)                 W2
+  iNaturalist    0.970/0.991/0.998    0.945/0.980/0.997  122 / 11450  0.953/0.987/0.998  139 / 11346
+  LAION          0.833/0.958/0.986    0.824/0.945/0.978 4724 / 2791   0.797/0.937/0.976 3175 / 2278
+  yahoo          0.781/0.901/0.970    0.774/0.899/0.963 1952 / 1018   0.779/0.898/0.963 2052 / 1018
+  arxiv          0.862/0.965/0.984    0.802/0.916/0.971 1587 / 1675   0.834/0.943/0.987 1748 / 2233
+
+What the runs say
+-----------------
+- **W2 is better where the replay said it would be.**
+  - iNaturalist unfiltered: 0.86 of spread at 0.99, against 1.01 for the stored ratio and 0.91 for d999606. So at
+    0.99 it now beats the start of the day.
+  - arxiv unfiltered: 0.64 / 0.65 / 0.69 against 0.69 / 0.70 / 0.81.
+  - Recall at psi 5 rises on both: iNaturalist 0.980 to 0.987, arxiv 0.916 to 0.943.
+- **It costs a little on LAION and yahoo unfiltered.**
+  - LAION: 0.59 / 0.50 / 0.59 against 0.51 / 0.47 / 0.57, about 16% at 0.9, 6% at 0.95 and 4% at 0.99. Its recall at a
+    given psi is lower (0.937 against 0.945 at psi 5), with a third fewer rows past the deterministic levels: W2 is
+    narrower there.
+  - yahoo: up to 10% at 0.99 (0.45 against 0.41).
+  - These are the indexes whose stored ratios are near 1 (median 1.03 to 1.09), where the ratio was already right.
+- **The filtered sets are mostly level.**
+  - Within about 5%, with arxiv random-1 at 0.99 the exception (0.81 against 0.74, a set read almost all directly,
+    where the width acts on nothing).
+  - region-25 is level everywhere (within 5%), a little better on arxiv.
+- **psi is not more uniform across indexes in the real reader.** Recall at psi 5 spans 0.898 to 0.987 under W2, and
+  0.899 to 0.980 under the ratio. The replay's narrower psi range (4.1 to 4.8 at 0.9 kept) does not carry over once
+  the stop moves with psi.
+- **What it costs:** 23 s of build on iNaturalist (14% of the build), 2.2 KB per cluster, and about 1.1 us per
+  index-path cluster at query time (0.5% of an iNaturalist query, 2% of a LAION one).
+
+Files
+-----
+- summary.txt, table.txt (builds_table.py; ignore its right-hand "/build" ratios), counts.txt
+  (../stored-correction/counts.py);
+- ab-knn-*.txt and .err, open-*.err, run.log, run_w.sh;
+- profile-*.txt, diag_w.py;
+- u_check.*, forms_check.*.
+- Code: rust/src/v2/wrule.rs (the forms), q.rs (CQ2::set_w2, KnnReader::w2, det_norm), adaptive.rs (WidthRule,
+  rule-aware dial, the window's coefficients), mod.rs and store.rs (Index2::wforms, wrule_g.bin, wrule_c.bin), e2e.rs
+  (tests; study_w_unit and study_w2_forms).
+
+After the review (fixes on research/w-rule after 6f86a1c; the timed W2 path's widths are unchanged)
+--------------------------------------------------------------------------------------------------
+W2 build cost on 8 threads with the machine otherwise idle (forms_check.sh's rebuilds). The forms match the replay to
+1e-4 at every step.
+
+| | iNaturalist W2 | iNaturalist build | LAION W2 | LAION build |
+|---|---|---|---|---|
+| as timed (6f86a1c) | 23.2 s | 162 s | 3.8 s | 34 s |
+| after V_q^T P in one product | 18.3 s | 155.5 s | 3.3 s | 34.8 s |
+| after sums taken during the encoding | 8.1 thread-seconds + 0.3 s | 135.6 s | 3.6 thread-seconds + 0.1 s | 31.0 s |
+
+- The last row's builds have no level-ratio step: 5.6 s on iNaturalist and 1.1 s on LAION of the first row are that
+  step's.
+- 8.1 thread-seconds is about 1 s of wall time on 8 threads.
+- The replay of the encoder (errs) is gone, and with it its per-cluster memory: about 130 MB per cluster in flight on
+  iNaturalist.
+
+The centre's term (alr_check.*, study_w2_alr): measured, not changed
+------------------------------------------------------------------
+- The reader's score error is (qv - alr mv) . (z - z^), where W2 takes D = qv d_l and a = P'q. The variant takes
+  D' = (qv - alr mv) d_l, T' = D'GD' and a' = a - alr P'm.
+- Both are computed from this index's forms, on the replay's benchmark queries, first 20 clusters, each level.
+- Actual spread (interval midpoints' error) over predicted, p10 / median / p90, level 0 (level 1 alike):
+
+  | index | pairs | as built | centre off |
+  |---|---|---|---|
+  | iNaturalist | all | 0.71 / 0.85 / 1.03 | 0.78 / 0.93 / 1.10 |
+  | iNaturalist | true-neighbour | 0.70 / 0.84 / 0.98 | 0.89 / 1.01 / 1.13 |
+  | LAION | all | 0.92 / 0.99 / 1.07 | 0.93 / 1.00 / 1.08 |
+  | LAION | true-neighbour | 0.94 / 1.00 / 1.10 | 0.96 / 1.03 / 1.12 |
+  | yahoo | all | 0.90 / 0.97 / 1.03 | 0.93 / 0.99 / 1.06 |
+  | yahoo | true-neighbour | 0.87 / 0.96 / 1.03 | 0.95 / 1.01 / 1.08 |
+
+- In the sample-when-needed replay (alr/replay-*.txt; its "W1" column is W2 as built, its "W2" column the variant), at
+  0.9 kept / 0.95 kept, psi and rows past the deterministic levels per query:
+
+  | index | as built | centre off | rows, centre off against as built |
+  |---|---|---|---|
+  | iNaturalist | 4.23, 134 / 4.84, 225 | 4.81, 90 / 5.61, 170 | 33% / 24% fewer |
+  | LAION | 4.47, 373 / 5.06, 741 | 4.57, 370 / 5.16, 738 | level |
+  | yahoo | 4.34, 75 / 4.91, 123 | 4.59, 66 / 5.15, 108 | 12% fewer |
+
+- As built, W2 is wide on iNaturalist's true-neighbour pairs (median 0.84): it counts coding error along mv d_l that
+  the reader's estimate does not carry. With the centre off, the median is 1.00 to 1.03 everywhere, and fewer rows
+  pass at the same share kept, at a higher psi.

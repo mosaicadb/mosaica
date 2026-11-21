@@ -6,8 +6,8 @@
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
 //! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
-//! state, `order::OrderState`), `level_ratio.bin` (the approximate k-NN's per-cluster correction to its deterministic
-//! levels' width, `adaptive::level_ratios`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
+//! state, `order::OrderState`), `wrule_h.bin` and `wrule_c.bin` (the approximate k-NN's W2 width's stored
+//! forms, `wrule::WForms`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
 //! number of directions the order state holds per cluster, the build options that decide the encoding, and the key
 //! of the fit and those options it was built from).
 //!
@@ -23,7 +23,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 12;
+pub const STORE_FORMAT: u64 = 17;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -532,8 +532,9 @@ pub fn save_rest(ix: &Index2, dir: &str) {
         put_cluster(&mut w, c, t, ix.meta.ndl());
     }
     write_file(&f("clusters.bin"), &w.0);
-    if let Some(r) = &ix.lratio {
-        write_file(&f(super::adaptive::RATIO_FILE), &r[..]);
+    if let Some(w) = &ix.wforms {
+        write_file(&f(super::wrule::FILES[0]), &w.h);
+        write_file(&f(super::wrule::FILES[1]), &w.c);
     }
     index_json(ix, dir, None);
 }
@@ -753,7 +754,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     let [orad, olam, odsc, odirs] = order::FILES.map(|name| f(name));
     let gone = |e: String| if e.contains("rebuild") { ours(e) } else { format!("{}; rebuild the index", ours(e)) };
     let (orad, olam, odsc, odirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&orad).map_err(gone)?, Arr::map(&olam).map_err(gone)?, Arr::map(&odsc).map_err(gone)?, Arr::map(&odirs).map_err(gone)?);
-    let lratio: Arr<f32> = Arr::map(&f(super::adaptive::RATIO_FILE)).map_err(gone)?;
+    let (wg, wc): (Arr<f32>, Arr<f32>) = (Arr::map(&f(super::wrule::FILES[0])).map_err(gone)?, Arr::map(&f(super::wrule::FILES[1])).map_err(gone)?);
     drop(dfd);
     drop(lock);
     // the fit's vectors (its Xs.npy, or its partition) and its perm.npy, as they were when the index was built: by
@@ -866,9 +867,8 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
-    if lratio.len() != k * meta.ndl() || lratio.iter().any(|&x| !(x.is_finite() && x > 0.0)) {
-        return Err(damaged(&format!("{} does not hold a ratio above 0 for each of {} levels of {k} clusters", super::adaptive::RATIO_FILE, meta.ndl())));
-    }
+    let wforms = super::wrule::WForms { r, h: wg.to_vec(), c: wc.to_vec() };
+    wforms.check(groups.len(), k, meta.ndl(), n).map_err(|e| damaged(&e))?;
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         order,
@@ -902,7 +902,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         nrows,
         vrow: Vec::new(),
         nent,
-        lratio: Some(Arc::new(lratio.to_vec())),
+        wforms: Some(Arc::new(wforms)),
     };
     // what this open derived again (plans, codebooks, rotations, centres; with this library and its dependencies) must
     // be what the build derived
@@ -1186,11 +1186,12 @@ impl Index2 {
                 h.big_pod(&o.dirs8[..]);
             }
         }
-        match &self.lratio {
+        match &self.wforms {
             None => h.u64(0),
-            Some(r) => {
-                h.u64(1);
-                h.pod(&r[..]);
+            Some(w) => {
+                h.usizes(&[1, w.r]);
+                h.pod(&w.h[..]);
+                h.pod(&w.c[..]);
             }
         }
         match &self.full {

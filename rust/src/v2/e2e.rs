@@ -409,7 +409,7 @@ fn the_order_state_is_built_saved_and_opened() {
     assert!(e.contains(&format!("format {}", store::STORE_FORMAT - 1)) && e.contains("rebuild"), "{e}");
     std::fs::write(&json, &text).unwrap();
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    for name in order::FILES.into_iter().chain([adaptive::RATIO_FILE]) {
+    for name in order::FILES.into_iter().chain(wrule::FILES) {
         let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/{name}.kept"));
         std::fs::rename(&path, &keep).unwrap();
         let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
@@ -925,7 +925,7 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
-    assert_eq!(a.lratio.as_ref().map(|r| f32b(r)), b.lratio.as_ref().map(|r| f32b(r)));
+    assert_eq!(a.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c))), b.wforms.as_ref().map(|w| (w.r, f32b(&w.h), f32b(&w.c))));
     for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
         assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
     }
@@ -2324,19 +2324,11 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
     [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
 }
 
-/// Each deterministic level's rho is a participation ratio of its n weighted coordinates, so between 1 / sqrt(n) (the
-/// terms equal) and 1 (one term). The query's dial leaves the deterministic levels certified (k-NN sets them cluster
-/// by cluster) and reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi
-/// is infinite.
+/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at the W2 width) and
+/// reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi is infinite.
 #[test]
-fn the_levels_statistical_width_is_a_participation_ratio() {
+fn the_query_dial_leaves_the_deterministic_levels_to_the_reader() {
     let ix = &fixture().ix;
-    let n = ix.n() as f32;
-    for gp in ix.groups.iter().filter(|gp| gp.cal.is_some()) {
-        for &r in &gp.rho[..ix.meta.ndl()] {
-            assert!(r >= (1.0 - 1e-5) / n.sqrt() && r <= 1.0 + 1e-6, "rho {r} at n {n}");
-        }
-    }
     let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
     assert!(ad.dial(f64::INFINITY).iter().all(|&d| d == 1.0));
     let (lo, hi) = (ad.dial(1.0), ad.dial(4.0));
@@ -2345,83 +2337,151 @@ fn the_levels_statistical_width_is_a_participation_ratio() {
     assert!(lo.iter().zip(&hi).all(|(&a, &b)| a > 0.0 && a <= b && b <= 1.0), "{lo:?} {hi:?}");
 }
 
-/// The build stores a level ratio above 0 for every cluster and deterministic level, not all 1; a saved index opens
-/// with the same ratios, and one without its ratio file is refused at the open, naming the file and a rebuild, as an
-/// index without ratios is by the approximate queries.
+/// The build stores the W2 forms (M and N second moments, gamma at least 0, U above 0 for every cluster with rows); a
+/// saved index opens with the same forms, and one without either file, or with its cluster file cut short, holding a
+/// value that is not a number or a negative gamma, is refused at the open with a rebuild, as an index without forms is
+/// by the approximate queries.
 #[test]
-fn the_level_ratios_are_stored_and_survive_a_reopen() {
+fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let tmp = tmp_dir("ratios");
     let edir = tmp.join("encoded");
     let edir = edir.to_str().unwrap();
     let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
-    let r = built.lratio.as_ref().unwrap();
-    assert_eq!(r.len(), built.k() * built.meta.ndl());
-    assert!(r.iter().all(|&x| x.is_finite() && x > 0.0) && r.iter().any(|&x| (x - 1.0).abs() > 1e-3), "{r:?}");
-    assert_eq!(r[..], fixture().ix.lratio.as_ref().unwrap()[..], "a saved build measures the ratios the build in memory does");
+    let w = built.wforms.as_ref().unwrap();
+    let (ndl, wr) = (built.meta.ndl(), w.r);
+    assert_eq!((w.h.len(), w.c.len()), (built.groups.len() * ndl * built.n(), built.k() * wrule::WForms::stride(wr, ndl)));
+    // every M and N a second moment (a'Ma >= 0), gamma at least 0 and U above 0 for every cluster with rows
+    let a: Vec<f32> = (0..wr).map(|j| 1.0 - j as f32 / wr as f32).collect();
+    for c in (0..built.k()).filter(|&c| built.cl[c].r1 > built.cl[c].r0) {
+        for l in 0..ndl {
+            let x = w.of(ndl, c, l);
+            let rp = wr * (wr + 1) / 2;
+            let o = wrule::outer(&a);
+            assert!(wrule::quad(&x[..rp], &o[..rp]) >= -1e-9 && wrule::quad(&x[rp..2 * rp], &o[..rp]) >= -1e-9 && x[2 * rp] >= 0.0 && x[2 * rp + 1] > 0.0, "cluster {c}, level {l}");
+        }
+    }
     let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    assert_eq!(r.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), opened.lratio.as_ref().unwrap().iter().map(|x| x.to_bits()).collect::<Vec<_>>());
-    opened.lratio = None;
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let ow = opened.wforms.as_ref().unwrap();
+    assert_eq!((wr, bits(&w.h), bits(&w.c)), (ow.r, bits(&ow.h), bits(&ow.c)));
+    let fw = fixture().ix.wforms.as_ref().unwrap();
+    assert_eq!((bits(&w.h), bits(&w.c)), (bits(&fw.h), bits(&fw.c)), "a saved build stores the forms the build in memory does");
+    opened.wforms = None;
     let e = adaptive::Adaptive::new(&opened, fixed_costs()).map(|_| ()).unwrap_err();
-    assert!(e.contains("level ratios") && e.contains("rebuild"), "{e}");
+    assert!(e.contains("W2 forms") && e.contains("rebuild"), "{e}");
     drop((built, opened));
-    let (path, keep) = (format!("{edir}/{}", adaptive::RATIO_FILE), format!("{edir}/kept"));
-    std::fs::rename(&path, &keep).unwrap();
-    let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
-    assert!(e.contains(adaptive::RATIO_FILE) && e.contains("rebuild"), "{e}");
-    std::fs::rename(&keep, &path).unwrap();
+    for name in wrule::FILES {
+        let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/kept"));
+        std::fs::rename(&path, &keep).unwrap();
+        let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+        assert!(e.contains(name) && e.contains("rebuild"), "{e}");
+        std::fs::rename(&keep, &path).unwrap();
+    }
+    // a damaged forms file is refused too: cut short, holding a value that is not a number, or a negative gamma
+    let path = format!("{edir}/{}", wrule::FILES[1]);
+    let orig = std::fs::read(&path).unwrap();
+    let at = |i: usize, v: f32| -> Vec<u8> {
+        let mut b = orig.clone();
+        b[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+        b
+    };
+    for (what, bytes) in [("cut short", orig[..orig.len() - 4].to_vec()), ("a NaN", at(0, f32::NAN)), ("a negative gamma", at(wr * (wr + 1), -0.5))] {
+        std::fs::write(&path, &bytes).unwrap();
+        let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+        assert!(e.contains("rebuild"), "{what}: {e}");
+    }
+    std::fs::write(&path, &orig).unwrap();
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
 }
 
-/// A query the index cannot answer (a zero row, which a fit accepts) is left out of the level ratios: with one added
-/// they are the ratios without it, bit for bit, from the same queries. The ratios do not depend on the threads that
-/// measure them.
+/// An index with a zero row (which a fit accepts) builds: its W2 forms are finite, and it opens with the same ones.
 #[test]
-fn a_zero_row_is_left_out_of_the_level_ratios() {
-    let ix = &fixture().ix;
-    let row = |r: usize| -> (Vec<f32>, Option<usize>) { (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r)) };
-    let qs: Vec<_> = (0..40).map(|i| row(i * 97 % ix.nrows)).collect();
-    let mut with_zero = qs.clone();
-    with_zero.insert(7, (vec![0f32; ix.n()], Some(5)));
-    assert!(query_ok(&with_zero[7].0).is_err());
-    let (a, na) = adaptive::level_ratios(ix, &qs);
-    let (b, nb) = adaptive::level_ratios(ix, &with_zero);
-    assert_eq!((na, nb), (qs.len(), qs.len()));
+fn an_index_with_a_zero_row_builds_and_opens() {
+    let tmp = tmp_dir("zero-row");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let xs = fit.join("Xs.npy");
+    let mut b = std::fs::read(&xs).unwrap();
+    let (hdr, off) = crate::util::npy_header(&b);
+    let n = crate::util::npy_shape(&hdr)[1];
+    b[off..off + 2 * n].fill(0);
+    std::fs::write(&xs, &b).unwrap();
+    let (_, built) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let zero: Vec<usize> = (0..built.nrows).filter(|&r| built.full_row_f16(r).iter().all(|&h| crate::util::f16_to_f32(h) == 0.0)).collect();
+    assert_eq!(zero.len(), 1);
+    let w = built.wforms.as_ref().unwrap();
+    assert!(w.h.iter().chain(&w.c).all(|x| x.is_finite()));
+    let (_, opened) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(opened.store_hash(), built.store_hash());
+}
+
+/// The W2 forms do not depend on the threads that build them: a build of synth4k on 1 and on 3 threads stores the
+/// forms the fixture's build does, bit for bit.
+#[test]
+fn the_w2_forms_do_not_depend_on_the_threads() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let w = fixture().ix.wforms.as_ref().unwrap();
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(&a), bits(&b));
     for threads in [1, 3] {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
-        assert_eq!(bits(&pool.install(|| adaptive::level_ratios(ix, &qs).0)), bits(&a), "{threads} threads");
+        let (_, ix) = pool.install(|| build(dir, &BuildOptions::default(), &mut |_| {})).unwrap();
+        let x = ix.wforms.as_ref().unwrap();
+        assert_eq!((bits(&x.h), bits(&x.c)), (bits(&w.h), bits(&w.c)), "{threads} threads");
     }
 }
 
-/// The level ratios measure each training query as k-NN reads it, at unit scale: queries scaled by 2^-10 give the
-/// ratios the queries give, to within the f16 rounding of their smallest values (unscaled, they were percents low).
+/// The W2 spread takes the centre's term off as the reader's estimate does: on synth4k's queries and clusters, the
+/// reader's tau^2 (`w2_tau2`) is a'Ma' + gamma max(0, T' - a'Na') with a' = P'(q - alr m) (in f64 from the order
+/// state's directions) and T' = D'GD', D' = (qv - alr mv) d_l, to f32 rounding; and it is not the spread with the
+/// centre's term left in.
 #[test]
-fn the_level_ratios_do_not_depend_on_the_queries_scale() {
-    let ix = &fixture().ix;
-    let qs: Vec<(Vec<f32>, Option<usize>)> = (0..40).map(|i| {
-        let r = i * 97 % ix.nrows;
-        (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r))
-    }).collect();
-    let small: Vec<_> = qs.iter().map(|(q, r)| (q.iter().map(|&x| x * 2f32.powi(-10)).collect(), *r)).collect();
-    let (a, b) = (adaptive::level_ratios(ix, &qs).0, adaptive::level_ratios(ix, &small).0);
-    assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-3 * x), "{a:?} {b:?}");
+fn the_w2_spread_takes_the_centre_term_off() {
+    let f = fixture();
+    let ix = &f.ix;
+    let (n, ndl) = (ix.n(), ix.meta.ndl());
+    let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
+    let (mut checked, mut moved) = (0, 0);
+    for q in &f.queries {
+        let pr = prep2(ix, q);
+        for ci in (0..ix.k()).filter(|&c| ix.cl[c].r1 - ix.cl[c].r0 >= 16) {
+            let g = ix.cl[ci].g;
+            let gq = group_q2r(ix, g, &pr, false);
+            let alr = cluster_q2(ix, ci, &gq, &pr, pr.qm(ix, ci)).alr as f64;
+            let got = w2_tau2(ix, ci, &gq, alr, &st.coefs_of(ci, n, &pr.q32)[..st.r]);
+            let m = &ix.centres32[ci * n..(ci + 1) * n];
+            let a: Vec<f32> = (0..st.r).map(|j| {
+                let p = &st.dirs(ci, st.r, n)[j * n..(j + 1) * n];
+                (p.iter().zip(&pr.q32).zip(m).map(|((&x, &y), &z)| x as f64 * (y as f64 - alr * z as f64)).sum::<f64>() * st.dsc[ci * st.r + j] as f64) as f32
+            }).collect();
+            let a0 = st.coefs_of(ci, n, &pr.q32)[..st.r].to_vec();
+            for (l, &gl) in got.iter().enumerate().take(ndl) {
+                let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[ci].mv32);
+                let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
+                let want = wf.tau2(ndl, ci, l, &a, t(alr));
+                assert!((gl - want).abs() <= 1e-4 * want.abs() + 1e-12, "cluster {ci}, level {l}: {gl} against {want}");
+                checked += 1;
+                moved += ((wf.tau2(ndl, ci, l, &a0, t(0.0)) - want).abs() > 1e-3 * want.abs()) as usize;
+            }
+        }
+    }
+    assert!(checked > 0 && moved > 0, "{checked} spreads checked, {moved} moved by the centre's term");
 }
 
-/// A cluster read on the index path at the statistical width (each deterministic level at min(1, psi rho r) of its
-/// half-width, r the cluster's stored ratio) sends on from each level no row the certified width would drop: against
-/// the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and the items
-/// it finds above t are among those the certified read finds, each with its own score. Over synth4k's clusters of at
-/// least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels, the width takes
-/// effect, and where psi rho r reaches 1 at every level the read is the certified one.
+/// A cluster read on the index path at the W2 width (each deterministic level at min(1, psi tau / (dwa sqrt U)) of its
+/// half-width, tau from the cluster's stored forms) sends on from each level no row the certified width would drop:
+/// against the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and
+/// the items it finds above t are among those the certified read finds, each with its own score. Over synth4k's
+/// clusters of at least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels,
+/// the width takes effect, and the cap binds: some reads at a large psi, and every read at an infinite one, are the
+/// certified read.
 #[test]
 fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
     let f = fixture();
     let ix = &f.ix;
     let (nl, ndl) = (ix.meta.nl(), ix.meta.ndl());
     let e = 64.0 * 2f64.powi(-24);
-    let ratio = ix.lratio.as_ref().unwrap();
     let big: Vec<usize> = (0..ix.k()).filter(|&c| ix.cl[c].r1 - ix.cl[c].r0 >= 64).collect();
     assert!(big.len() >= 4, "{} clusters of at least 64 rows", big.len());
     let (mut capped, mut fewer) = (0, 0);
@@ -2432,12 +2492,11 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
         let t10 = (tr[9].0 + tr[10].0) / 2.0;
         for &ci in &big {
             let c = &ix.cl[ci];
-            let gp = &ix.groups[c.g];
             let mut sc: Vec<f64> = (c.r0..c.r1).map(|r| exact_value2(ix, &pr, r)).collect();
             sc.sort_by(f64::total_cmp);
             for t in [t10, (sc[sc.len() / 2] + sc[sc.len() / 2 + 1]) / 2.0] {
                 for plan in [Plan::default(), Plan { int_det: false, gtab: false, repack: false, ..Plan::default() }] {
-                    for psi in [0.5, 2.0, adaptive::PSI, 50.0] {
+                    for psi in [0.5, 2.0, adaptive::PSI, 50.0, f64::INFINITY] {
                         let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}", plan.int_det);
                         let read = |width: Option<f64>| {
                             let mut rd = KnnReader::new(ix, &pr, None, ix.nrows, plan, crate::kernel::Stats::new(nl));
@@ -2464,88 +2523,267 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
                             assert!(v > t && (v - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e, "{what}: entity {ent} scored {v}");
                             assert!(fb.iter().any(|x| x.1 == ent), "{what}: entity {ent} not found by the certified read");
                         }
-                        if (0..ndl).all(|l| psi * gp.rho[l] as f64 * ratio[ci * ndl + l] as f64 >= 1.0) {
-                            capped += 1;
-                            assert_eq!((&sa.enter, sa.full_reads, &fa), (&sb.enter, sb.full_reads, &fb), "{what}: capped at every level, yet not the certified read");
-                        }
+                        let same = (&sa.enter, sa.full_reads, &fa) == (&sb.enter, sb.full_reads, &fb);
+                        assert!(same || psi.is_finite(), "{what}: an infinite psi, yet not the certified read");
+                        capped += (psi == 50.0 && same) as usize;
                         fewer += (sa.enter[ndl] < sb.enter[ndl]) as usize;
                     }
                 }
             }
         }
     }
-    assert!(capped > 0 && fewer > 0, "{capped} reads capped at every level, {fewer} dropping more rows than the certified width");
+    assert!(capped > 0 && fewer > 0, "{capped} reads at psi 50 the certified one, {fewer} dropping more rows than the certified width");
 }
 
-/// Study (ignored; run by hand on a fit, which it rebuilds when its saved index is stale, as the bindings do): the level
-/// ratios measured with given training queries, for a check against the replay that chose the rule
-/// (`bench/suite/notes/visit-order/results/stored-correction/check_ratios.py`). DIAG_DIR the fit, DIAG_PREP a directory
-/// with `queries.npy` (corpus rows as queries) and `query_rows.npy` (their entities, each left out of its own
-/// cluster), DIAG_OUT the output prefix: `.study.f32` (k x ndl, from those queries) and `.build.f32` (the build's
-/// own). Also the time of each and of reading the ratios as the reader does (`CQ2::set_width`'s arithmetic over every
-/// cluster).
+/// Study (ignored; run by hand on a fit, rebuilt when stale): whether a cluster's rms half-width at a deterministic
+/// level is a query-independent multiple of |D| (D = qv d_l, `GQ2::cq`) or of its code term, dwa_l rms(r) (`CQ2::dwa`, r
+/// the rows' stored norms, `det_norm`). Over each query's first DIAG_M clusters by the probe's window key, one line per
+/// (query, cluster, level): qi c l rms(h) |D| dwa rms(r). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_OUT, DIAG_M, DIAG_NQ.
 #[test]
 #[ignore]
-fn study_level_ratios() {
+fn study_w_unit() {
+    use rayon::prelude::*;
+    use std::io::Write;
     let dir = std::env::var("DIAG_DIR").unwrap();
     let prep = std::env::var("DIAG_PREP").unwrap();
     let out = std::env::var("DIAG_OUT").unwrap();
-    let mut log = |s: String| eprintln!("{s}");
+    let m: usize = std::env::var("DIAG_M").ok().map_or(20, |s| s.parse().unwrap());
+    let nqmax: usize = std::env::var("DIAG_NQ").ok().map_or(usize::MAX, |s| s.parse().unwrap());
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut |_| {}) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut |_| {}).unwrap(),
+    };
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let (n, ndl, k, nl) = (ix.n(), ix.meta.ndl(), ix.k(), ix.meta.nl());
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = (qs.len() / d).min(nqmax);
+    let lines: Vec<String> = (0..nq).into_par_iter().flat_map_iter(|qi| {
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let pr = prep2(&ix, &q);
+        let ok = ad.z_keys(&ix, &q, None, true);
+        let mut o: Vec<usize> = (0..k).filter(|&c| ix.cl[c].r1 > ix.cl[c].r0).collect();
+        o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+        o.truncate(m);
+        let mut st = crate::kernel::Stats::new(nl);
+        let mut rf = Refiner::new(&ix, &pr);
+        let mut v = Vec::new();
+        for &c in &o {
+            let cl = &ix.cl[c];
+            let gq = get_gq2(&ix, &pr, cl.g, &mut st);
+            let cq = cluster_q2(&ix, c, gq, &pr, pr.qm(&ix, c));
+            for l in 0..ndl {
+                let iv = rf.refine(&(cl.r0..cl.r1).map(|r| (r as u32, l)).collect::<Vec<_>>(), &mut st);
+                let nr = iv.len() as f64;
+                let rh = (iv.iter().map(|&(lo, hi)| ((hi - lo) / 2.0).powi(2)).sum::<f64>() / nr).sqrt();
+                let rr = ((cl.r0..cl.r1).map(|r| det_norm(&ix, c, l, r).powi(2)).sum::<f64>() / nr).sqrt();
+                v.push(format!("{qi} {c} {l} {rh:.6e} {:.6e} {:.6e} {rr:.6e}", gq.cq[l].sqrt(), cq.dwa[l]));
+            }
+        }
+        v
+    }).collect();
+    let mut f = std::fs::File::create(&out).unwrap();
+    writeln!(f, "# qi c l rms_h D dwa rms_r").unwrap();
+    for x in lines {
+        writeln!(f, "{x}").unwrap();
+    }
+}
+
+/// Study (ignored; run by hand on a fit, rebuilt when stale; pin it to one core): the W2 width's work per index-path
+/// cluster at query time. For the benchmark queries' first DIAG_M clusters by the probe's window key, each query at the
+/// scale k-NN reads it (`Prep2::unit`): the group setups (one per query and group, as the reader keeps them), alr and
+/// the coefficients a are formed first; then DIAG_REPS passes over every (query, cluster), query by query, time
+/// `w2_tau2` alone and `OrderState::coefs_of` alone, and the same calls DIAG_REPS times back to back on each case (the
+/// work with its inputs in cache). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_M, DIAG_REPS.
+#[test]
+#[ignore]
+fn study_w2_cost() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let m: usize = std::env::var("DIAG_M").ok().map_or(20, |s| s.parse().unwrap());
+    let reps: usize = std::env::var("DIAG_REPS").ok().map_or(20, |s| s.parse().unwrap());
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut |_| {}) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut |_| {}).unwrap(),
+    };
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let (n, k) = (ix.n(), ix.k());
+    let st = ix.order.as_ref().unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let mut cases = Vec::new();
+    for qi in 0..qs.len() / d {
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let ok = ad.z_keys(&ix, &q, None, true);
+        let mut o: Vec<usize> = (0..k).filter(|&c| ix.cl[c].r1 > ix.cl[c].r0).collect();
+        o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+        let pr = std::sync::Arc::new(prep2(&ix, &q).unit());
+        let mut gqs: std::collections::HashMap<usize, std::sync::Arc<GQ2>> = Default::default();
+        for &c in o.iter().take(m) {
+            let gq = gqs.entry(ix.cl[c].g).or_insert_with(|| std::sync::Arc::new(group_q2r(&ix, ix.cl[c].g, &pr, false))).clone();
+            let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
+            let a = st.coefs_of(c, n, &pr.q32)[..st.r].to_vec();
+            cases.push((c, gq, alr, a, pr.clone()));
+        }
+    }
+    let calls = (reps * cases.len()) as f64;
+    let mut sink = 0f64;
+    let mut time = |hot: bool, f: &mut dyn FnMut(usize) -> f64| -> f64 {
+        let t = Timer::new();
+        if hot {
+            for i in 0..cases.len() {
+                for _ in 0..reps {
+                    sink += f(i);
+                }
+            }
+        } else {
+            for _ in 0..reps {
+                for i in 0..cases.len() {
+                    sink += f(i);
+                }
+            }
+        }
+        t.s() / calls * 1e6
+    };
+    let mut w2 = |i: usize| { let (c, gq, alr, a, _) = &cases[i]; std::hint::black_box(w2_tau2(&ix, *c, gq, *alr, a))[0] };
+    let (w_cold, w_hot) = (time(false, &mut w2), time(true, &mut w2));
+    let mut co = |i: usize| { let (c, _, _, _, pr) = &cases[i]; std::hint::black_box(st.coefs_of(*c, n, &pr.q32))[0] as f64 };
+    let (c_cold, c_hot) = (time(false, &mut co), time(true, &mut co));
+    eprintln!("{dir}: {} (query, cluster) cases x {reps}, us per call, query by query / back to back on one case: w2_tau2 {w_cold:.3} / {w_hot:.3}, coefs_of {c_cold:.3} / {c_hot:.3} ({sink:.3e})", cases.len());
+}
+
+/// Study (ignored; run by hand on a fit, rebuilt when stale): W2 with the centre's term taken off, against W2 as built.
+/// The reader's score error is (qv - alr mv) . (z - z^) (alr the cluster's `CQ2::alr`, mv = V_q^T m its centre's
+/// coordinates), where W2 takes D = qv d_l and a = P'q; the variant takes D' = (qv - alr mv) d_l, T' = D'GD' and a' = a -
+/// alr P'm. For each line of the replay's study_w_rule table DIAG_REF (the benchmark queries' first 20 clusters, each
+/// level): tau^2 under both, from this index's forms. Writes DIAG_OUT, the table with column 11 (W1's) replaced by W2 as
+/// built and column 12 (W2's) by the variant, for replay.py --w; prints, per level, the actual spread (the interval
+/// midpoints' error, the table's a_ref) over each prediction, p10 / median / p90, over all pairs and over those holding a
+/// true neighbour; and the reader's tau^2 (`w2_tau2`, which the reader now uses, in f32 kernels) against the variant
+/// computed here in f64, with the time of one `w2_tau2` call (one cluster, every level). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF, DIAG_OUT.
+#[test]
+#[ignore]
+fn study_w2_alr() {
+    use std::io::Write;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let refp = std::env::var("DIAG_REF").unwrap();
+    let out = std::env::var("DIAG_OUT").unwrap();
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut |_| {}) {
+        Ok(x) => x,
+        Err(_) => rebuild(&dir, &BuildOptions::default(), &mut |_| {}).unwrap(),
+    };
+    let (n, ndl) = (ix.n(), ix.meta.ndl());
+    let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    // in f64 throughout, apart from the reader's f32 kernels: a'Xa over the packed record (off-diagonals doubled)
+    let rp = wf.r * (wf.r + 1) / 2;
+    let quad64 = |x: &[f32], a: &[f32]| -> f64 {
+        let (mut s, mut k) = (0f64, 0);
+        for i in 0..a.len() {
+            for j in i..a.len() {
+                s += x[k] as f64 * a[i] as f64 * a[j] as f64;
+                k += 1;
+            }
+        }
+        s
+    };
+    let tau2 = |c: usize, l: usize, a: &[f32], t: f64| {
+        let rec = wf.of(ndl, c, l);
+        quad64(&rec[..rp], a) + rec[2 * rp] as f64 * (t - quad64(&rec[rp..2 * rp], a)).max(0.0)
+    };
+    let (mut worst, mut over, mut calls, mut secs) = (0f64, 0usize, 0usize, 0f64);
+    let mut f = std::fs::File::create(&out).unwrap();
+    // per level and (all, hit): actual over predicted, as built and the variant
+    let mut r: Vec<[Vec<f64>; 4]> = (0..ndl).map(|_| Default::default()).collect();
+    for line in std::fs::read_to_string(&refp).unwrap().lines() {
+        if line.starts_with('#') {
+            writeln!(f, "{line}").unwrap();
+            continue;
+        }
+        let mut v: Vec<String> = line.split_whitespace().map(|x| x.to_string()).collect();
+        let x: Vec<f64> = v.iter().map(|y| y.parse().unwrap()).collect();
+        let (qi, c, l, hit, a_ref) = (x[0] as usize, x[1] as usize, x[3] as usize, x[5] > 0.0, x[6]);
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let pr = prep2(&ix, &q);
+        let g = ix.cl[c].g;
+        let gq = group_q2r(&ix, g, &pr, false);
+        let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
+        let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[c].mv32);
+        let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
+        let a = st.coefs_of(c, n, &q)[..st.r].to_vec();
+        let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])[..st.r].to_vec();
+        let a2: Vec<f32> = a.iter().zip(&am).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
+        let (w, wv) = (tau2(c, l, &a, t(0.0)), tau2(c, l, &a2, t(alr)));
+        let tm = Timer::new();
+        let reader = std::hint::black_box(w2_tau2(&ix, c, &gq, alr, &a))[l];
+        (secs, calls) = (secs + tm.s(), calls + 1);
+        let rel = (reader - wv).abs() / wv.abs().max(1e-300);
+        (worst, over) = (worst.max(rel), over + (rel > 1e-4) as usize);
+        v[11] = format!("{w:.6e}");
+        v[12] = format!("{wv:.6e}");
+        writeln!(f, "{}", v.join(" ")).unwrap();
+        for (i, p) in [w, wv].into_iter().enumerate() {
+            let ratio = (a_ref / p).sqrt();
+            r[l][2 * i].push(ratio);
+            if hit {
+                r[l][2 * i + 1].push(ratio);
+            }
+        }
+    }
+    let q3 = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); format!("{:.3} / {:.3} / {:.3} ({})", v[v.len() / 10], v[v.len() / 2], v[v.len() * 9 / 10], v.len()) };
+    for (l, x) in r.iter_mut().enumerate() {
+        let [a, b, c, d2] = x;
+        eprintln!("{dir}: level {l}, actual over predicted, p10 / median / p90 (pairs): all pairs: as built {}, centre off {}; true-neighbour pairs: as built {}, centre off {}", q3(a), q3(c), q3(b), q3(d2));
+    }
+    eprintln!("{dir}: the reader's tau^2 (w2_tau2) against the centre-off variant: largest relative difference {worst:.2e}, {over} of {calls} lines past 1e-4; one call (a cluster, {ndl} levels) {:.2} us on average", secs / calls as f64 * 1e6);
+}
+
+/// Study (ignored; run by hand on a fit, rebuilt when stale): the stored W2 forms against the replay that chose the
+/// rule (`study_w_rule` on research/sampled-width, its output DIAG_REF): for each of its (query, cluster, level) lines,
+/// tau^2 = a'Ma + gamma max(0, T - a'Na) from this index's forms, with a and T for the same query (unscaled, as the
+/// study had them), over the study's tau2_W2, and the stored gamma over the study's. Also the rebuild's log lines.
+/// DIAG_DIR, DIAG_PREP (queries.npy), DIAG_REF.
+#[test]
+#[ignore]
+fn study_w2_forms() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let refp = std::env::var("DIAG_REF").unwrap();
+    let mut log = |s: String| if s.contains("W2 forms") || s.contains("assembled") { eprintln!("{s}") };
     let (_, ix) = match open(&dir, &OpenOptions::default(), &mut log) {
         Ok(x) => x,
         Err(_) => rebuild(&dir, &BuildOptions::default(), &mut log).unwrap(),
     };
+    let (n, ndl) = (ix.n(), ix.meta.ndl());
+    let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
+    let rp = wf.r * (wf.r + 1) / 2;
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
     let (qs, d) = qn.rows_f32("queries").unwrap();
-    let ents: Vec<i64> = crate::util::read_npy(&format!("{prep}/query_rows.npy")).i64s();
-    let queries: Vec<(Vec<f32>, Option<usize>)> = ents.iter().enumerate().map(|(i, &e)| {
-        let mut v = vec![0f32; ix.n()];
-        v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]);
-        (v, Some(ix.row_of_ent(e as u32)))
-    }).collect();
-    let t = Timer::new();
-    let (r, _) = adaptive::level_ratios(&ix, &queries);
-    eprintln!("{dir}: level ratios from {} given queries in {:.1}s on {} threads", queries.len(), t.s(), rayon::current_num_threads());
-    let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
-    std::fs::write(format!("{out}.study.f32"), bytes(&r)).unwrap();
-    std::fs::write(format!("{out}.build.f32"), bytes(ix.lratio.as_ref().unwrap())).unwrap();
-    let t = Timer::new();
-    let (reps, ndl) = (1000, ix.meta.ndl());
-    let mut acc = 0f32;
-    for i in 0..reps {
-        let psi = 4.0 + i as f64 * 1e-6;
-        for ci in 0..ix.k() {
-            let gp = &ix.groups[ix.cl[ci].g];
-            let lr = &ix.lratio.as_ref().unwrap()[ci * ndl..(ci + 1) * ndl];
-            for (l, &x) in lr.iter().enumerate() {
-                acc += std::hint::black_box((psi * gp.rho[l] as f64 * x as f64).min(1.0) as f32);
-            }
-        }
+    let (mut rt, mut rg) = (Vec::new(), Vec::new());
+    for line in std::fs::read_to_string(&refp).unwrap().lines().filter(|x| !x.starts_with('#')) {
+        let f: Vec<f64> = line.split_whitespace().map(|x| x.parse().unwrap()).collect();
+        let (qi, c, l) = (f[0] as usize, f[1] as usize, f[3] as usize);
+        let mut q = vec![0f32; n];
+        q[..d].copy_from_slice(&qs[qi * d..(qi + 1) * d]);
+        let pr = prep2(&ix, &q);
+        let g = ix.cl[c].g;
+        let qv = group_q2r(&ix, g, &pr, false).qv;
+        let h = wf.h(n, ndl, g, l);
+        let t: f64 = (0..n).map(|j| qv[j].powi(2) * h[j] as f64).sum();
+        let a = st.coefs_of(c, n, &q)[..st.r].to_vec();
+        let rec = wf.of(ndl, c, l);
+        let tau2 = wf.tau2(ndl, c, l, &a, t);
+        rt.push(tau2 / f[12]);
+        rg.push(rec[2 * rp] as f64 / f[16]);
     }
-    eprintln!("reading the ratios as the reader does: {:.1} ns per cluster ({acc})", t.s() * 1e9 / (reps * ix.k()) as f64);
-}
-
-/// The deterministic levels' psi apart from the stop's: unset or equal to psi it is k-NN at psi; any value, infinity
-/// (the certified width) too, returns k visible items, each with its own score, and at psi infinite the exact query.
-#[test]
-fn the_levels_psi_is_psi_unless_set() {
-    let f = fixture();
-    let ix = &f.ix;
-    let e = 64.0 * 2f64.powi(-24);
-    let ad = adaptive::Adaptive::new(ix, cheap_index(fixed_costs())).unwrap();
-    for q in &f.queries {
-        let pr = prep2(ix, q);
-        for psi in [2.0, adaptive::PSI] {
-            let base = ad.knn(ix, q, 10, None, psi, probe_plan()).0.ents;
-            assert_eq!(ad.knn_levels(ix, q, 10, None, psi, Some(psi), probe_plan()).0.ents, base);
-            for lp in [0.0, 1.0, 50.0, f64::INFINITY] {
-                let got = ad.knn_levels(ix, q, 10, None, psi, Some(lp), probe_plan()).0.ents;
-                assert_eq!(got.len(), 10);
-                assert!(got.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e));
-            }
-        }
-        assert_eq!(ad.knn_levels(ix, q, 10, None, f64::INFINITY, Some(1.0), probe_plan()).0.ents, knn2(ix, q, 10, None, probe_plan()).ents);
-    }
+    let q3 = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); format!("{:.4} / {:.4} / {:.4} / {:.4} / {:.4}", v[0], v[v.len() / 10], v[v.len() / 2], v[v.len() * 9 / 10], v[v.len() - 1]) };
+    eprintln!("{dir}: {} lines of {refp}; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) {}; gamma {}", rt.len(), q3(&mut rt), q3(&mut rg));
+    eprintln!("storage: per cluster and level {} f32, per cluster {} B (with P'm); per group and level {} f32", wrule::WForms::rec(wf.r), 4 * wrule::WForms::stride(wf.r, ndl), n);
 }
 
 /// The approximate k-NN returns k visible items (each once, with its own score) whenever k are visible, under the
@@ -4254,15 +4492,9 @@ fn study_count_model() {
                     let vrows: Vec<usize> = (u0..u1).filter(|&r| vis.as_ref().is_none_or(|v| v.rows.binary_search(&(r as u32)).is_ok())).collect();
                     let (mut avg, mut medp) = (Vec::new(), Vec::new());
                     for l in 0..ndl {
-                        let sb = &ix.lscal[l][ix.soff[l][c]..];
-                        let srows = gp.levels[l].srows;
                         let ws: Vec<f64> = vrows.iter().map(|&row| {
-                            let ri = row - cl.r0;
-                            let byte = sb[(ri / BLK) * srows * 16 + (ri % 32 & 15)];
-                            let code = (if ri % 32 < 16 { byte & 15 } else { byte >> 4 }) as usize;
                             let si = crate::index::item_scale(ix.ahat[row], cl.mn32, gp.lamsum) as f64;
-                            let rho = if code == 15 { ix.esc.get(l as u8, 0, row as u32) as f64 } else { gp.pconst[l] as f64 * si * gp.ntab[l][code] as f64 };
-                            (cq.dwa[l] as f64 * rho + cq.fixed as f64 + si * cq.ewdet as f64) * pr.dial[l] as f64
+                            (cq.dwa[l] as f64 * det_norm(&ix, c, l, row) + cq.fixed as f64 + si * cq.ewdet as f64) * pr.dial[l] as f64
                         }).collect();
                         avg.push(ws.iter().map(|&w| sf((t - qmf - w) / sig[c])).sum::<f64>() / ws.len() as f64);
                         let mut wm = ws.clone();
@@ -4316,6 +4548,20 @@ fn study_count_model() {
     eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
 }
 
+/// Each group's derived rho per deterministic level, the studies' unit of a level's error spread: rho derived from the
+/// build's design, whose level weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual variance at the level,
+/// pi_c the query profile of the fit in `dir`), so both sides of Cauchy-Schwarz carry a_c = D_c^2 pi_c per coordinate
+/// and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2.
+fn derived_rho(ix: &Index2, dir: &str) -> Vec<Vec<f32>> {
+    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
+    let n = ix.n();
+    ix.groups.iter().enumerate().map(|(g, gp)| (0..ix.meta.ndl()).map(|l| {
+        let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
+        let sum: f64 = a.iter().sum();
+        if sum > 0.0 { (a.iter().map(|x| x * x).sum::<f64>().sqrt() / sum) as f32 } else { 1.0 }
+    }).collect()).collect()
+}
+
 /// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: per query,
 /// every cluster's centre score, sigma, order key and stream key, and for the DIAG_M clusters first in the k-NN order
 /// (among those holding a visible row) every visible row's entity, exact score, key, certified interval from the key
@@ -4325,7 +4571,7 @@ fn study_count_model() {
 /// u32: cluster, visible rows; a cluster of u32::MAX pads a query with fewer live clusters), `.rows` (per row, 5 + 2
 /// levels words: entity u32, then f32 exact score, key, key interval lo and hi, each level's lo and hi), `.kst` (per
 /// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text; with each group's derived rho per
-/// deterministic level, `GroupPlan2::rho`, and per randomised level its certified constant `csgl` and its blocks'
+/// deterministic level, `derived_rho`, and per randomised level its certified constant `csgl` and its blocks'
 /// `rates`).
 #[test]
 #[ignore]
@@ -4351,7 +4597,7 @@ fn study_layered_dump() {
     let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
     let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
-    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\nrho {:?}\ncsgl {:?}\nrates {:?}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows, ix.groups.iter().map(|gp| gp.rho[..ix.meta.ndl()].to_vec()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.csgl.clone()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.rates.iter().map(|r| r.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>())).unwrap();
+    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\nrho {:?}\ncsgl {:?}\nrates {:?}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows, derived_rho(&ix, &dir), ix.groups.iter().map(|gp| gp.csgl.clone()).collect::<Vec<_>>(), ix.groups.iter().map(|gp| gp.rates.iter().map(|r| r.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>())).unwrap();
     let kst: Vec<f32> = (0..k).flat_map(|c| {
         let cl = &ix.cl[c];
         let nr = (cl.r1 - cl.r0).max(1) as f64;
@@ -4444,16 +4690,10 @@ fn study_layered_kernel() {
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
     let plan = Plan::default();
     eprintln!("{dir} {set}: k {kk}, groups {}, levels end at {:?} B, rho {rho_arg}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
-    // rho derived from the build's own design: a level's weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual
-    // variance at the level, pi_c the query profile), so both sides of Cauchy-Schwarz carry a_c = sqrt(v_c pi_c) =
-    // D_c^2 pi_c per coordinate, and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2
-    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
     let n = ix.n();
+    let derived = derived_rho(&ix, &dir);
     for l in 0..ix.meta.ndl() {
-        let mut r: Vec<f64> = ix.groups.iter().enumerate().map(|(g, gp)| {
-            let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
-            a.iter().map(|x| x * x).sum::<f64>().sqrt() / a.iter().sum::<f64>()
-        }).collect();
+        let mut r: Vec<f64> = derived.iter().map(|x| x[l] as f64).collect();
         r.sort_by(|a, b| a.total_cmp(b));
         if rho_arg == "derived" {
             rho.push(r[r.len() / 2]);

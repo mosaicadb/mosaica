@@ -199,119 +199,6 @@ pub fn sigma_of(st: &super::order::OrderState, rest: f64, n: usize, ci: usize, q
     (v + rest * (qq - pp).max(0.0)).max(0.0).sqrt()
 }
 
-/// The probe's window key of every cluster, mu_c + z(1, v) sigma_c(q), z(1, v) = Phi^-1(v / (v + 1)) of its v rows
-/// (`nv`; 0 for none), from the clusters' centre scores `qm`, the order state `st` and the query's f32 values `q32`:
-/// the level ratios' ranking of the clusters, and the studies' (`Adaptive::z_keys`).
-pub fn window_keys(ix: &Index2, st: &super::order::OrderState, qm: &[f64], q32: &[f32], nv: impl Fn(usize) -> usize) -> Vec<f64> {
-    let qq: f64 = q32.iter().map(|&x| x as f64 * x as f64).sum();
-    let mut p = vec![0f32; st.r];
-    (0..ix.k()).map(|c| {
-        let v = nv(c) as f64;
-        let z = if v == 0.0 { 0.0 } else { inv_norm(v / (v + 1.0)) };
-        qm[c] + z * sigma_of(st, st.rest(c), ix.n(), c, q32, qq, &mut p)
-    }).collect()
-}
-
-/// The file of a saved index that holds its level ratios (`level_ratios`).
-pub const RATIO_FILE: &str = "level_ratio.bin";
-/// The level ratios' training queries: this many rows of the index (all of them on a smaller one), each against the
-/// `RATIO_CLUSTERS` clusters it ranks first; a cluster in fewer than `RATIO_MIN_PAIRS` of those (query, cluster) pairs
-/// takes its group's ratio. Sample sizes, not tuned values: those of the replay the rule was chosen on
-/// (`bench/suite/notes/visit-order/results/sample-when-needed/replay.py`, "A data cluster ratio").
-pub const RATIO_QUERIES: usize = 400;
-pub const RATIO_CLUSTERS: usize = 20;
-pub const RATIO_MIN_PAIRS: usize = 3;
-
-/// Per cluster and deterministic level (k x ndl, cluster-major), the ratio of the spread of a row's error at the level
-/// to the derived width's unit, rho_g,l h (`GroupPlan2::rho` of the cluster's group g, h the row's certified
-/// half-width), measured with `queries` (each a query of the index's n values and the row it was taken from, which is
-/// left out of its own cluster): each query takes the `RATIO_CLUSTERS` clusters first by mu + z(1, v) sigma (the
-/// probe's window key over every row, z(1, v) = Phi^-1(v / (v + 1)), v the cluster's rows), and every other row of
-/// each, of a cluster with at least two, gives z = (s - m) / (rho_g,l h) at each level (s its score, m and h its
-/// certified interval's midpoint and half-width there). A cluster's ratio is the root mean square of its rows' z over
-/// its pairs; with fewer than `RATIO_MIN_PAIRS` pairs it is its group's (over the group's rows), else the whole
-/// index's, else 1. Each query is scaled as k-NN scales it (`Prep2::unit`). A query the index cannot answer
-/// (`query_ok`: a zero row) is left out. Needs the order state and stored vectors. Returns the ratios and the number
-/// of queries used.
-pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<f32>, usize) {
-    use rayon::prelude::*;
-    let (k, ndl, nl) = (ix.k(), ix.meta.ndl(), ix.meta.nl());
-    let st = ix.order.as_ref().expect("the level ratios rank the clusters by the order state, which this index lacks");
-    let centres = Approx::centres(ix);
-    let rows_of = |c: usize| ix.cl[c].r1 - ix.cl[c].r0;
-    // per query, each cluster it reads with its rows and sum of z^2 per level; added in query order, so that the sums
-    // do not depend on how the queries were split over threads
-    let used: Vec<&(Vec<f32>, Option<usize>)> = queries.iter().filter(|(q, _)| query_ok(q).is_ok()).collect();
-    type Sums = Vec<(usize, Vec<(f64, f64)>)>;
-    let per: Vec<Sums> = used.par_iter().map(|&(q, own)| {
-        // scaled as k-NN scales the query (`Prep2::unit`), since the intervals carry an absolute margin
-        let pr = prep2(ix, q).unit();
-        let keys = window_keys(ix, st, &centres.centre_scores(ix, &pr.q32), &pr.q32, rows_of);
-        let mut by: Vec<(f64, usize)> = (0..k).filter(|&c| rows_of(c) > 0).map(|c| (keys[c], c)).collect();
-        by.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-        let mut rf = Refiner::new(ix, &pr);
-        let mut sts = Stats::new(nl);
-        let mut out = Vec::new();
-        for &(_, c) in by.iter().take(RATIO_CLUSTERS) {
-            let cl = &ix.cl[c];
-            let rows: Vec<u32> = (cl.r0..cl.r1).filter(|&r| Some(r) != *own).map(|r| r as u32).collect();
-            if rows.len() < 2 {
-                continue;
-            }
-            let gp = &ix.groups[cl.g];
-            let s: Vec<f64> = rows.iter().map(|&r| exact_value2(ix, &pr, r as usize)).collect();
-            let sums = (0..ndl).map(|l| {
-                let iv = rf.refine(&rows.iter().map(|&r| (r, l)).collect::<Vec<_>>(), &mut sts);
-                let mut a = (0f64, 0f64);
-                for (&s, &(lo, hi)) in s.iter().zip(&iv) {
-                    let unit = gp.rho[l] as f64 * (hi - lo) / 2.0;
-                    if unit > 0.0 {
-                        let z = (s - (lo + hi) / 2.0) / unit;
-                        a = (a.0 + 1.0, a.1 + z * z);
-                    }
-                }
-                a
-            }).collect();
-            out.push((c, sums));
-        }
-        out
-    }).collect();
-    let (mut pairs, mut acc) = (vec![0usize; k], vec![(0f64, 0f64); k * ndl]);
-    for (c, sums) in per.into_iter().flatten() {
-        pairs[c] += 1;
-        for (l, x) in sums.into_iter().enumerate() {
-            let a = &mut acc[c * ndl + l];
-            *a = (a.0 + x.0, a.1 + x.1);
-        }
-    }
-    let ng = ix.groups.len();
-    let (mut grp, mut all) = (vec![(0f64, 0f64); ng * ndl], vec![(0f64, 0f64); ndl]);
-    for c in 0..k {
-        for l in 0..ndl {
-            let (x, g) = (acc[c * ndl + l], ix.cl[c].g);
-            grp[g * ndl + l] = (grp[g * ndl + l].0 + x.0, grp[g * ndl + l].1 + x.1);
-            all[l] = (all[l].0 + x.0, all[l].1 + x.1);
-        }
-    }
-    let rms = |x: (f64, f64)| (x.0 > 0.0 && x.1 > 0.0).then(|| (x.1 / x.0).sqrt());
-    let ratios = (0..k).flat_map(|c| (0..ndl).map(move |l| (c, l))).map(|(c, l)| {
-        let own = if pairs[c] >= RATIO_MIN_PAIRS { rms(acc[c * ndl + l]) } else { None };
-        own.or_else(|| rms(grp[ix.cl[c].g * ndl + l])).or_else(|| rms(all[l])).unwrap_or(1.0) as f32
-    }).collect();
-    (ratios, used.len())
-}
-
-/// `level_ratios` as a build measures them: with `RATIO_QUERIES` rows of the index drawn at random (by `seed`), each
-/// its stored vector as a query. Returns the ratios and the number of queries used.
-pub fn build_level_ratios(ix: &Index2, seed: u64) -> (Vec<f32>, usize) {
-    use rand::SeedableRng;
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed ^ 0x6c65_7665_6c73);
-    let mut rows = rand::seq::index::sample(&mut rng, ix.nrows, RATIO_QUERIES.min(ix.nrows)).into_vec();
-    rows.sort_unstable();
-    let queries: Vec<(Vec<f32>, Option<usize>)> = rows.iter().map(|&r| (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r))).collect();
-    level_ratios(ix, &queries)
-}
-
 /// The timing procedure (`measure`), structural choices rather than tuned values: `T_QUERIES` pseudo-queries (corpus
 /// rows spread over the index), and for each, under every visible share of `SHARES` (one row in s, by a hash of the
 /// row), the `T_CLUSTERS` clusters with the largest centre scores and `T_CLUSTERS` more spread evenly over the rest,
@@ -671,7 +558,7 @@ pub struct Adaptive {
     /// per randomised level, the spread of a row's error as a share of its certified half-width, the median over the
     /// groups of 1 / c (its half-width is c times the spread, c the certified constant `GroupPlan2::csgl`); k-NN at psi
     /// reads each randomised level at psi / c of its half-width (at most the certified width), and each deterministic
-    /// one at its cluster's statistical width (`KnnReader::with_width`): psi spreads of the row's error at every level
+    /// one at its cluster's W2 width (`KnnReader::with_width`): psi spreads of the row's error at every level
     inv_c: Vec<f64>,
     ndl: usize,
 }
@@ -724,8 +611,8 @@ impl Adaptive {
         }
         m.check().map_err(|e| format!("the cost model cannot price a query: {e}"))?;
         let st = ix.order.clone().ok_or("this index holds no order state (the clusters' directions the approximate queries read); rebuild it")?;
-        if ix.lratio.is_none() {
-            return Err("this index holds no level ratios (the approximate k-NN's width per cluster); rebuild it".into());
+        if ix.wforms.is_none() {
+            return Err("this index holds no W2 forms (the approximate k-NN's width per cluster); rebuild it".into());
         }
         let r = st.r;
         let rest: Vec<f64> = (0..ix.k()).map(|c| st.rest(c)).collect();
@@ -751,15 +638,7 @@ impl Adaptive {
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
     fn sigma(&self, ix: &Index2, ci: usize, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
-        let (st, r, n) = (&self.st, self.st.r, ix.n());
-        unsafe { crate::kernel::gemv_i8(q32, st.dirs(ci, r, n), n, &mut p[..r]) };
-        let (mut v, mut pp) = (0f64, 0f64);
-        for ((&pj, &sc), &l) in p[..r].iter().zip(&st.dsc[ci * r..(ci + 1) * r]).zip(&st.lam[ci * r..(ci + 1) * r]) {
-            let x = pj as f64 * sc as f64;
-            v += l as f64 * x * x;
-            pp += x * x;
-        }
-        (v + self.rest[ci] * (qq - pp).max(0.0)).max(0.0).sqrt()
+        sigma_of(&self.st, self.rest[ci], ix.n(), ci, q32, qq, p)
     }
 
     /// The upper bound of cluster ci's key (sigma <= sqrt(top |q|^2)).
@@ -800,15 +679,13 @@ impl Adaptive {
     pub(crate) fn z_keys(&self, ix: &Index2, q: &[f32], vis: Option<&Vis2>, sigma: bool) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
-        let nv = |ci: usize| vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
-        if sigma {
-            return window_keys(ix, &self.st, &qm, &pr.q32, nv);
-        }
-        let s = self.stream_scale(&pr.q32, &mut vec![0f32; self.st.r]);
+        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
+        let mut p = vec![0f32; self.st.r];
+        let s = self.stream_scale(&pr.q32, &mut p);
         (0..ix.k()).map(|ci| {
-            let v = nv(ci) as f64;
+            let v = vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize) as f64;
             let z = if v == 0.0 { 0.0 } else { inv_norm(v / (v + 1.0)) };
-            qm[ci] + z * self.st.rad[ci] * s
+            qm[ci] + z * if sigma { self.sigma(ix, ci, &pr.q32, qq, &mut p) } else { self.st.rad[ci] * s }
         }).collect()
     }
 
@@ -828,13 +705,6 @@ impl Adaptive {
     /// setup's cost). Returns k items whenever
     /// k are visible. `plan` is the index path's and the exact query's.
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
-        self.knn_levels(ix, q, kk, vis, psi, None, plan)
-    }
-
-    /// `knn` with the deterministic levels' statistical width at its own psi (`level_psi`, psi when None), apart from
-    /// the stop's and the randomised levels': a knob for studies; at psi infinite the exact query whatever it is.
-    #[allow(clippy::too_many_arguments)]
-    pub fn knn_levels(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, level_psi: Option<f64>, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
         assert!(psi >= 0.0, "psi is at least 0 (infinity is the exact query), not {psi}");
         let tm = Timer::new();
@@ -900,7 +770,9 @@ impl Adaptive {
         // given its clusters read directly are summed (`lost`), and the cluster whose saving takes the sum to the
         // setup's cost sets it up (at most twice the best purchase)
         let mut lost = vec![0f64; ix.groups.len()];
-        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(level_psi.unwrap_or(psi));
+        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(psi);
+        // each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
+        let mut wcoef: Vec<Option<[f32; order::R_MAX]>> = Vec::with_capacity(LOOKAHEAD);
         loop {
             let ts = tick();
             // the running k-th best (the batched direct rows scored first; their time is the reads'), the moments of
@@ -946,8 +818,10 @@ impl Adaptive {
                     info.sigma_cost += m.sig_us;
                     info.priced.push(ci as u32);
                     info.lam_priced.push(lam_stream);
+                    wcoef.push(Some(self.st.coefs(ci, &p[..self.st.r])));
                     sg
                 } else {
+                    wcoef.push(None);
                     self.st.rad[ci] * s
                 };
                 window.push((ci, sg));
@@ -960,6 +834,7 @@ impl Adaptive {
             let key = |&(ci, sg): &(usize, f64)| Key(qm[ci] + lam * sg, Reverse(ci));
             let i = (0..window.len()).max_by(|&a, &b| key(&window[a]).cmp(&key(&window[b]))).unwrap();
             let (ci, sg) = window.swap_remove(i);
+            let coef = wcoef.swap_remove(i);
             info.lam_read.push(lam);
             rd.st.cyc[P_ORDER] += tick() - ts;
             let tch = tick();
@@ -1009,6 +884,7 @@ impl Adaptive {
             if path == KnnPath::Direct {
                 rd.visit_z(ci, qm[ci], sg);
             } else {
+                rd.coef = coef;
                 rd.visit(ci, path);
             }
         }

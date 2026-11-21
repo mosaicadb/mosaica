@@ -1,0 +1,19 @@
+[build2] fit loaded; anon 45 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 677305 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 6.8s (sub-Gaussian c = 8.482): [([47], 5.994, ExactTail), ([47, 63, 127, 143], 7.805, Certificate), ([47, 127], 7.551, ConvexOrder)]
+[build2] plans 7.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[4.0, 0.0, 0.0, 0.0], [5.0, 1.0, 1.0, 0.5], [5.0, 4.0, 3.0, 1.0], [7.0, 6.0, 5.0, 3.0]]
+[build2] calibration sample 437769 items from 339 clusters
+[build2] calibrated 19.5s; anon 434 MB
+[build2] encoded 23.8s, with it the support table of 339 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 4.3 thread-seconds); anon 573 MB
+[build2] level ratios: 400 rows as queries, 0.9s
+[build2] W2 forms: 1.7s
+[build2] assembled 26.8s; anon 584 MB; x2 bound 3.052e-4; escapes: det norms 24, |y| 2597, kappa 9908, tan 16991; code hash 25d0c4be6d18a504
+[build2] saved to /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/encoded; store hash 1b86bd14f78883f0
+[repack] occupancy thresholds by level [0.09, 0.09, 0.05, 0.07, 0.09, 0.12] (timed in 0.0s)
+[approx] measured constants dir_us=0.40641968395850947 row_us_1=0.04767147952410046 row_us_4=0.05499724769185951 row_us_16=0.05654524519080773 row_us_64=0.0317969894571259 cl_us=3.905964468022991 cut_row_us_1=0.01662162711672431 cut_row_us_4=0.0653030075723319 cut_row_us_16=0.15136577217479524 cut_row_us_64=0.34723643396030307 cut_us=1.1126562500000001 grp_us=18.531 sig_us=0.73921875: timed: no cache at /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/compute-constants.txt; saved in /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/compute-constants.txt, in 0.2s; the exact planner's rule from them: r_rows=149 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/encoded in 0.192s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 1b86bd14f78883f0
+[repack] occupancy thresholds by level [0.09, 0.09, 0.05, 0.07, 0.08, 0.12] (timed in 0.0s)
+[open] 0.306s in all: fit read 0.069s, key 0.006s, index opened 0.193s, repack timed 0.037s; anon 71 MB
+[approx] measured constants dir_us=0.31132908961034056 row_us_1=0.05139960091446079 row_us_4=0.05432560242990374 row_us_16=0.04108499270651696 row_us_64=0.031131261163844688 cl_us=1.4723836999513455 cut_row_us_1=0.01942368691224384 cut_row_us_4=0.0702657641652708 cut_row_us_16=0.14694874285445145 cut_row_us_64=0.35803945569549644 cut_us=1.0829374999999999 grp_us=18.987 sig_us=0.75834375: timed: no cache at /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/compute-constants.txt; saved in /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-6f86a1c/compute-constants.txt, in 0.2s; the exact planner's rule from them: r_rows=70 r_kappa=0.000

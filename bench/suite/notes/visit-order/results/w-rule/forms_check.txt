@@ -1,0 +1,16 @@
+[build2] W2 forms: 5.6 thread-seconds of sums during the encoding, then 0.2s
+[build2] assembled 136.3s; anon 772 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+/home/joe/code/vexact-data/wrule/val/inat: 4000 lines of /home/joe/code/vexact-data/sampled/dump/w-inat-test.txt; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) 1.0000 / 1.0000 / 1.0000 / 1.0000 / 1.0000; gamma 0.9999 / 1.0000 / 1.0000 / 1.0000 / 1.0001
+storage: per cluster and level 274 f32, per cluster 2256 B (with P'm); per group and level 2048 f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 137.47s
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:23.06
+	Maximum resident set size (kbytes): 6477904
+564000	/home/joe/code/vexact-data/wrule/val/inat/encoded/wrule_c.bin
+[build2] W2 forms: 2.9 thread-seconds of sums during the encoding, then 0.1s
+[build2] assembled 31.4s; anon 659 MB; x2 bound 6.328e-4; escapes: det norms 1257, |y| 3486, kappa 11075, tan 23166; code hash f282d680b4f756a9
+/home/joe/code/vexact-data/wrule/val/laion: 4000 lines of /home/joe/code/vexact-data/sampled/dump/w-laion-test.txt; stored over the study's, min / p10 / median / p90 / max: tau^2 (W2) 1.0000 / 1.0000 / 1.0000 / 1.0000 / 1.0000; gamma 0.9999 / 1.0000 / 1.0000 / 1.0000 / 1.0001
+storage: per cluster and level 274 f32, per cluster 2256 B (with P'm); per group and level 512 f32
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 31.89s
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:33.36
+	Maximum resident set size (kbytes): 3069692
+1128000	/home/joe/code/vexact-data/wrule/val/laion/encoded/wrule_c.bin

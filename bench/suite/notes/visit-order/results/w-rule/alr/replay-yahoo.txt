@@ -1,0 +1,40 @@
+## yahoo: 100 test queries, first 20 clusters; groups 64; training 400 corpus rows, 400 real queries
+costs (us): row past the deterministic levels 0.095, stored vector 0.04, sampled cluster 23.0; randomised-level bytes per row past them (derived, psi 4): 138
+rule                       | kept 0.90: psi, past det, stored, sampled, cost us | kept 0.95: psi, past det, stored, sampled, cost us
+certified                  |  1.53    21152       9      0    2010 |  1.84    21152      10      0    2010
+derived                    |  4.85       81      10      0       8 |  5.35      124      11      0      12
+sampled 128                |  1.60      195       9   2560     479 |  1.92      254      10   2560     484
+sampled 64                 |  1.66      218       9   1280     251 |  1.96      273      10   1280     256
+A data index ratio         |  4.77       80      10      0       8 |  5.23      121      11      0      12
+A data index shift         |  4.77       81      10      0       8 |  5.24      122      11      0      12
+A data group ratio         |  4.76       77      10      0       8 |  5.22      116      11      0      11
+A data group shift         |  4.76       77      10      0       8 |  5.22      115      11      0      11
+A data cluster ratio       |  4.77       77      10      0       8 |  5.25      117      11      0      12
+A data cluster shift       |  4.76       77      10      0       8 |  5.25      117      11      0      12
+A real index ratio         |  4.79       79      10      0       8 |  5.28      122      11      0      12
+A real index shift         |  4.79       79      10      0       8 |  5.28      121      11      0      12
+A real group ratio         |  4.79       77      10      0       8 |  5.25      117      11      0      12
+A real group shift         |  4.78       77      10      0       8 |  5.25      117      11      0      12
+A real cluster ratio       |  4.81       78      10      0       8 |  5.29      118      11      0      12
+A real cluster shift       |  4.82       78      10      0       8 |  5.29      119      11      0      12
+B K=1                      |  4.41      307      10    128      53 |  5.04      413      11    128      63
+B K=2                      |  4.08      387      10    256      83 |  4.89      567      11    256     100
+B K=4                      |  3.20      358      10    512     126 |  4.38      675      11    512     157
+B K=8                      |  1.88      189       9   1024     202 |  2.96      404      10   1024     223
+B held                     |  1.60      175       9   1747     331 |  1.92      219      10   1483     288
+C data flags               |  4.84      128      10     73      26 |  5.33      188      11     73      31
+Z derived                  |  1.61      181       9      0      18 |  1.92      235      10      0      23
+Z data cluster             |  1.59      185       9      0      18 |  1.88      239      10      0      23
+Z real cluster             |  1.60      181       9      0      18 |  1.89      232      10      0      22
+W1                         |  4.34       75      10      0       8 |  4.91      123      11      0      12
+W2                         |  4.59       66      10      0       7 |  5.15      108      11      0      11
+W2d                        |  4.35       76      10      0       8 |  4.89      123      11      0      12
+kept by psi, derived / sampled 128 / Z derived: 0.5: 0.034/0.484/0.483  1: 0.076/0.714/0.711  1.5: 0.131/0.885/0.882  2: 0.215/0.963/0.963  2.5: 0.361/0.989/0.991  3: 0.496/0.994/0.998  3.5: 0.638/0.997/0.999  4: 0.760/0.998/1.000  4.5: 0.847/0.999/1.000  5: 0.922/1.000/1.000  5.5: 0.962/1.000/1.000  6: 0.982/1.000/1.000  7: 0.995/1.000/1.000  8: 1.000/1.000/1.000  10: 1.000/1.000/1.000  13: 1.000/1.000/1.000
+(A) rms z = actual error over derived width, per level
+  level 0: index: corpus rows 1.027, real 1.020; groups p10/50/90 corpus 0.97 / 1.02 / 1.05, real 0.97 / 1.01 / 1.05
+    clusters (>= 3 training pairs: corpus 339, real 339, both 339 of 339): p10/50/90 corpus 0.98 / 1.03 / 1.07, real 0.98 / 1.02 / 1.06; corpus over real, per cluster 0.98 / 1.01 / 1.03
+    test pairs: rms z p10/50/90 0.93 / 1.01 / 1.11; median |log(stored / test pair)|: corpus index 0.048, corpus group 0.043, corpus cluster 0.042, real index 0.046, real group 0.042, real cluster 0.041
+  level 1: index: corpus rows 1.014, real 1.006; groups p10/50/90 corpus 0.96 / 1.01 / 1.03, real 0.96 / 1.00 / 1.03
+    clusters (>= 3 training pairs: corpus 339, real 339, both 339 of 339): p10/50/90 corpus 0.98 / 1.01 / 1.05, real 0.97 / 1.01 / 1.04; corpus over real, per cluster 0.98 / 1.01 / 1.03
+    test pairs: rms z p10/50/90 0.94 / 1.00 / 1.08; median |log(stored / test pair)|: corpus index 0.041, corpus group 0.036, corpus cluster 0.034, real index 0.039, real group 0.034, real cluster 0.034
+(C) clusters flagged: 11 of 339 with corpus-row pairs (339 in all); test cluster visits flagged and sampled 57 of 2000; test visits with >= 3 corpus pairs 2000 of 2000

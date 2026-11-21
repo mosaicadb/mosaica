@@ -75,6 +75,7 @@ pub struct GQ2 {
     // two products and their sum round, within about u (2 |q| + 2 sqrt n) of the exact value, far inside the
     // 1e-12 |qv| the bounds allow
     pub qv: Vec<f64>,
+    pub qv32: Vec<f32>, // qv in f32 (the W2 width's T, `w2_tau2`)
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
@@ -486,7 +487,8 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
         }
     }
     let l1det = wq.iter().map(|x| x.abs() as f64).sum();
-    let gq = GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, rot: OnceLock::new(), cyc: (0, 0), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() };
+    let qv32 = qv.iter().map(|&x| x as f32).collect();
+    let gq = GQ2 { qv, qv32, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, rot: OnceLock::new(), cyc: (0, 0), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() };
     if rot {
         let _ = gq.rot.set(rotate(ix, &[&gq]).pop().unwrap());
     }
@@ -630,7 +632,7 @@ pub struct CQ2 {
     pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
     /// per deterministic level, the factor on the item intervals' upper half-width: the query's (`Prep2::dial`), or
-    /// the cluster's statistical width (`set_width`)
+    /// the cluster's W2 width (`set_w2`)
     pub ddial: [f32; NDL_MAX],
 }
 
@@ -645,15 +647,13 @@ pub struct IntDet {
 }
 
 impl CQ2 {
-    /// The deterministic levels read at the statistical width for `psi`: min(1, psi rho_g,l r_c,l) of each upper
-    /// half-width, rho_g,l the derived width's share (`GroupPlan2::rho`) and r_c,l cluster ci's stored ratio
-    /// (`Index2::lratio`, `adaptive::level_ratios`).
-    pub fn set_width(&mut self, ix: &Index2, ci: usize, psi: f64) {
+    /// The deterministic levels read at the W2 width for `psi`: min(1, psi tau / (dwa_l sqrt U)) of each upper
+    /// half-width (`wrule::factor`), `tau2` cluster ci's predicted spread squared per level (`w2_tau2`).
+    pub fn set_w2(&mut self, ix: &Index2, ci: usize, psi: f64, tau2: &[f64]) {
         let ndl = ix.meta.ndl();
-        let gp = &ix.groups[ix.cl[ci].g];
-        let r = &ix.lratio.as_ref().expect("the statistical width reads the index's level ratios")[ci * ndl..(ci + 1) * ndl];
-        for (l, d) in self.ddial[..ndl].iter_mut().enumerate() {
-            *d = (psi * gp.rho[l] as f64 * r[l] as f64).min(1.0) as f32;
+        let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+        for (l, &t2) in tau2.iter().enumerate().take(ndl) {
+            self.ddial[l] = super::wrule::factor(psi, t2, self.dwa[l] as f64, wf.u(ndl, ci, l));
         }
     }
 
@@ -1178,6 +1178,84 @@ unsafe fn push_rows(v: &mut Vec<u32>, idx: *const u32, m: u16, r0: u32) {
 
 /// Blocks ahead whose codes are prefetched on the aligned path.
 const PF: usize = 8;
+
+/// Cluster ci's W2 spread squared at each deterministic level, with the centre's term taken off as the reader's
+/// estimate takes it (`wrule`): `gq` the query's group setup (qv in f32, `GQ2::qv32`), `alr` the cluster's centre
+/// coefficient for the query (`CQ2::alr`), `a` the query's coefficients on the cluster's order directions. a' = a - alr
+/// P'm (P'm stored at the end of the cluster's record, `WForms::pm`); T' = D'GD' with D' = (qv - alr mv) d_l (mv the
+/// stored `Cl2::mv32`), that is sum_j (qv_j - alr mv_j)^2 h_lj (h_l = d_l^2 G_l, stored; two levels a pass,
+/// `centred_sq2`); and tau^2 from a''s packed outer product and T' (`WForms::tau2_outer`).
+pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
+    let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
+    let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+    let pm = wf.pm(ndl, ci);
+    let mut ac = [0f32; super::order::R_MAX];
+    for ((x, &aj), &y) in ac.iter_mut().zip(a).zip(pm) {
+        *x = (aj as f64 - alr * y as f64) as f32;
+    }
+    let a = &ac[..wf.r];
+    let mv = &ix.cl[ci].mv32;
+    let mut t = [0f64; NDL_MAX];
+    for l in (0..ndl).step_by(2) {
+        let h1 = wf.h(n, ndl, g, (l + 1).min(ndl - 1));
+        (t[l], t[(l + 1).min(NDL_MAX - 1)]) = unsafe { centred_sq2(&gq.qv32, mv, alr as f32, wf.h(n, ndl, g, l), h1) };
+    }
+    let o = super::wrule::outer(a);
+    let mut tau2 = [0f64; NDL_MAX];
+    for (l, x) in tau2.iter_mut().enumerate().take(ndl) {
+        *x = wf.tau2_outer(ndl, ci, l, &o, t[l]);
+    }
+    tau2
+}
+
+/// sum_j (qv_j - alr mv_j)^2 h0_j and the same with h1, in one pass: f32 lanes (two 8-lane accumulators each), summed
+/// in f64.
+#[target_feature(enable = "avx2,fma")]
+unsafe fn centred_sq2(qv: &[f32], mv: &[f32], alr: f32, h0: &[f32], h1: &[f32]) -> (f64, f64) {
+    use std::arch::x86_64::*;
+    let n = qv.len();
+    let al = _mm256_set1_ps(alr);
+    let (mut s0, mut s1) = ([_mm256_setzero_ps(); 2], [_mm256_setzero_ps(); 2]);
+    let mut i = 0;
+    while i + 16 <= n {
+        for k in 0..2 {
+            let o = i + 8 * k;
+            let e = _mm256_fnmadd_ps(al, _mm256_loadu_ps(mv.as_ptr().add(o)), _mm256_loadu_ps(qv.as_ptr().add(o)));
+            let e2 = _mm256_mul_ps(e, e);
+            s0[k] = _mm256_fmadd_ps(e2, _mm256_loadu_ps(h0.as_ptr().add(o)), s0[k]);
+            s1[k] = _mm256_fmadd_ps(e2, _mm256_loadu_ps(h1.as_ptr().add(o)), s1[k]);
+        }
+        i += 16;
+    }
+    let sum = |v: [__m256; 2]| -> f64 {
+        let (mut a, mut b) = ([0f32; 8], [0f32; 8]);
+        _mm256_storeu_ps(a.as_mut_ptr(), v[0]);
+        _mm256_storeu_ps(b.as_mut_ptr(), v[1]);
+        a.iter().chain(&b).map(|&x| x as f64).sum()
+    };
+    let (mut r0, mut r1) = (sum(s0), sum(s1));
+    while i < n {
+        let e = qv[i] as f64 - alr as f64 * mv[i] as f64;
+        r0 += e * e * h0[i] as f64;
+        r1 += e * e * h1[i] as f64;
+        i += 1;
+    }
+    (r0, r1)
+}
+
+/// Row `row`'s stored norm at deterministic level l, in cluster ci: pconst_l s ntab_l[code] (s the row's scale), or its
+/// escaped value (code 15). The row's half-width there is dwa_l times this (`CQ2::dwa`) plus the fixed terms.
+pub fn det_norm(ix: &Index2, ci: usize, l: usize, row: usize) -> f64 {
+    let (c, gp) = (&ix.cl[ci], &ix.groups[ix.cl[ci].g]);
+    let ri = row - c.r0;
+    let byte = ix.lscal[l][ix.soff[l][ci] + (ri / BLK) * gp.levels[l].srows * 16 + ((ri % BLK) & 15)];
+    let code = (if ri % BLK < 16 { byte & 15 } else { byte >> 4 }) as usize;
+    if code == 15 {
+        ix.esc.get(l as u8, 0, row as u32) as f64
+    } else {
+        gp.pconst[l] as f64 * crate::index::item_scale(ix.ahat[row], c.mn32, gp.lamsum) as f64 * gp.ntab[l][code] as f64
+    }
+}
 
 /// Nibble of slot i of a block in row u.
 #[inline(always)]
@@ -3923,8 +4001,10 @@ pub struct KnnReader<'a> {
     zcl: Vec<(usize, usize, f64, f64)>,
     /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
     z: (f64, f64, f64),
-    /// psi of the deterministic levels' statistical width (`with_width`)
+    /// psi of the deterministic levels' W2 width (`with_width`)
     width: Option<f64>,
+    /// the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
+    pub coef: Option<[f32; super::order::R_MAX]>,
     pub st: Stats,
 }
 
@@ -3932,15 +4012,24 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, st }
     }
 
-    /// The reader with each cluster's deterministic levels on the index path read at its statistical width for `psi`
-    /// (at least 0; infinity is the certified width; `CQ2::set_width`), not at the query's dial.
+    /// The reader with each cluster's deterministic levels on the index path read at its W2 width for `psi` (at least
+    /// 0; infinity is the certified width; `CQ2::set_w2`), not at the query's dial.
     pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
-        assert!(psi >= 0.0, "the statistical width needs a psi of at least 0, not {psi}");
+        assert!(psi >= 0.0, "the W2 width needs a psi of at least 0, not {psi}");
         self.width = Some(psi);
         self
+    }
+
+    /// Cluster ci's W2 width on `cq` (its group's setup `gq`), from its coefficients on its order directions (given by
+    /// the caller, else computed as its sigma computes them; `w2_tau2`).
+    fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<[f32; super::order::R_MAX]>) {
+        let (ix, st) = (self.ix, self.ix.order.as_ref().unwrap());
+        let a = coef.unwrap_or_else(|| st.coefs_of(ci, ix.n(), &self.pr.q32));
+        let tau2 = w2_tau2(ix, ci, gq, cq.alr as f64, &a[..st.r]);
+        cq.set_w2(ix, ci, psi, &tau2);
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -3993,6 +4082,7 @@ impl<'a> KnnReader<'a> {
     /// Reads cluster ci's visible rows by `path`.
     pub fn visit(&mut self, ci: usize, path: KnnPath) {
         let (ix, pr, vis, kk) = (self.ix, self.pr, self.vis, self.kk);
+        let coef = self.coef.take();
         let c = &ix.cl[ci];
         let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
         let fits = !self.top.full() && self.top.h.len() + self.flat.len() + nv <= kk;
@@ -4056,7 +4146,7 @@ impl<'a> KnnReader<'a> {
                 let tq = tick();
                 let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
                 if let Some(psi) = self.width {
-                    cq.set_width(ix, ci, psi);
+                    self.w2(ci, gq, &mut cq, psi, coef);
                 }
                 self.st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };
