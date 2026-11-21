@@ -906,6 +906,7 @@ impl Adaptive {
     /// reads' (and the exact query's on a hand-over).
     pub fn threshold(&self, ix: &Index2, q: &[f32], t: f64, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (ThrOut2, AdaptiveInfo) {
         assert!(psi >= 0.0, "psi is at least 0 (infinity reads every cluster), not {psi}");
+        check_threshold(t);
         let t0 = tick();
         let (k, nl, m) = (ix.k(), ix.meta.nl(), &self.m);
         let pr = prep2(ix, q);

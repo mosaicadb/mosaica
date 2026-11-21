@@ -2575,6 +2575,7 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 /// Certified scan of the visible set (every row when vis is None): every visible row's full vector, exact near the
 /// threshold.
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
+    check_threshold(t);
     let nl = ix.meta.nl();
     let nch = scan_chunks(ix, vis);
     // every row's full vector on file: read through io_uring, each thread's chunks read while it decides the earlier
@@ -3039,7 +3040,13 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     Planned::Run { pre, use_idx, cut_cyc }
 }
 
+/// Refuses a NaN threshold, which no score reaches and which the paths' comparisons would not all treat alike.
+pub fn check_threshold(t: f64) {
+    assert!(!t.is_nan(), "the threshold is NaN; give a number (+inf for an empty answer, -inf for every visible item)");
+}
+
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
+    check_threshold(t);
     match plan2(ix, pr, t, o) {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, cut_cyc),
@@ -3064,6 +3071,7 @@ pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: P
 
 /// The threshold query over the clusters as planned.
 pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], cut_cyc: u64) -> ThrOut2 {
+    check_threshold(t);
     let nl = ix.meta.nl();
     let k = ix.k();
     let rr = ix.x2.sqrt();

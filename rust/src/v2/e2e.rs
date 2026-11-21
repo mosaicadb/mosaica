@@ -112,6 +112,30 @@ fn threshold_answers_equal_brute_force_on_every_path() {
     }
 }
 
+/// A NaN threshold is refused by every threshold query: the exact one, its scan and the approximate one.
+#[test]
+fn a_nan_threshold_is_refused() {
+    let f = fixture();
+    let ix = &f.ix;
+    let q = &f.queries[0];
+    let pr = prep2(ix, q);
+    for (pname, plan) in plans() {
+        let r = std::panic::catch_unwind(|| threshold2(ix, &pr, f64::NAN, &Opts2 { vis: None, verify: false, want_iv: false, plan }));
+        assert!(r.is_err(), "plan {pname}: a NaN threshold answered");
+    }
+    assert!(std::panic::catch_unwind(|| scan_visible(ix, &pr, f64::NAN, None, false, false)).is_err(), "the scan answered a NaN threshold");
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    assert!(std::panic::catch_unwind(|| ad.threshold(ix, q, f64::NAN, None, adaptive::PSI, Plan::default())).is_err(), "the approximate query answered a NaN threshold");
+    // infinite thresholds answer as brute force does
+    let t = truth(ix, q, None);
+    for th in [f64::INFINITY, f64::NEG_INFINITY] {
+        for (pname, plan) in plans() {
+            let r = threshold2(ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+            assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "plan {pname}, t {th}");
+        }
+    }
+}
+
 /// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
 /// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
 #[test]
