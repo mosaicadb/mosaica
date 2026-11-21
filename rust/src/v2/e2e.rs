@@ -2577,9 +2577,10 @@ fn study_w_unit() {
 
 /// Study (ignored; run by hand on a fit, rebuilt when stale; pin it to one core): the W2 width's work per index-path
 /// cluster at query time. For the benchmark queries' first DIAG_M clusters by the probe's window key, each query at the
-/// scale k-NN reads it (`Prep2::unit`): the group setup, alr and the coefficients a are formed first, then DIAG_REPS
-/// passes over every (query, cluster) time `w2_tau2` alone and `OrderState::coefs_of` alone. DIAG_DIR, DIAG_PREP
-/// (queries.npy), DIAG_M, DIAG_REPS.
+/// scale k-NN reads it (`Prep2::unit`): the group setups (one per query and group, as the reader keeps them), alr and
+/// the coefficients a are formed first; then DIAG_REPS passes over every (query, cluster), query by query, time
+/// `w2_tau2` alone and `OrderState::coefs_of` alone, and the same calls DIAG_REPS times back to back on each case (the
+/// work with its inputs in cache). DIAG_DIR, DIAG_PREP (queries.npy), DIAG_M, DIAG_REPS.
 #[test]
 #[ignore]
 fn study_w2_cost() {
@@ -2603,30 +2604,39 @@ fn study_w2_cost() {
         let ok = ad.z_keys(&ix, &q, None, true);
         let mut o: Vec<usize> = (0..k).filter(|&c| ix.cl[c].r1 > ix.cl[c].r0).collect();
         o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
-        let pr = prep2(&ix, &q).unit();
+        let pr = std::sync::Arc::new(prep2(&ix, &q).unit());
+        let mut gqs: std::collections::HashMap<usize, std::sync::Arc<GQ2>> = Default::default();
         for &c in o.iter().take(m) {
-            let gq = group_q2r(&ix, ix.cl[c].g, &pr, false);
+            let gq = gqs.entry(ix.cl[c].g).or_insert_with(|| std::sync::Arc::new(group_q2r(&ix, ix.cl[c].g, &pr, false))).clone();
             let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
             let a = st.coefs_of(c, n, &pr.q32)[..st.r].to_vec();
-            cases.push((c, gq, alr, a, pr.q32.clone()));
+            cases.push((c, gq, alr, a, pr.clone()));
         }
     }
-    let (mut sink, t) = (0f64, Timer::new());
-    for _ in 0..reps {
-        for (c, gq, alr, a, _) in &cases {
-            sink += std::hint::black_box(w2_tau2(&ix, *c, gq, *alr, a))[0];
-        }
-    }
-    let tw = t.s();
-    let t = Timer::new();
-    for _ in 0..reps {
-        for (c, _, _, _, q32) in &cases {
-            sink += std::hint::black_box(st.coefs_of(*c, n, q32))[0] as f64;
-        }
-    }
-    let tc = t.s();
     let calls = (reps * cases.len()) as f64;
-    eprintln!("{dir}: {} (query, cluster) cases x {reps}: w2_tau2 {:.3} us per call, coefs_of {:.3} us per call ({sink:.3e})", cases.len(), tw / calls * 1e6, tc / calls * 1e6);
+    let mut sink = 0f64;
+    let mut time = |hot: bool, f: &mut dyn FnMut(usize) -> f64| -> f64 {
+        let t = Timer::new();
+        if hot {
+            for i in 0..cases.len() {
+                for _ in 0..reps {
+                    sink += f(i);
+                }
+            }
+        } else {
+            for _ in 0..reps {
+                for i in 0..cases.len() {
+                    sink += f(i);
+                }
+            }
+        }
+        t.s() / calls * 1e6
+    };
+    let mut w2 = |i: usize| { let (c, gq, alr, a, _) = &cases[i]; std::hint::black_box(w2_tau2(&ix, *c, gq, *alr, a))[0] };
+    let (w_cold, w_hot) = (time(false, &mut w2), time(true, &mut w2));
+    let mut co = |i: usize| { let (c, _, _, _, pr) = &cases[i]; std::hint::black_box(st.coefs_of(*c, n, &pr.q32))[0] as f64 };
+    let (c_cold, c_hot) = (time(false, &mut co), time(true, &mut co));
+    eprintln!("{dir}: {} (query, cluster) cases x {reps}, us per call, query by query / back to back on one case: w2_tau2 {w_cold:.3} / {w_hot:.3}, coefs_of {c_cold:.3} / {c_hot:.3} ({sink:.3e})", cases.len());
 }
 
 /// Study (ignored; run by hand on a fit, rebuilt when stale): W2 with the centre's term taken off, against W2 as built.
