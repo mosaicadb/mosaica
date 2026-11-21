@@ -165,10 +165,10 @@ chapter cites them; paths are those of the chapter.
 | 3.1 | Error law: E ⟂ y, ‖E‖ = ‖y‖tan φ, direction uniform on y^⊥, for any codebook | [proved, refereed] | 3.2 | `CONSOLIDATED_PROOFS.md` §5 (Lemma 8); `referee.txt` §2 |
 | 3.a | The law holds on nytimes and glove (sd 0.9999–1.0000, sphere tails); kurtosis 2.988 at 50k | [measured] | 3.2 | `reports/surge/level0/lawcheck.py`; `reports/bounds3/scale_check.py` |
 | 3.25 | A rounded copy R̃_j of the rotation on the query side, the build encoding against R_j, costs the allowance ‖y_j‖·sec φ_j·(ρ_R,j + η_R,j)·‖Δ_j‖, same constant and δ | [proved, refereed] | 3.2a | `program/rotations/CLAIMS.md` E1; `rotations/referee/referee-1.md` "E1, E2" |
-| 3.ao | The worst query's change of the estimate reached 0.52–0.58 of the allowance, never above it | [measured, simulation] | 3.2a | `referee-1.md` (`ref_e.py`) |
-| 3.ap | Encoding against R̃ breaks the exact law at a coarse grid (mean +0.046, 90 standard errors) | [measured, simulation] | 3.2a | `referee-1.md` (`ref_e_build.py`) |
+| 3.ao | The worst query's change of the estimate reached 0.52–0.58 of the allowance, never above it | [model] | 3.2a | `referee-1.md` (`ref_e.py`) |
+| 3.ap | Encoding against R̃ breaks the exact law at a coarse grid (mean +0.046, 90 standard errors) | [model] | 3.2a | `referee-1.md` (`ref_e_build.py`) |
 | 3.aq | A guarantee at f32 encoding against R̃ costs a factor E[2^Q] on δ (E[Q] ≈ 0.35 at depth 8, [model]) plus slacks not worked out | [sketch: gap named] | 3.2a | `referee-1.md` "Is 'the build must not encode against R̃' necessary?" |
-| 3.ar | The codes from R·y and R̃·y differed for no item with f32 and for 1–62% with int16 | [measured, simulation] | 3.2a | `referee-1.md` |
+| 3.ar | The codes from R·y and R̃·y differed for no item with f32 and for 1–62% with int16 | [model] | 3.2a | `referee-1.md` |
 | 3.as | The referee's ten repairs to the use of 3.25 (the factor 1 + dk_j in the slot, the product against x_j, the kernel's f32 bound, the centre tables, and others) | [proved, unrefereed] | 3.2a | `referee-1.md` items 1–10 |
 | 3.at | The slot form exceeds 3.25's form by √n_j/‖ō‖, 2.0 to 4.2; int16 through the slot costs 0.05–0.1 / 0.4–0.7 / 6–13% at depths 1 / 4 / 8 | [computed] | 3.2a | `ref_e.txt` |
 | 3.au | E2: the allowance in f32 is at most 0.0024% of c·sd; int16 0.025–3.9%; int8 unusable from depth 4 | [computed] | 3.2a | `rotations/e_rounding.py`, `out_e.txt`; reproduced in part by the referee |
@@ -195,9 +195,9 @@ chapter cites them; paths are those of the chapter.
 | 3.ax | The guarantee is ε at the answer level, 1.8·10¹⁰ atoms at every N, so a longer seed makes nothing provable; the advice to use one is withdrawn | [proved, unrefereed] | 3.4 | `referee-1.md` "C2" (a model of the generator as independent Haar draws) |
 | 3.10 | Exact k-NN fails with probability at most k·L·δ, for the stated algorithm class | [proved, refereed] | 3.5 | `level0/REPORT.txt` §1 Theorem A; `referee.txt` §1 |
 | 3.i | Monte Carlo confirms 3.10; the width without e_m is unsound (810 wrong) | [measured] | 3.5 | `reports/surge/referee_work/thmA_mc.py`; `referee.txt` §2 |
-| 3.j | The union over k is tight | [proved by example; measured] | 3.5 | `reports/surge/bounds2.txt` §2 (`simcap.py`) |
+| 3.j | The union over k is tight | [model] | 3.5 | `reports/surge/bounds2.txt` §2 (`simcap.py`) |
 | 3.k | Drop events at different levels are disjoint; any fixed split of ε is sound | [proved, unrefereed] | 3.5 | `bounds2.txt` §2 |
-| 3.l | Gaps between neighbours give a constant | [refuted as a constant] | 3.5 | `bounds2.txt` §2 |
+| 3.l | Gaps between neighbours give a constant | [refuted] | 3.5 | `bounds2.txt` §2 |
 | 3.m | Items' errors are independent under one rotation | [refuted] | 3.5 | `bounds2.txt` §2 (`pairdep.py`) |
 | 3.n | Theorem 3.11's upper end needs only the upper event (valid only with the cap at b; Editor's query 12) | [proved, unrefereed] | 3.5 | `bounds2.txt` §2 |
 | 3.o | One-sided tail plus uneven split worth about 1% of bytes on glove | [model] | 3.5 | level-0 counts, `bounds2.txt` §2 |
@@ -219,20 +219,20 @@ chapter cites them; paths are those of the chapter.
 | 3.x | Expected errors ≤ ε has the same constant as Pr[any error] ≤ ε | [proved, unrefereed] | 3.6 | `bounds2.txt` |
 | 3.y | Filters: all-items constant makes masked results equal visible-set results | [proved, unrefereed] | 3.6 | `bounds2.txt` |
 | 3.z | Constants for thresholds | [computed] | 3.6 | `bounds2/consts3.py` |
-| 3.aa | Measured effect on thresholds; exact reads ∝ \|S\|^0.8 is [measured and argued] | [measured] | 3.6 | `thr768.py` |
+| 3.aa | Measured effect on thresholds; exact reads ∝ \|S\|^0.8, measured and argued, is [model] | [measured] | 3.6 | `thr768.py` |
 | 3.29 | Given the seed, the failure events of i.i.d. items are independent with one probability p(ω); N·p̄ − (N²/2)·π₂ ≤ Pr[some item fails] ≤ N·p̄ | [proved, unrefereed] | 3.6a | `program/confidence/CLAIMS.md` C2.1; `confidence/referee/referee-lower-bounds.md` §6 |
-| 3.ay | The latitude-corpus model agreed with simulation in 16 one-block cells and a two-block case (0.6020 against 0.6014) | [measured, simulation] | 3.6a | `referee-lower-bounds.md` (`ref_sim_c.py`) |
+| 3.ay | The latitude-corpus model agreed with simulation in 16 one-block cells and a two-block case (0.6020 against 0.6014) | [model] | 3.6a | `referee-lower-bounds.md` (`ref_sim_c.py`) |
 | 3.30 | R9 in quantile form: for every per-item rule, Pr_ω[p(ω) ≥ x/N] ≤ ε/(1 − e^(−x)) | [proved, unrefereed] | 3.6a | `referee-lower-bounds.md` §6 (statement); `CLAIMS.md` C2.1 (proof) |
 | 3.az | Mean form: p̄ ≤ ε/N + (N/2)·π₂, so the union is attained up to 1 − γ/2 when π₂ ≤ γ·p̄/N (the track's Corollary C1) | [proved, unrefereed] | 3.6a | `CLAIMS.md` C2.1 |
 | 3.31 | Random shared codebook, equator corpus: π₂ ≤ 2e^(−λ) + λ²δ² + M·δ·I*(θ), with step (c) or the referee's (c′) | [proved, unrefereed] | 3.6a | `CLAIMS.md` C2.2; `referee-lower-bounds.md` §6 |
-| 3.ba | One codeword's event was 0.83–0.96 of δ·I(θ) in four settings, never above | [measured, simulation] | 3.6a | `c2_revision.py` |
+| 3.ba | One codeword's event was 0.83–0.96 of δ·I(θ) in four settings, never above | [model] | 3.6a | `c2_revision.py` |
 | 3.32 | Any code: Pr[F_1 ∩ F_2 \| z_1, z_2] ≤ T_{d−1}(ζ√(2/(1 + χ))) | [proved, unrefereed] | 3.6a | `CLAIMS.md` C2.2; `referee-lower-bounds.md` §6 |
 | 3.bb | The bound of 3.32 is below δ·10⁻¹¹ for χ ≤ χ₀ = 0.52 / 0.45 / 0.34 / 0.33 at d = 95 / 127 / 255 / 287 | [computed] | 3.6a | `c2_union.log` part 3; reproduced by the referee |
 | 3.33 | One block, one level, the plain rule and a random shared codebook: some corpus fails with probability ≥ Nδ(1 − 0.01 − Nλ²δ/2), so δ ≤ (ε/N)(1 + 0.011) | [proved, unrefereed] | 3.6a | `CLAIMS.md` C2.3; `referee-lower-bounds.md` §6 |
 | 3.bc | Codebook sizes sufficient at N = 10⁹: 50–51 bits by step (c), 30–41 bits by (c′); at d = 95 and 29 bits the union is attained within 2% | [computed] | 3.6a | `c2_union.log` part 2; `c2_revision.log` part 1; `ref_num2b.py` |
-| 3.bd | The union needs M ≫ N·ln²(N/δ), and fails with fewer codewords than items | [refuted as stated] | 3.6a | `referee-lower-bounds.md` §6 |
+| 3.bd | The union needs M ≫ N·ln²(N/δ), and fails with fewer codewords than items | [refuted] | 3.6a | `referee-lower-bounds.md` §6 |
 | 3.be | With one codeword the union over N is not attained (π₂ of order δ) (the track's Claim E) | [proved, unrefereed] | 3.6a | `CLAIMS.md` C2; `referee-lower-bounds.md` §6 |
-| 3.bf | The excess Pr[F_2 \| F_1] − p̄ of a small random code depends on d and δ, not on M/N alone | [measured, simulation] | 3.6a | `ref_sim_c.py` part D |
+| 3.bf | The excess Pr[F_2 \| F_1] − p̄ of a small random code depends on d and δ, not on M/N alone | [model] | 3.6a | `ref_sim_c.py` part D |
 | 3.bg | 3.33 does not cover the factor N·L over levels, other rules, several blocks or the built code (G3); k-NN not at all | [sketch: gap named] | 3.6a | `CLAIMS.md` C2; `referee-lower-bounds.md` §6 |
 | 3.ab | Chernoff with exact Λ over shares gives 9.086 (implementation unrefereed) | [computed] | 3.7 | `rust/REPORT_BOUNDS.md` Part 2 |
 | 3.18 | R1: T(a; x) non-decreasing in every a_j | [proved, refereed] | 3.7 | `bounds3/REPORT.txt` R1; referee item 5 |
@@ -245,7 +245,7 @@ chapter cites them; paths are those of the chapter.
 | 3.ae | Pointwise rule from the fourth cumulant alone | [refuted] | 3.7 | `bounds3/REPORT.txt` |
 | 3.23 | R6: (i) one-sided thresholds and (iii) changed k-NN counts sound; (ii) `knn2d` [refuted] | [proved, refereed] | 3.7 | R6; referee items 1, 8 |
 | 3.24 | R7: overlap of two levels' failures bounded by Pr[Z ≥ 2] | [proved, refereed] | 3.7 | R7; referee item 10 |
-| 3.af | Level correlations 0.22–0.47 [measured]; overlaps e^−31 to 7·10⁻⁷ [computed]; Brownian count [sketch: gap named]; conditioning [refuted as a saving] | [measured] | 3.7 | `level_corr.py`; `overlap01.py` |
+| 3.af | Level correlations 0.22–0.47 [measured]; overlaps e^−31 to 7·10⁻⁷ [computed]; Brownian count [sketch: gap named]; conditioning as a saving [refuted] | [measured] | 3.7 | `level_corr.py`; `overlap01.py` |
 | 3.ag | Constants by split weight and by L | [computed] | 3.7 | `bounds3/REPORT.txt` |
 | 3.R9 | No per-item rule beats the item's own quantile with N items (R9 as worded; first tagged a sketch); replaced by Corollary 3.30, with Theorem 3.33 where the union is attained | [refuted] | 3.7, 3.6a | `bounds3/REPORT.txt` R9; `confidence/referee/referee-lower-bounds.md` §6 |
 | 3.R10 | Block-wise splitting, Bernstein and Jensen routes | [refuted] | 3.7 | `bounds3/REPORT.txt` R10 |
@@ -266,20 +266,20 @@ chapter cites them; paths are those of the chapter.
 | 3.44 | First order: E h₁ ≥ ζ/√(4^ν − 1 + ζ²)·(1 − o(1)) when ln(1/δ)/ln d → ∞ (B4) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §4 |
 | 3.45 | Theorem 3.43 integrated over the quantile: E h₁ ≥ cos ψ_m·∫₀¹ W_{ζ(u)}(θ(u)) du (B6) | [proved, refereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §4 |
 | 3.46 | R8 with its half-width frozen at Ê = 0, h₁ = W_ζ(φ), is one-sided δ-valid and meets 3.43 (A4) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §2 |
-| 3.bk | Over seven codes and 63 cells the one-sided rate of 3.46 never exceeded δ | [measured, simulation] | 3.7a | `ref_sim_a4.py` |
-| 3.bl | 3.46's upper end lies above the plain end in 13–22% of draws at v = 0, 50–98% at v = −0.3, over 99% at −0.9 | [measured, simulation] | 3.7a | `referee-lower-bounds.md` §2 |
+| 3.bk | Over seven codes and 63 cells the one-sided rate of 3.46 never exceeded δ | [model] | 3.7a | `ref_sim_a4.py` |
+| 3.bl | 3.46's upper end lies above the plain end in 13–22% of draws at v = 0, 50–98% at v = −0.3, over 99% at −0.9 | [model] | 3.7a | `referee-lower-bounds.md` §2 |
 | 3.47 | 3.46 inside the bit budget: ĉ on a geometric grid and h₁ = W_ζ(φ̂) + η_g (A4′) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §1(a) |
 | 3.48 | One event serves the plain end, 3.46's end and capped R8 in one block (A5) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §2 (Editor's query 20) |
-| 3.bm | The smallest of the three ends was exceeded at rates 0.0097–0.0102 against δ = 0.01 | [measured, simulation] | 3.7a | `c1_revision.log` part 4 |
-| 3.bn | Without the cap, R8's upper end used one-sidedly fails up to 2δ for aligned queries; with it at most δ | [measured, simulation] | 3.7a | `referee-lower-bounds.md` §2; reproduced by the theorist |
+| 3.bm | The smallest of the three ends was exceeded at rates 0.0097–0.0102 against δ = 0.01 | [model] | 3.7a | `c1_revision.log` part 4 |
+| 3.bn | Without the cap, R8's upper end used one-sidedly fails up to 2δ for aligned queries; with it at most δ | [model] | 3.7a | `referee-lower-bounds.md` §2; reproduced by the theorist |
 | 3.49 | One side against two in 𝓛: a two-sided scheme satisfies 3.43; one side costs at most one halving of δ (B5) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §4 |
 | 3.bo | The two tails of 3.46 sum to 1.0000·T_d(ζ) for ξ² ≥ 0.09, 1.035 at 0.018, 1.91 (referee 1.94) at 0.001 | [computed] | 3.7a | `c1_revision.log` part 3; `ref_num1.py` (Editor's query 18) |
 | 3.bp | The optimum in 𝓛 for one block: w* = ζ/√(4^ν − 1 + ζ²) to first order | [proved, unrefereed] | 3.7a | combines 3.43, 3.44, 3.47, 3.37 |
 | 3.bq | Under the averaged requirement the shrunk estimate's error is exactly sin φ·U′, so such a converse proves at most ζ·E sin φ (the track's N2) | [proved, unrefereed] | 3.7a | `CLAIMS.md` N2; `referee-lower-bounds.md` §3 |
-| 3.br | The sin rule fails fixed queries: 1.8% at v = 0.3 to 78% at 0.99 for δ = 0.01 | [measured, simulation] | 3.7a | `c1_revision.py` part 4; the referee's run |
+| 3.br | The sin rule fails fixed queries: 1.8% at v = 0.3 to 78% at 0.99 for δ = 0.01 | [model] | 3.7a | `c1_revision.py` part 4; the referee's run |
 | 3.bs | TurboQuant's 4^(−b) against 1/(4^b − 1) | [cited, unchecked] | 3.7a | the librarian's summary |
 | 3.bt | At the index's block sizes the proved lower bound in 𝓛 is 4–6% below the proved upper bound and 1–5% below w*; plain exceeds w* by √(1 + ξ²) | [computed] | 3.7a | `c1_converse.py` part 3; `c1_revision.py` part 1; `ref_num1.py` |
-| 3.bu | Simulation at d = 12, 512 codewords: one-sided rates of plain, sin, 3.46, R8 with and without cap, and their minimum, by latitude | [measured, simulation] | 3.7a | `c1_revision.py` part 4 |
+| 3.bu | Simulation at d = 12, 512 codewords: one-sided rates of plain, sin, 3.46, R8 with and without cap, and their minimum, by latitude | [model] | 3.7a | `c1_revision.py` part 4 |
 | 3.50 | The confidence tax: R_cert − R_sd = ½·log₂[(w² + ζ²(1 − w²))/(w² + 1/d)], tending to log₂ c for w ≪ 1/√d (given 3.47 and 3.43) | [proved, unrefereed] | 3.7a | `CLAIMS.md` C1.3; `referee-lower-bounds.md` §5 |
 | 3.bv | Tax figures: limits 2.88 / 3.05 / 3.12 bits at d = 95 / 255 / 767 | [computed] | 3.7a | `c1_revision.log` part 2; reproduced in part by the referee |
 | 3.bw | G1: no lower bound outside 𝓛; a trimmed Urysohn inequality is missing | [sketch: gap named] | 3.7a | `CLAIMS.md` C1; `referee-lower-bounds.md` §7 |
@@ -299,7 +299,7 @@ chapter cites them; paths are those of the chapter.
 | 4.d | Per-query fixed reads are as large as what the support table saves | [measured] | 4.1 | `agent3b/REPORT.md` headline |
 | 4.e | Pătraşcu–Thorup Ω(n/log(Sn/N)) probes; Rubinstein; Afshani–Cheng; ALRW hashing; Pestov; Chávez et al.; Weber–Schek–Blott; cover trees | [cited] | 4.2 | `sublinear/REPORT.md` §3, refs. 1, 7, 10, 12–15, 20 |
 | 4.f | Earlier cell-probe bounds; Williams; ARW; Chen; Alman–Williams; the hashing model; navigating nets; Matoušek; Chan | [cited, unchecked] | 4.2 | `sublinear/REPORT.md` §3, refs. 5, 6, 8, 9, 11, 16–19 |
-| 4.2 | A sublinear threshold index with polynomial build solves OV subquadratically | [proved, unrefereed] | 4.2 | `sublinear/REPORT.md` §3.3 Proposition 1 |
+| 4.2 | A sublinear threshold index with polynomial build solves OV subquadratically (a lower bound conditional on the OV conjecture) | [proved, unrefereed] | 4.2 | `sublinear/REPORT.md` §3.3 Proposition 1 |
 | 4.g | Intrinsic dimension 279 (text), 92 (item); C_exp 4,050 and N/k; guarantees vacuous | [measured] | 4.2 | `sublinear/REPORT.md` §3.4 (`tail.py`) |
 | 4.h | Item exponents 0.49–0.64, text 0.91–0.93 | [measured] | 4.2 | `sublinear/REPORT.md` §3.4 |
 | 4.3 | Summaries cannot be small (given a measured property) (= 2.10) | [proved, unrefereed] | 4.2 | `agent3b/REPORT.md` §2 |
@@ -324,12 +324,12 @@ chapter cites them; paths are those of the chapter.
 | 4.t | Timed cost at 1M; fixed cost 6–7 ms | [measured] | 4.4 | `SYSTEM.md` §4, §4.2 |
 | 4.u | Visible sets: work sublinear in \|V\| in the same weak sense | [measured] | 4.5 | `sublinear/REPORT.md` §5.5 |
 | 4.v | Zero-read slack about √n_eff within-cluster sd (Editor's query 17) | [model] | 4.6 | `sublinear/REPORT.md` §7 |
-| 4.w | Fewer dimensions leave less room in the tail | [measured on a proxy] | 4.6 | `sublinear/REPORT.md` §7 (`dims.py`) |
+| 4.w | Fewer dimensions leave less room in the tail | [model] | 4.6 | `sublinear/REPORT.md` §7 (`dims.py`) |
 | 4.x | At n = 1,024 range and table read 0.159–0.419% | [measured] | 4.6 | `agent3b/REPORT.md` headline |
 | 4.y | Approximate reads at 1M: 23–64 MB a query | [measured] | 4.7 | `layered.md` §1 (replay B) |
 | 4.z | Approximate law rows ∝ n̄^u·N^v; share depends on K; visible set as subsample | [measured] | 4.7 | `layered.md` §2 (`layered/scaling.py`) |
 | 4.aa | MB per query at 100M and 1B | [model] | 4.7 | `layered.md` §8.1 (`layered/extrapolate.py`) |
-| 4.ab | Clusters of fixed size worth about 0.04 of the text exponent | [measured, share inferred] | 4.8 | `sublinear/REPORT.md` |
+| 4.ab | Clusters of fixed size worth about 0.04 of the text exponent | [model] | 4.8 | `sublinear/REPORT.md` |
 | 4.ac | Cluster size against time at 1M; linear-in-N time model [model] | [measured] | 4.8 | `rust/REPORT_CLUSTERSIZE.md` |
 | 4.ad | Rows touched rise with cluster size at 200k | [measured] | 4.8 | `agent3b/REPORT.md` §2 |
 | 4.ae | 2,000-row leaves: 4–9× fewer rows at 1M [measured]; gain at 100M and 1B | [model] | 4.8 | `layered.md` §0 |
@@ -340,29 +340,29 @@ chapter cites them; paths are those of the chapter.
 | 4.ak | A rotated block beats its own zero-bit bound from B₀ = (n_T/2)·log₂(1 + c²/d_T) bits, 35.7 at c = 8 and n_T = 96; a sign per position needs 2.18 times more | [model] | 4.9.2 | DESIGN-CLAIMS C3a.1; the referee §2 |
 | 4.al | A flat block beats the same bits spent deterministically iff d_T > c² and B > B₁ (77.6 bits at c = 8, n_T = 96); at high rate iff d_T(GM/AM)² > c² | [model] | 4.9.2 | DESIGN-CLAIMS C3a.2; the referee §2 |
 | 4.am | With the nested code the first randomised level is 3% on the losing side of that margin; a one-rate code would win by 11% | [model] | 4.9.2 | the referee §2, E1 (correcting DESIGN-CLAIMS C3a.2) |
-| 4.an | Over the frontier the hand-over is at most 16 B with ideal curves and between 32 and 40 B with built ones; group 6 gives the same | [computed in the model] | 4.9.2 | DESIGN-CLAIMS C3b.3; `c3b_g12_c8_*.log`; `c3_tables.log`; `c3b_g6_c8_*.log`; the referee §3 |
-| 4.ao | The hand-over moves as c²: at c = 4 at most 4 B (ideal) and 8 B (built) | [computed in the model] | 4.9.2 | DESIGN-CLAIMS C3b.4 item 2 |
-| 4.ap | The best layout found is at least 1.4 / 2.1 / 2.7 times narrower than W at 32 / 96 / 256 B (ideal), 1.2 / 1.5 / 1.9 times than 1.19·W at 56 / 96 / 256 B (built) | [computed in the model] | 4.9.2 | DESIGN-CLAIMS C3b.3, C3b.4 |
+| 4.an | Over the frontier the hand-over is at most 16 B with ideal curves and between 32 and 40 B with built ones; group 6 gives the same | [model] | 4.9.2 | DESIGN-CLAIMS C3b.3; `c3b_g12_c8_*.log`; `c3_tables.log`; `c3b_g6_c8_*.log`; the referee §3 |
+| 4.ao | The hand-over moves as c²: at c = 4 at most 4 B (ideal) and 8 B (built) | [model] | 4.9.2 | DESIGN-CLAIMS C3b.4 item 2 |
+| 4.ap | The best layout found is at least 1.4 / 2.1 / 2.7 times narrower than W at 32 / 96 / 256 B (ideal), 1.2 / 1.5 / 1.9 times than 1.19·W at 56 / 96 / 256 B (built) | [model] | 4.9.2 | DESIGN-CLAIMS C3b.3, C3b.4 |
 | 4.aq | In time, no coded block at the first level is between 3% wider and 11% narrower than one; crossover 1.7 ns, so one against none is undecided | [model] | 4.9.2 | DESIGN-CLAIMS C5.3 item 3; the referee §4.2 |
 | 4.ar | Under Theorem 3.11 at Ê = 0, B₀ disappears and a flat block with d_T > c² wins from its first bit (interval [proved, refereed] in chapter 3) | [model] | 4.9.2 | the referee §4.4 (restating DESIGN-CLAIMS C5.4) |
 | 4.as | The rate–margin law: an item's bytes depend on ũ_i alone, a query's bytes are a shell count in units of each item's scale, and each halving costs n_⋆(ũ) bits | [model] | 4.9.3 | DESIGN-CLAIMS C4.1 items 1–3; the referee §5 |
-| 4.at | At an optimum n_⋆ = Σ_j n_j cos²φ_j, holding along the computed frontier within 4% from 24 to 256 B | [model and computed] | 4.9.3 | DESIGN-CLAIMS C3b.1 item 4, C3b.3 item 6; the referee §3 |
+| 4.at | At an optimum n_⋆ = Σ_j n_j cos²φ_j, holding along the computed frontier within 4% from 24 to 256 B | [model] | 4.9.3 | DESIGN-CLAIMS C3b.1 item 4, C3b.3 item 6; the referee §3 |
 | 4.au | Query type enters through ũ and the class's own w̄_ℓ; answer size only through ũ; the visible set untested | [measured] | 4.9.3 | RESULTS §2; the referee §5 (replacing DESIGN-CLAIMS C4.1 item 4) |
-| 4.av | On the frontier an item at a tenth of its zero-bit bound needs at most about 56 B, at a hundredth about 215 B; not a power law; the deterministic floor alone needs about 96 B at a tenth | [computed in the model] | 4.9.3 | DESIGN-CLAIMS C4.1; the referee §3, §5 |
+| 4.av | On the frontier an item at a tenth of its zero-bit bound needs at most about 56 B, at a hundredth about 215 B; not a power law; the deterministic floor alone needs about 96 B at a tenth | [model] | 4.9.3 | DESIGN-CLAIMS C4.1; the referee §3, §5 |
 | 4.aw | Dump test: each level's normalised width is a property of the level; survival steps at 0.990–1.005 of w̄_ℓ; the law predicts each query's bytes (1.000–1.001 pooled, rms 0.049–0.051); T5 0.92–1.23 | [measured] | 4.9.3 | RESULTS §1, §2 (`c4_dump_test.py`, `c4_dump_test_replay.py`, `t2_criteria.py`, `t5.py`) |
 | 4.ax | The estimate's error costs nothing net: 238.0 B against the index's 237.9 at item 50% | [measured] | 4.9.3 | RESULTS §3.1 |
 | 4.ay | The model's inputs are wrong in two terms at item 50%: Gaussian margins ×1.68 and the scale η ×1.28; η_i falls with the answer size, refuting C4.2's suggested cause in direction | [measured] | 4.9.3 | RESULTS §3.2 (`step3.py`, `chain_table.py`); the referee §5 |
 | 4.az | Carried to 1M, 131.7 × 1.68 × 1.24 = 274 B against 276.2 B measured (arithmetic on two factors) | [model] | 4.9.3 | RESULTS §5 (Editor's query 27) |
 | 4.ba | The best package that keeps the decode is worth about 3% of bytes (an estimate in the source) | [model] | 4.9.3 | `codes/REPORT.md`; the referee §6 item 7 |
 | 4.bb | Stored bytes per item by level, 6.5 to 276.3; one block-rise costs 1–1.5 B and each block 1 B of ‖y‖ once | [measured] | 4.9.4 | `bd_p2c.out`, via DESIGN-CLAIMS C5.1; the referee §4.1 |
-| 4.bc | The scalars are about 1% of what an item reaching 256 B stores and 4–5% of what a query reads at item 50% | [model on measured sizes] | 4.9.4 | DESIGN-CLAIMS C5.1 |
+| 4.bc | The scalars are about 1% of what an item reaching 256 B stores and 4–5% of what a query reads at item 50% | [model] | 4.9.4 | DESIGN-CLAIMS C5.1 |
 | 4.bd | Profiled phases at 1M: the randomised scalars' decode is 4.5–12.4% of the wall | [measured] | 4.9.4 | `SYSTEM.md` §4.2 = `bd_p2c.out` |
 | 4.be | About 1.4–2.8 ns per (item, coded block, rise) for the decode alone, uncertain by a factor 2 and biased high; 3–10 ns all-in, uncertain by 3.3 and confounded | [model] | 4.9.4 | DESIGN-CLAIMS C5.1; the referee §4.1 |
 | 4.bf | The dump test counts 5.60 rises per item of N at item 50% (5.73 at c = 8) | [measured] | 4.9.4 | RESULTS §4 |
 | 4.bg | τ_byte ≈ 0.133 ns, τ_lvl ≈ 3.2 ns, a full vector ≈ 104 ns; by 256 B an item pays 11 block-rises, 15–110 ns, against about 34 ns of code decode | [model] | 4.9.4 | DESIGN-CLAIMS C5.1, C5.5; the referee §4.1, §7 |
 | 4.bh | A level that codes a second block pays 15% on its random term (constant 6.931 against 7.963) | [computed] | 4.9.4 | DESIGN-CLAIMS C5.1 |
-| 4.bi | More coded blocks at 56 B save time only below 0.3–1.1 ns a block-rise (three or four) or 0.7–3.3 ns (two at free rates); bytes save 0.2–2.9 B | [model with measured costs] | 4.9.5 | DESIGN-CLAIMS C5.2 (`c5a.py`) |
-| 4.bj | The model predicts a 6–26% fall in entrants to 96 B where the native trial measured 2% | [model against measured] | 4.9.5 | DESIGN-CLAIMS C5.2 item 4; the referee §4.1 |
+| 4.bi | More coded blocks at 56 B save time only below 0.3–1.1 ns a block-rise (three or four) or 0.7–3.3 ns (two at free rates); bytes save 0.2–2.9 B | [model] | 4.9.5 | DESIGN-CLAIMS C5.2 (`c5a.py`) |
+| 4.bj | The model predicts a 6–26% fall in entrants to 96 B where the native trial measured 2% | [model] | 4.9.5 | DESIGN-CLAIMS C5.2 item 4; the referee §4.1 |
 | 4.bk | The likely cause is the model's block norms; the index's block 0 is about 1.5 times heavier | [model] | 4.9.5 | DESIGN-CLAIMS C5.2 item 4, C3 (c) item 4 |
 | 4.bl | Charging scalars per coded block: in time at most one coded block at the first level; in bytes a near-tie, three blocks winning by 3.6–5.9% at 1–1.5 B | [model] | 4.9.5 | DESIGN-CLAIMS C5.3 (`c5b.py`); `referee/rd_c5b_s.py`; the referee §4.2 |
 | 4.bm | Charged 2.5 B a coded block, the later levels still code three, four and two blocks | [model] | 4.9.5 | DESIGN-CLAIMS C5.3 item 4 |
@@ -449,7 +449,7 @@ chapter cites them; paths are those of the chapter.
 | 5.bm | 64 sampled rows are enough and 32 marginal for far clusters | [computed] | 5.9a.6 | `CLAIMS.md` A4.7 |
 | 5.32 | At a fully coded randomised level, E_ω[â_R] = s, E_ω[(â_R − â)²] = e² + v_R, E_ω[(â_R − â)·â_R] = e·s + v_R (A4.7) | [proved, refereed] | 5.9a.6 | `CLAIMS.md` A4.7; `referee-2.md` §5; `ref2_a47.txt` |
 | 5.bn | The sample must be larger by 1 + 2v_R/σ̂² + v_R²/σ̂⁴ for normal errors: 1.2 or 1.6 times | [proved, refereed] | 5.9a.6 | `CLAIMS.md` A4.7 |
-| 5.bo | An uncoded block, or an upper bound used for v_R, biases σ̂² and σ_c² low, the unsafe side | [checked by referee 2 in simulation] | 5.9a.6 | `referee-2.md` §5 |
+| 5.bo | An uncoded block, or an upper bound used for v_R, biases σ̂² and σ_c² low, the unsafe side | [model] | 5.9a.6 | `referee-2.md` §5 |
 | 5.bp | A sample read at the first fully coded randomised level estimates σ̂, μ_c, σ_c within 2–6%, at about 10 kB against 256 kB | [measured] | 5.9a.6 | `rand_sample.py`; `program/LOG-2026-11-21.md` |
 | 5.bq | The slope far up is √(PR(left)/PR(var)) (A4.4 item 2), except when every coordinate is wholly coded or left out | [refuted] | 5.9a.7 | `referee-2.md` §3 |
 | 5.br | The repaired slope far up, (Σdist_i/Σvar_i)·√(Σvar_i²/Σdist_i·var_i) | [model] | 5.9a.7 | `referee-2.md` §3 |
@@ -470,7 +470,7 @@ chapter cites them; paths are those of the chapter.
 | 5.cc | No leaf-query rule in 12,000 trees beat the floor; the two built to sit on it were within 0.05 targets | [model] | 5.10.1a | `referee/ref1_a12.txt` |
 | 5.35 | The leaf floor for the k best, (5.9) (A1.2b, the referee's) | [proved, unrefereed] | 5.10.1a | `CLAIMS.md` A1.2b; `referee-1.md` A1.2 remark (i) |
 | 5.cd | With a few hundred parents the floor for the k best is 1.05–3.1 times B_leaf, because τ_k does not concentrate; the static optimum lies 1–4% above | [computed] | 5.10.1a | `referee/ref1_a12c.py`; `ref1_a12.txt`; `scripts/topk_model.py check` |
-| 5.ce | On the three suite fits the static optimum is 1.19–1.88 times B_leaf(0.9) | [computed, unrefereed] | 5.10.1a | `out/topk_model_fits.txt` |
+| 5.ce | On the three suite fits the static optimum is 1.19–1.88 times B_leaf(0.9) | [computed] | 5.10.1a | `out/topk_model_fits.txt` |
 | 5.cf | Addario-Berry–Maillard Theorem 1.1: easy below x_*, exponential above, for a continuous random energy model | [cited] | 5.10.1a | arXiv:1810.05129 |
 | 5.cg | The ground state x_s, after Bovier and Kurkova | [cited, unchecked] | 5.10.1a | through Addario-Berry and Maillard |
 | 5.ch | The hardness theorem applied to model T, so that a non-concave profile costs every hierarchy exponentially many reads | [refuted] | 5.10.1a | `referee-1.md` A1.1 item 2 |
@@ -481,7 +481,7 @@ chapter cites them; paths are those of the chapter.
 | 5.cm | Model T's split is Bovier and Kurkova's weak and strong correlation regimes | [refuted] | 5.10.1a | `referee-1.md` A1.5 item 3 |
 | 5.cn | Leaves of about 125 rows bring the row term down to the centres' term | [refuted] | 5.10.1a | `referee-1.md` A1.4 item 5 |
 | 5.co | By count the row term is the largest in all twelve designs, by 20–100 times | [computed] | 5.10.1a | `ref1_a14_a15.txt` part B |
-| 5.cp | The static optimum falls 2.1–2.4 times to 125-row leaves and 1.4–2.1 times more to 31-row leaves, against measured 2.7–4.1 and 2.3–2.5 | [computed and measured, unrefereed] | 5.10.1a | `CLAIMS.md` A1.9 |
+| 5.cp | The static optimum falls 2.1–2.4 times to 125-row leaves and 1.4–2.1 times more to 31-row leaves, against measured 2.7–4.1 and 2.3–2.5 | [model] | 5.10.1a | `CLAIMS.md` A1.9 |
 | 5.cq | The cost exponent above x_* (Addario-Berry and Maillard's open question 2, formula (5.1)) | [conjecture] | 5.10.1a | arXiv:1810.05129 |
 | 5.cr | Pemantle 2009: a fraction 1 − ε of the best level costs N·exp(Θ(ε^(−1/2))) | [cited, unchecked] | 5.10.1a | abstract via a search summary; Ho and Maillard, arXiv:2107.11465 |
 | 5.19 | σ_g(q)² = qᵀC_g q + mean_c σ_c(q)² | [proved, unrefereed] | 5.10.2 | `hierarchy/theory.md` (3.1) |
@@ -489,7 +489,7 @@ chapter cites them; paths are those of the chapter.
 | 5.p | Branching-bandit index [cited, unchecked]; DP agreement on 300 instances | [model] | 5.10.2 | `hierarchy/theory.md` §3.2 |
 | 5.21 | Never expand a sparse node | [proved, unrefereed] | 5.10.2 | `hierarchy/theory.md` §3.2 |
 | 5.q | Total-variance key cuts parents expanded 15–25% | [measured] | 5.10.2 | `hierarchy/theory.md` |
-| 5.r | Best ψ does not depend on the unit's size | [model, measured] | 5.10.3 | `hierarchy/theory.md` §3.4 |
+| 5.r | Best ψ does not depend on the unit's size | [model] | 5.10.3 | `hierarchy/theory.md` §3.4 |
 | 5.s | Sub-clusters in rows 2.1–3.8×; in time only with contiguous layout; leaf design [model] | [measured] | 5.10.4 | `hierarchy/theory.md` §4.1; `subclusters.md`; `hierarchy/layered.md` §§8.6–8.7 |
 | 5.t | Groups do not prune; savings around setup [model]; κ 0.7–1.1 | [measured] | 5.10.5 | `hierarchy/theory.md` §2.4; `groups-setup.md`; `hierarchy/layered.md` §0, §8.7 |
 | 5.22 | Group-opening plan optimal over closed sets | [proved, unrefereed] | 5.10.6 | `hierarchy/policy.md` §2.1 |
@@ -520,7 +520,7 @@ chapter cites them; paths are those of the chapter.
 | 7.k | A block whose last rise is its only rise can use the one-rate codes; the 16-word codebook below one bit is the cheapest | [measured] | 7.2 | `codes/REPORT.md` "Verdict" item 3; `codes/NOTEBOOK.md` entry 4 |
 | 7.l | The corrected stop bound with an estimated tail uses κ_σ = M_σ/M̂_σ (median 27, 90th percentile 300 in the referee's run [model]) | [proved, unrefereed] | 7.3 | `approximate/CLAIMS.md` A2.1 |
 | 7.m | Two steps of A2.2's first proof (a shape chosen after the sample, a false independence) | [refuted] | 7.3 | `approximate/CLAIMS.md` A2.2; `approximate/referee/referee-1.md` |
-| 7.n | With 1,300–4,000 pooled rows the prediction is off by a factor 2.2–4.0 at the decision | [computed on measured counts] | 7.3 | `approximate/CLAIMS.md` A2.3 |
+| 7.n | With 1,300–4,000 pooled rows the prediction is off by a factor 2.2–4.0 at the decision | [measured] | 7.3 | `approximate/CLAIMS.md` A2.3 |
 | 7.o | One shape over-predicts at τ_k by 2.2–2.5 times, the first clusters over-predict the rest by 1.7–3.1 times, and the stop selects its own low estimates | [measured] | 7.3 | `approximate/CLAIMS.md` A2.5 |
 | 7.p | The stops on expected misses read 0.87–3.01 times the built stop's rows; at a nominal 0.9 the delivered mean recall is 0.65–0.99 | [measured] | 7.3 | `approximate/CLAIMS.md` A2.6 |
 | 7.q | The per-query spread: ρ_ℓ(q, c)² = E_ω[a]/‖a‖₁ exactly for a fixed offset, returning (5.6) on average | [proved, unrefereed] | 7.3 | `approximate/CLAIMS.md` A3.1 |
@@ -530,7 +530,7 @@ chapter cites them; paths are those of the chapter.
 | 7.u | In a two-segment example the partition k-means prefers costs 2.00 bits a row more at w = 0.05 | [model] | 7.4 | `partition/CLAIMS.md` P1.3 |
 | 7.v | Within a group, k-means in the group's metric is coding-optimal | [refuted] | 7.4 | `partition/referee/referee-1.md` P1.4 |
 | 7.w | The mismatch of k-means and coding cost appears wherever a covariance is formed | [model] | 7.4 | `partition/CLAIMS.md` P1.4, S.1 |
-| 7.x | The sorted range counts the keys' low tail, whose sum spherical k-means ascends; the approximate order is served by a trace in the queries' metric | [proved as identities] | 7.4 | `partition/CLAIMS.md` P1.6, P1.7 |
+| 7.x | The sorted range counts the keys' low tail, whose sum spherical k-means ascends; the approximate order is served by a trace in the queries' metric | [proved, unrefereed] | 7.4 | `partition/CLAIMS.md` P1.6, P1.7 |
 | 7.y | The built fit leaves 4.4% of rows away from their best centre | [measured] | 7.4 | `partition/experiment/RESULTS.md` item 1 |
 | 7.z | Partition experiment: no alternative clears twice the seed spread (B ≤ 2.5% of S1b, C16 2.4%); balanced k-means trades decisions for layout; the neighbour-graph partition was not run | [measured] | 7.4 | `partition/experiment/RESULTS.md` "Summary table", "Drop rules" |
 | 7.aa | The built grouping is worth 16% of S1d and 22% of bytes against one basis; a random grouping keeps a quarter; a basis per cell is 10% narrower still | [measured] | 7.4 | `partition/experiment/RESULTS.md` item 3 |
@@ -573,16 +573,15 @@ chapter cites them; paths are those of the chapter.
 | Tag | Rows |
 |---|---|
 | [proved, refereed] | 66 |
-| [proved, unrefereed] | 120 |
+| [proved, unrefereed] | 121 |
 | [sketch: gap named] | 17 |
 | [conjecture] | 16 |
-| [refuted] | 29 |
-| [measured] | 131 |
-| [computed] | 48 |
-| [model] | 72 |
+| [refuted] | 31 |
+| [measured] | 132 |
+| [computed] | 49 |
+| [model] | 98 |
 | [cited] | 8 |
 | [cited, unchecked] | 15 |
-| outside the scheme | 31 |
 | total | 553 |
 
 | Chapter | Rows |
@@ -607,33 +606,28 @@ of their own beyond those listed.
 
 ## Tags outside the scheme
 
-These are copied from the chapters, and the PI should map each to a tag of `README.md`. Each is given with the nearest
-README tag and the reason it was not mapped.
+No row and no secondary tag of chapters 1 to 5 and 7 now carries a tag outside the scheme. The 31 rows that did were
+mapped to the weakest README tag that fits, with the qualifier moved into the chapter's sentence in words:
 
-- [proved by example; measured] (3.j). Nearest [measured]; the example is a proof of tightness, which no tag names.
-- [refuted as a constant] (3.l) and [refuted as stated] (3.bd). Nearest [refuted]; each refutes one reading of the
-  statement, not the statement in every reading.
-- [measured and argued] (inside 3.aa). Nearest [measured]; the argument is not a proof.
-- [refuted as a saving] (inside 3.af). Nearest [refuted]; it refutes the use, not the inequality.
-- [measured on a proxy] (4.w). Nearest [measured]; the quantity measured is not the one claimed.
-- [measured, share inferred] (4.ab). Nearest [measured]; part of the figure is inferred.
-- [model, measured] (5.r). Nearest [model]; the chapter joins two kinds of evidence.
-- [proved, unrefereed; conditional on the OV conjecture] (4.2). Nearest [proved, unrefereed]; it rests on a conjecture.
-- [proved, unrefereed; given a measured property] (4.3). Nearest [proved, unrefereed]; it rests on a measurement.
-- [measured, simulation] (3.ao, 3.ap, 3.ar, 3.ay, 3.ba, 3.bf, 3.bk, 3.bl, 3.bm, 3.bn, 3.br, 3.bu). Nearest
-  [measured], since the figures were counted; README's [measured] is on real data, and [model] would hide that they
-  were counted.
-- [computed in the model] (4.an, 4.ao, 4.ap, 4.av). Nearest [model]; README's [computed] evaluates a proved inequality,
-  and these evaluate the layout programme.
-- [model and computed] (4.at). Nearest [model]; it joins a derivation in the model to a computation along the frontier.
-- [model on measured sizes] (4.bc), [model with measured costs] (4.bi) and [model against measured] (4.bj). Nearest
-  [model]; each sets measured inputs or a measured outcome beside the model.
-- [computed, unrefereed] (5.ce). Nearest [computed]; README's [computed] has no refereed axis.
-- [computed and measured, unrefereed] (5.cp). Nearest [computed]; it sets model counts beside measured falls.
-- [checked by referee 2 in simulation] (5.bo). Nearest [measured, simulation] above, itself outside the scheme.
-- [proved as identities] (7.x). Nearest [proved, unrefereed]; the chapter says nothing of a referee.
-- [computed on measured counts] (7.n). Nearest [computed]; it is arithmetic on measured counts, not a proved
-  inequality. Chapter 5 tags the same figure [measured] (5.ad).
+- [measured, simulation] (3.ao, 3.ap, 3.ar, 3.ay, 3.ba, 3.bf, 3.bk, 3.bl, 3.bm, 3.bn, 3.br, 3.bu) became [model], since
+  README's [measured] is on real data; each sentence says the figures are by simulation and names the script.
+- [proved by example; measured] (3.j) became [model]: the example is argued, and the measurement is a toy simulation.
+- [refuted as a constant] (3.l) and [refuted as stated] (3.bd) became [refuted], with "as a constant" and "as stated" in
+  the sentence; so did [refuted as a saving] inside 3.af.
+- [measured and argued] inside 3.aa became [model], with "as measured and argued" in the sentence.
+- [measured on a proxy] (4.w) and [measured, share inferred] (4.ab) became [model], with the proxy and the inferred
+  share named in the sentence.
+- [computed in the model] (4.an, 4.ao, 4.ap, 4.av), [model and computed] (4.at), [model on measured sizes] (4.bc),
+  [model with measured costs] (4.bi, and chapter 7, §7.7) and [model against measured] (4.bj) became [model], with the
+  computation or the measured inputs named in the sentence.
+- [proved, unrefereed; conditional on the OV conjecture] (4.2) and [proved, unrefereed; given a measured property]
+  (4.3) became [proved, unrefereed], with the condition stated after the tag.
+- [model, measured] (5.r), [computed and measured, unrefereed] (5.cp) and [checked by referee 2 in simulation] (5.bo)
+  became [model]; [computed, unrefereed] (5.ce) became [computed].
+- [proved as identities] (7.x) became [proved, unrefereed], with "as identities" in the sentence; section 7.4 records
+  no referee's check of P1.6 and P1.7.
+- [computed on measured counts] (7.n) became [measured], chapter 5's tag for the same figure (5.ad), with "computed
+  from measured counts" in the sentence.
 
 Rows that use a README tag outside its definition: 2.r is [measured] on synthetic data, and the grid check of 2.18 is
 [computed] although it evaluates no proved inequality. Defects 4 and 6 of §1.8a (1.be, 1.bg) are [model] although
@@ -675,12 +669,10 @@ values. Two computations behind them were not refereed line by line: the Chernof
 
 ## Disagreements found while rebuilding
 
-- **The estimate of the tail at the decision (A2.3).** Chapter 5 tags it [measured] inside one bracket for A2.3 to
-  A2.6 (5.ad); chapter 7 tags it [computed on measured counts] (7.n). Each row keeps its chapter's tag.
-- **Proposition 3.46's upper end against the plain end (13 to 22% at v = 0).** Chapter 3 tags it [measured, simulation]
-  (3.bl); chapter 7, §7.7, tags the same figure [model, simulated by the referee]. Chapter 7 adds no row for it.
-- **The hand-over budgets for group 6.** Chapter 4, §4.9.2, tags the group-12 budgets [computed in the model] and the
-  group-6 budgets of the same programme plain [computed]. The row (4.an) gives the weaker, [computed in the model].
+Three found earlier are resolved by the mapping above: the estimate of the tail at the decision (5.ad and 7.n are both
+[measured]), Proposition 3.46's upper end against the plain end (3.bl and §7.7 are both [model]), and the hand-over
+budgets for group 6 (§4.9.2 now tags groups 12 and 6 alike [model]).
+
 - **Tags of §3.7a, §3.2a and §3.4 against their tracks.** The confidence and rotations tracks mark every proof
   unrefereed; chapter 3 tags [proved, refereed] the results whose text the referee read unchanged (3.25 to 3.28, 3.34
   to 3.41, 3.43, 3.45), after an audit (chapter 3, Editor's queries 14 and 15). The chapter is consistent with itself,

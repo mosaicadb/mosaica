@@ -172,9 +172,9 @@ applied to R_j. sec φ_j is computed from the stored tan φ_j and ‖y_j‖, bot
 The share is ‖y_j‖ sec φ_j·ρ_R,j·‖Δ_j‖ divided by c·‖y_j‖ tan φ_j·‖Δ_j‖/√d_j. ∎
 
 [proved, refereed] `notes/program/rotations/CLAIMS.md` E1; referee "E1, the inequality: no error found". The bound is
-pointwise in ω, so it may use a ρ_R,j computed from the realised matrices. The referee attacked it with the worst query
+pointwise in ω, so it may use a ρ_R,j computed from the realised matrices. The referee attacked it by simulation with the worst query
 for each item, Δ ∝ (R̃ − R)ᵀō: the change of the estimate reached 0.52 to 0.58 of the allowance and never exceeded it
-(300 items, n_j = 256 and 768, depths 1, 4 and 8, f32 and int16) [measured, simulation, `ref_e.py`]. So the allowance is
+(300 items, n_j = 256 and 768, depths 1, 4 and 8, f32 and int16) [model; `ref_e.py`]. So the allowance is
 within a factor 2 of attained.
 
 **The build rule.** The build must go on encoding against its f64 matrix: it must not encode against R̃_j, or derive κ_j
@@ -185,7 +185,7 @@ The referee asked whether the rule is necessary, and found it exact for int16 an
 
 - For the exact law it is necessary. With a grid as coarse as the entries (step 1/8 at n_j = 64) and the one-bit code
   taken from R̃y, the standardised error had mean +0.046 (90 standard errors) and Pr[> 2 sd] = 0.0234 against the law's
-  0.0223; with step 2⁻¹⁰ nothing showed in 4·10⁶ draws [measured, simulation, `ref_e_build.py`].
+  0.0223; with step 2⁻¹⁰ nothing showed in 4·10⁶ draws [model; by simulation, `ref_e_build.py`].
 - For a guarantee at f32 it is not. The device after Lemma 3.1 (a code computed from a rounded product costs a factor
   E[2^Q] on δ, Q the coordinates within rounding of a cell boundary) applies when Q is defined from z alone with the
   worst-case radius ‖N_p‖₂·‖y‖ per coordinate, N = R̃ − R: given z the code is one of 2^Q functions of z, and the lemma
@@ -193,8 +193,8 @@ The referee asked whether the rule is necessary, and found it exact for int16 an
   about e^0.35 on δ and 0.04 in c at the deepest code [model; the referee's estimate]. That route also needs a radial
   slack of order ρ_R·sec φ·|Ê|, a tan φ rounded up by ρ_R·sec²φ (the present margin of 10⁻⁷ on tan φ is too small at
   depth 8) and the same count for near-ties between the six scales, which was not worked out. [sketch: gap named]
-- For int16, E[Q] is in the hundreds and no argument is available. The realised codes from R·y and R̃·y differed for no
-  item with f32 and for 1% to 62% of items with int16 [measured, simulation].
+- For int16, E[Q] is in the hundreds and no argument is available. In the referee's simulation the realised codes from R·y and R̃·y differed for no
+  item with f32 and for 1% to 62% of items with int16 [model; `ref_e.py`].
 
 So the rule as stated is the simple sufficient one, and it costs nothing, because the build regenerates the f64 matrix
 from the seed and no query reads it.
@@ -584,12 +584,12 @@ item is re-encoded. Theorem 3.6 applies because 𝒯_k is unique.
 
 Five further facts about the k-NN union come from the second pass (`reports/surge/bounds2.txt` section 2).
 
-- *The union over k is tight* [proved by example; measured]. k matches tied at the k-th score with unrelated residuals
-  fail nearly independently, and a toy with the oracle constant c(|S|) fails at 0.093–0.101 at ε = 0.1
+- *The union over k is tight* [model]. By example, k matches tied at the k-th score with unrelated residuals
+  fail nearly independently, and by simulation a toy with the oracle constant c(|S|) fails at 0.093–0.101 at ε = 0.1
   (`simcap.py`, n = 16, 40,000 seeds).
 - *Levels* [proved, unrefereed]. An item is dropped once, so its drop events at different levels are disjoint, and the
   only slack is the split of ε across levels, which is sound for any fixed weights.
-- *Gaps between neighbours* [refuted as a constant]. The i-th neighbour is lost only if its bound fails by the gap
+- *Gaps between neighbours, as a constant* [refuted]. The i-th neighbour is lost only if its bound fails by the gap
   s_i − s_k as well, but the gaps are unknown until the answer is known. A rank-dependent rule is unsound, a posterior
   check on the returned gaps is unsound because losing a tied neighbour makes the gaps look safe, and lowering t̂ to
   manufacture a gap is the same as raising c. The most the gaps could give is c(kL) − c(L): 0.26 / 0.31 / 0.34 at
@@ -855,7 +855,7 @@ after the 6-bit level:
 | T1 with d = 0.002 / 0.005 / 0.01 | 0.099 / 0.004 / 0 | 0.076 / 0.008 / 0 | 0.065 / 0.010 / 0 | 0.052 / 0.012 / 0 | 0.044 / 0.010 / 0 |
 
 Exact reads are (score density at t) × (c_in + c_ex) × (last-level sd) within a factor of two on this sample, so they are
-linear in the two constants, and against answer size they follow the hazard rate: about |S|^0.8 [measured and argued].
+linear in the two constants, and against answer size they follow the hazard rate, as measured and argued: about |S|^0.8 [model].
 The depth of the last code level (4 to 6 bits per dimension: 3 to 3.4 times fewer reads) and the tolerance d move exact
 reads far more than any sound constant.
 
@@ -914,7 +914,7 @@ the latitude of Δ_j onto that of Δ′_j, so for a rule that uses the rotations
 through (Δ′, codebooks). The corpus must be free to place blocks anywhere on the latitude with one common prefix read.
 The referee's simulation, with a fixed query, a corpus on its latitude and one Haar matrix per trial, agreed with this
 model in 16 one-block cells and in a two-block, two-level case (Pr[at least one failure] 0.6020 against 0.6014)
-[measured, simulation, `ref_sim_c.py`].
+[model; `ref_sim_c.py`].
 
 **Corollary 3.30 (Corollary Q of the confidence track; R9 in quantile form).** Suppose the answer is wrong with
 probability at most ε on every corpus of N items. Take any i.i.d. corpus whose items are at the threshold, so that F_i
@@ -978,7 +978,7 @@ d/(d − 1) ≤ 1 + 2/d for d ≥ 2. ∎
 the conditioning on z_1 and whose inequality on C_d was checked only numerically for d ≥ 4. The proof by Wendel's
 inequality and step (c′) are the referee's (section 6), and (c′) is itself unrefereed. The event's probability for one
 uniform codeword was 0.83 to 0.96 of δ·I(θ) in four settings (d = 6, 12, 24; δ = 0.01, 0.002; 10 to 20 million draws)
-and never exceeded it [measured, simulation, `c2_revision.py`].
+and never exceeded it, by simulation [model; `c2_revision.py`].
 
 **Lemma 3.32 (Lemma C4 of the confidence track; any code, through the angle between two errors).** For any fixed codebook
 (or conditionally on a random one), d ≥ 3, and any two fixed linearly independent items y_1, y_2 orthogonal to Δ, let
@@ -1031,14 +1031,14 @@ N·λ²·δ is 1.2·10⁻⁶ and the last term N·M·I*(θ) is below 0.01 from [
 
 The first row is the slack of step (c), not a boundary. At d = 95 and 29 bits, where M = 5.4·10⁸ is less than N, the
 last term with (c′) is 0.026, so there the union is attained within 2% with fewer codewords than items. The track's first
-version had drawn two conclusions that the referee showed unsupported and that are withdrawn [refuted as stated]: that
+version had drawn two conclusions that the referee showed unsupported and that are withdrawn as stated [refuted]: that
 the union needs M ≫ N·ln²(N/δ), and that it fails with fewer codewords than items. What survives of them is the case of
 one codeword (the track's Claim E, [proved, unrefereed]): with M = 1 every item of the equator corpus with cos φ_i > 0
 fails as soon as τ = −Δ′·c′ ≥ ζ, because sin φ_i ≤ 1, so p(Δ′) = ½ on an event of probability T_{d+1}(ζ) and
 π₂ ≥ ¼·T_{d+1}(ζ), of order δ rather than δ², and the union over N is not attained. Where between one codeword and the
-table's sizes the union starts to be attained is open; the referee measured the excess Pr[F_2 | F_1] − p̄ for a random
+table's sizes the union starts to be attained is open; the referee measured by simulation the excess Pr[F_2 | F_1] − p̄ for a random
 shared code at n = 13 as 0.5/M, 0.25/M, 0.14/M at M = 8, 64, 512 for δ = 0.01 and 0.35/M, 0.10/M, 0.05/M for δ = 0.002, so
-the boundary depends on d and δ, not on M/N alone [measured, simulation, `ref_sim_c.py` part D].
+the boundary depends on d and δ, not on M/N alone [model; `ref_sim_c.py` part D].
 
 What Theorem 3.33 does not cover, each [sketch: gap named]: the factor N·L over levels, which needs
 Pr[F_{1,ℓ} ∩ F_{2,ℓ′}] for two items at two levels whose codes are nested refinements, while Lemma 3.31 is for one
@@ -1234,7 +1234,8 @@ to 7·10⁻⁷ of δ for block 0 holding 22–55% of the second level's variance
 no maximal inequality removes it for intervals of this form. Pairs overlap by more than 10% only above ρ = 0.9, which
 needs more than about twenty levels over this range of sds. In a Brownian picture even continuous monitoring counts as
 about c²·ln(sd_first/sd_last), some 140 tests [sketch: gap named]. Conditioning on an earlier level does not help either,
-because the items at level ℓ + 1's boundary are those whose level-ℓ estimate was ρc sds from t [refuted as a saving].
+because the items at level ℓ + 1's boundary are those whose level-ℓ estimate was ρc sds from t, so as a saving it is
+refuted [refuted].
 
 Any fixed weights π_ℓ with Σπ_ℓ = 1 are sound for splitting ε over levels. The four-block constants by weight are 8.551
 (all of ε), 8.589 (0.7), 8.695 (0.25), 8.789 (0.1), 8.899 (1/30), and the one-block constants 7.291, 7.312, 7.373,
@@ -1523,7 +1524,7 @@ has not been re-read. The theorist's runs gave 0.0090 to 0.0093 against δ = 0.0
 simulation over seven codes (the sign code at n = 8, a 2-bit scalar grid at n = 13, a ternary code at n = 5, random
 codebooks of 512, 16, 2 and 1 words) and 63 cells never put the one-sided rate above δ (largest 0.0094 at δ = 0.01 and
 0.0192 at δ = 0.02), and in every cell the rate matched the proof's conditional law within two standard errors
-[measured, simulation, `ref_sim_a4.py`].
+[model; `ref_sim_a4.py`].
 
 *What Proposition 3.46 is and is not* (referee section 2, accepted in full).
 
@@ -1537,7 +1538,7 @@ codebooks of 512, 16, 2 and 1 words) and 63 cells never put the one-sided rate a
    half-widths, not about the bound an exclusion uses. Its upper end Ê/(1 + ξ²) + ξ/√(1 + ξ²) is above the plain upper
    end Ê + ξ exactly when Ê < −ξ·√(1 + ξ²)/(1 + √(1 + ξ²)), about −½·ζ·tan φ. In the referee's runs that held in 13 to
    22% of draws at v = 0, in 50 to 98% at v = −0.3 for codes with ξ² below 0.4 (15 to 23% for the codebooks of 16 words
-   or fewer), and in over 99% at v = −0.9 [measured, simulation]. So neither end should be used alone; Proposition 3.48
+   or fewer), and in over 99% at v = −0.9 [model; by simulation, `ref_sim_a4.py`]. So neither end should be used alone; Proposition 3.48
    shows that their minimum costs no second event.
 
 **Proposition 3.47 (A4′ of the confidence track; Proposition 3.46 inside the bit budget).** Proposition 3.46 stores the
@@ -1575,15 +1576,15 @@ statement of the upper end, with b̄ = 1 and Ē = Ê, which is proved on this sa
 Theorem 3.11's repaired statement is written on the two-sided event |U| ≤ c/√d, while the proof uses it on the
 one-sided event 𝓔₁ (Editor's query 20). In
 the theorist's simulation (d = 12, 512 random codewords, δ = 0.01, 400,000 draws per row) the smallest of the three ends
-was exceeded at rates 0.0097 to 0.0102 at v = 0, ±0.3, 0.6, 0.9 and 0.99, and 0.0001 at v = −0.9 [measured, simulation,
+was exceeded at rates 0.0097 to 0.0102 at v = 0, ±0.3, 0.6, 0.9 and 0.99, and 0.0001 at v = −0.9 [model;
 `c1_revision.log` part 4]. The remark after Theorem 3.12 that R8 and the plain interval have different events, so that
 their minimum costs a second event, concerns several blocks, where the shares are unknown; for one block Proposition
 3.48 shows a single event serves both (see Editor's query 13).
 
 The cap is needed. Without it R8's upper end, used one-sidedly at ζ_d(δ), fails with probability rising to 2δ for aligned
 queries: 0.0168 at v = 0.9, 0.0197 at 0.99 and 0.0200 at 0.999 (n = 13, M = 512, δ = 0.01), and 0.0394 at v = 0.99
-(n = 5, δ = 0.02); with the cap it is at most δ in every cell [measured, simulation, referee section 2; reproduced by the
-theorist]. Its two-sided validity held in every cell.
+(n = 5, δ = 0.02); with the cap it is at most δ in every cell, by simulation [model; referee section 2, `ref_sim_a4.py`;
+reproduced by the theorist]. Its two-sided validity held in every cell.
 
 **Lemma 3.49 (B5 of the confidence track; one side against two).** (i) A two-sided δ-valid scheme in 𝓛 satisfies Theorem
 3.43 with δ, and at v = 0 the stronger E_ω T_d(h₁/e_⊥) ≤ δ/2, because there both tails are equal. (ii) Proposition 3.46
@@ -1617,8 +1618,8 @@ of Lemma 3.1's form, if Δ is uniform on S^d and independent of (y, ω), the shr
 Δ·(y − cos φ·x₀), and ‖y − cos φ·x₀‖ = sin φ exactly. So the error is sin φ·U′ with U′ a coordinate of a uniform unit
 vector in ℝ^(d+1), independent of φ, and the half-width ζ_{d+1}(δ)·sin φ·‖Δ‖ fails with probability exactly δ on average
 over Δ. A converse that uses only the requirement averaged over independent (y, Δ) therefore proves at most
-ζ_{d+1}(δ)·E sin φ, about ζ·2^(−ν). That rule is not valid for fixed queries: at δ = 0.01 it failed in 1.8% of draws at
-v = 0.3, 12% at 0.6, 48% at 0.9 and 78% at 0.99 [measured, simulation, `c1_revision.py` part 4; the referee found
+ζ_{d+1}(δ)·E sin φ, about ζ·2^(−ν). That rule is not valid for fixed queries: at δ = 0.01, by simulation, it failed in 1.8% of draws at
+v = 0.3, 12% at 0.6, 48% at 0.9 and 78% at 0.99 [model; `c1_revision.py` part 4; the referee found
 1.3%, 9.4%, 40% and 73% at 0.3, 0.6, 0.9, 0.999]. The tan comes from queries correlated with the item, which Lemma 3.40
 uses. The ratio of the two forms is cos θ_ν = √(1 − 4^(−ν)): 0.968 at ν = 2, 0.866 at ν = 1, 0.541 at ν = ¼. The track
 reads this as the difference between TurboQuant's 4^(−b) and 1/(4^b − 1) [cited, unchecked: from the librarian's
@@ -1654,7 +1655,7 @@ has a tan φ 1.3 to 1.8 times the ideal (`notes/program/codes/REPORT.md`), which
 (¼ bit) the plain half-width exceeds the deterministic bound |Δ·y| ≤ ‖Δ‖‖y‖, an interval cut there is outside 𝓛, and w*
 is 0.76 and 0.63 of the deterministic bound at d = 95 and 255; so the low-rate rows say least about the index.
 
-**Simulation** [measured, simulation, `c1_revision.py` part 4: d = 12, 512 random codewords, δ = 0.01, 400,000 draws per
+**Simulation** [model; `c1_revision.py` part 4: d = 12, 512 random codewords, δ = 0.01, 400,000 draws per
 row, standard error 0.00016]. One-sided rates of "truth above the upper end". "Uniform" is Δ uniform and independent of
 y; the other rows are fixed queries at latitude v. "sin" is the rule of the averaged requirement above.
 

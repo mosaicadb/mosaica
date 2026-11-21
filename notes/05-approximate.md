@@ -887,7 +887,7 @@ Referee 2 lists four hypotheses the source does not state (`referee-2.md` §5).
    near-duplicates. The uncentred second moment is exactly unbiased, and the centred one is low by the mean pairwise
    covariance.
 
-*The direction of the bias* [checked by referee 2 in simulation]. If a block is still uncoded at R, â_R − s holds
+*The direction of the bias*, checked by referee 2 by simulation [model; `program/approximate/referee/ref2_a47.py`]. If a block is still uncoded at R, â_R − s holds
 Δ_j·y_j for that block, which is not random over the seed, and σ̂² and σ_c² come out low, the unsafe side. The track's
 "low by the share of the level's error variance in that block" assumes that block's part is uncorrelated with the
 rest; in the simulation the block held 39% of σ̂² and the estimate came out at 30% of the truth, because the blocks'
@@ -1115,7 +1115,7 @@ sampled and no Poisson form the track finds floor over B_leaf of 1.75 at 28 × 7
 referee's 1.73 [computed] (`program/approximate/scripts/topk_model.py check`). On trees with the three suite fits'
 measured shares, the static optimum is 1.42, 1.50 and 1.19 times B_leaf(0.9) at the cluster level (yahoo, LAION
 text, glove), 1.69, 1.88 and 1.30 with leaves of about 125 rows under the clusters, and 1.38, 1.76 and 1.41 with
-leaves of about 31 rows [computed, unrefereed] (`program/approximate/out/topk_model_fits.txt`). The floor's own column
+leaves of about 31 rows [computed] (`program/approximate/out/topk_model_fits.txt`). The floor's own column
 in those runs came out above the static optimum in 11 of 18 cells, which cannot be, and a run at 19,200 draws a seed
 shows it is noise, so only the static optimum is quoted from them.
 
@@ -1154,8 +1154,8 @@ shows it is noise, so only the static optimum is quoted from them.
   two orders of magnitude at ϑ near ½, and by count the row term is the largest in all twelve designs on the three fits,
   by 20 to 100 times [computed] (`program/approximate/referee/ref1_a14_a15.txt`, part B). The exponent is a statement
   about the limit only. In the model finer leaves still lower the rows when the read is one knapsack over the leaves:
-  the static optimum falls 2.1 to 2.4 times from the clusters to 125-row leaves and a further 1.4 to 2.1 times to
-  31-row leaves, against measured falls of 2.7 to 4.1 and 2.3 to 2.5 times [computed and measured, unrefereed]
+  the static optimum, as computed, falls 2.1 to 2.4 times from the clusters to 125-row leaves and a further 1.4 to 2.1 times to
+  31-row leaves, against measured falls of 2.7 to 4.1 and 2.3 to 2.5 times [model]
   (`program/approximate/CLAIMS.md` A1.9), which agrees in direction with §5.10.4.
 
 *Prior art.* The generalised random energy model is Derrida's [cited, unchecked]. Theorem 1.1 of Addario-Berry and
@@ -1210,7 +1210,7 @@ text, and an explicit best-child term adds nothing; no key from the parent's mom
 
 By Proposition 5.10 the multiplier is the marginal ζ, a property of the budget. Measured best ψ in μ + ψσ with the exact
 σ, by rows to recall 0.9 at k = 10: clusters 3.0 / 4.0 / 4.0 (glove / yahoo / LAION text), 16 sub-clusters a cluster
-3.0 / 3.0 / 4.0, 64 a cluster 3.5 / 3.5 / 3.0, and 2.5 to 3.5 at k = 100 [model, measured] (`hierarchy/theory.md`
+3.0 / 3.0 / 4.0, 64 a cluster 3.5 / 3.5 / 3.0, and 2.5 to 3.5 at k = 100 [model] (`hierarchy/theory.md`
 §3.4). H's z(k, n_c) would give 2.6 for 2,000 rows, 1.4 for 125 and 0.5 for 31, so it must not be carried below the
 cluster level; its collapse to z(10, 20) ≈ 0 under sparse visible sets was the same error.
 

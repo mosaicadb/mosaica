@@ -165,7 +165,7 @@ built stop and a fixed cluster count on yahoo, LAION text and glove, five visibl
   referee's repairs; the constant is unchanged.
   The sequential form is [sketch: gap named]. "Nothing between all shapes and a parametric family" is withdrawn: a
   Cantelli stop is valid for every standardised shape and useless in practice, and the classes between are open.
-- *The estimate at the decision* [computed on measured counts; A2.3]. With 1,300 to 4,000 pooled rows the prediction is
+- *The estimate at the decision* [measured; A2.3]. Computed from measured counts, with 1,300 to 4,000 pooled rows the prediction is
   off by a factor 2.2 to 4.0, because the decision reads the tail beyond where the query holds more than a handful of
   rows. The tail is near exponential, with a decay rate of 1.97 to 2.77 where the normal has 4.7 [measured; A2.4].
 - *The premise fails* [measured; A2.5]. One shape for all queries over-predicts at τ_k by 2.2 to 2.5 times; the clusters
@@ -220,7 +220,7 @@ zero-read cost is concave in it, and the referee's counter-example has two parti
 points and differ by 10%. The corrected statement is that the mismatch appears wherever a covariance is formed: which
 rows share a cell, which cells share a basis, and which basis a row is coded in [model; P1.4, S.1]. The sorted range
 counts the low tail of the keys, whose sum spherical k-means ascends, and the approximate order is served by a trace in
-the queries' metric [proved as identities; P1.6, P1.7]. The built fit stops short of a fixed point, with 4.4% of rows
+the queries' metric, as identities [proved, unrefereed; P1.6, P1.7]. The built fit stops short of a fixed point, with 4.4% of rows
 away from their best centre on this sample [measured; `partition/experiment/RESULTS.md` item 1].
 
 **The experiment** [measured; `partition/experiment/RESULTS.md`, "Summary table" and "Drop rules: which fired"]. The seed
@@ -408,7 +408,7 @@ referee's statement]. This quantile form is chapter 3's Corollary 3.30, in secti
 
 **Coding every block at the 56-byte level.** The recommendation to code every block at the first randomised level is
 withdrawn once the stored scalars are charged: in time coding three or four blocks there would pay only below 0.3 to
-1.1 ns per block-rise, against a decode of 1.4 to 2.8 ns [model with measured costs; `confidence/DESIGN-CLAIMS.md`
+1.1 ns per block-rise, against a decode of 1.4 to 2.8 ns, with measured costs [model; `confidence/DESIGN-CLAIMS.md`
 C5.2, C5.6]. The earlier native trial was 8 to 24% slower, though that trial changed every level's rates, so the figure
 is confounded (`confidence/referee/referee-design.md` section 4.1). The model also over-predicted the gain (6 to 26%
 fewer entrants to 96 B against 2% measured). The referee

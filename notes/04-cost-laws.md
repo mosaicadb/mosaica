@@ -167,7 +167,8 @@ least 25 even at one bit a coordinate [sublinear/REPORT.md §3.2].
 
 **Proposition 4.2 (Proposition 1 of sublinear/REPORT.md §3.3).** Suppose an index over N unit vectors in dimension n
 can be built in N^(c_b) time and answers "is there a row x with q·x ≥ t?" in N^(1−η) time, for n = ω(log N). Then OV
-is solved in N^(2−η′) time for some η′ > 0. **[proved, unrefereed; conditional on the OV conjecture]**
+is solved in N^(2−η′) time for some η′ > 0. **[proved, unrefereed]** As a lower bound it is conditional on the OV
+conjecture.
 
 *Proof.* Let A, B ⊂ {0,1}^n be the OV instance, and write |b| for the number of ones in b. Map b to the unit vector
 x_b = (𝟙 − b)/√(n − |b|) and a to q_a = a/√|a|. Split B into classes by the weight n − |b|, of which there are at most
@@ -218,7 +219,7 @@ A lower bound on storage completes the list. It concerns what a cluster summary 
 **Proposition 4.3 (summaries cannot be small; agent3b/REPORT.md §2).** Suppose row i exceeds every other row of its
 cluster by e_i in some direction r̂_i. A summary that decides "the cluster's maximum is at least t" to tolerance e_i/2,
 for every sub-collection of the cluster, solves the INDEX problem, so it needs at least (1 − h₂(δ)) bits for each such
-row, with δ its failure probability. **[proved, unrefereed; given a measured property]**
+row, with δ its failure probability. **[proved, unrefereed]** Its use rests on a measured property, given below.
 
 *Proof (as the source gives it).* Querying direction r̂_i at a threshold between row i's score and the largest score of
 the other rows tells whether row i is in the sub-collection, so the summary encodes one membership bit for each such
@@ -549,7 +550,7 @@ first pass further into the bulk and move its exponent toward one. A randomised 
 dimension keeps a fixed slack in sd units, so bytes a row scale with n and the share of the vector read stays roughly
 constant.
 
-Fewer dimensions leave less room in the tail [measured on a proxy; sublinear/REPORT.md §7, `dims.py`, `tail_32.txt`,
+Fewer dimensions leave less room in the tail, as measured on a proxy [model; sublinear/REPORT.md §7, `dims.py`, `tail_32.txt`,
 `tail_96.txt`, `tail_256.txt`]. The proxy projects corpus and queries on the top n principal directions and renormalises,
 which is a truncation of one model rather than another model:
 
@@ -680,7 +681,8 @@ The two laws count different things on different data, so their exponents can be
 Three sources set the cluster size, and each optimises a different quantity.
 
 **The exact path's exponent** (sublinear/REPORT.md). Clusters kept at 1,000 rows as N grows (K = N/1,000) are part of
-every measured exponent of section 4.4, and are worth about 0.04 of the text exponent [measured, share inferred]. Over
+every measured exponent of section 4.4, and are worth about 0.04 of the text exponent, a share inferred from the
+measurements [model]. Over
 the 1.5 decades measured, the rms residual falls as N^(−0.086), and the cluster radius at fixed size falls as
 N^(−1/n_int) with n_int about 20, which slows the approach to Theorem 4.7's linear limit. Finer clusters at fixed N
 gain little, since their radius falls only as K^(−0.053) [sublinear/REPORT.md §4, §5.1, §5.6]. The report recommends
@@ -791,19 +793,19 @@ measured nested code (1.625) the left side is 9.70, 3% on the losing side; with 
 code it would win by 11% [model; the referee §2, E1, which corrects DESIGN-CLAIMS C3a.2]. The nesting of §4.9.1 is
 therefore what puts the first level on the wrong side.
 
-Over the whole frontier the hand-over follows [computed in the model; DESIGN-CLAIMS C3b.3; `c3b_g12_c8_ideal.log`,
+Over the whole frontier, computed in the model, the hand-over follows [model; DESIGN-CLAIMS C3b.3; `c3b_g12_c8_ideal.log`,
 `c3b_g12_c8_built.log`]. With ideal curves a layout found by the search first beats the deterministic code at 16 B,
 and none found does at 12 B. With the built codes the first such budget is 40 B, by 3%, and none found does at 32 B, so
 the hand-over lies between 32 and 40 B in the search. The search is local, so each figure is an upper bound on the
 hand-over budget; a wider search by the referee, with ideal curves, improved the frontier by at most 0.2% at 32 and
 56 B [referee §3, §3a]. The built schedule hands over at 32 B, where the built codes put it. Group 6 gives the same
-budgets [computed; `c3_tables.log`, `c3b_g6_c8_*.log`, `c3c_g6_c8.log`]. The hand-over moves as c²: at c = 4 it is at most 4 B with ideal curves and at most 8 B with built
-ones [computed in the model; DESIGN-CLAIMS C3b.4 item 2, with the referee's "at most"]. These c = 4 figures describe a
+budgets, computed in the same model [model; `c3_tables.log`, `c3b_g6_c8_*.log`, `c3c_g6_c8.log`]. The hand-over moves as c²: at c = 4 it is at most 4 B with ideal curves and at most 8 B with built
+ones, computed in the model [model; DESIGN-CLAIMS C3b.4 item 2, with the referee's "at most"]. These c = 4 figures describe a
 certificate of the same form at a larger failure probability; they do not describe the approximate mode as built,
 whose deterministic levels are read with a statistical width rather than against W [DESIGN-CLAIMS C3b.4 item 4]. At
 equal bytes the best layout found is at least 1.4, 2.1 and 2.7 times narrower than the deterministic code alone (W) at
 32, 96 and 256 B with ideal curves, and at least 1.2, 1.5 and 1.9 times narrower than the built deterministic code
-(1.19·W) at 56, 96 and 256 B with built ones [computed in the model; same sources].
+(1.19·W) at 56, 96 and 256 B with built ones, computed in the model [model; same sources].
 
 In time the first rotated block is itself at the margin. With a block-rise charged at its decode time (§4.9.4), coding
 no block at the first level is between 3% wider and 11% narrower than coding one, and the crossover, 1.7 ns a
@@ -830,16 +832,16 @@ chapter 3 records ξ² = 0.092 at 56 B on the dump and 0.6% of bytes.
 3. *Local form.* Along the frontier, dB*/d log₂(1/ũ) = n_⋆(ũ), so the bits per item are
    ∫₀¹ n_⋆(ũ)·Pr[ũ_i < ũ] d log₂(1/ũ), with i a random item: each halving of the width costs n_⋆ bits for every item still inside the shell of
    that width. At an optimum n_⋆ = Σ_j n_j cos²φ_j for a rotated layout and W_T/λ_w for a deterministic one, and this
-   identity holds along the computed frontier to within 4% from 24 to 256 B [model and computed; DESIGN-CLAIMS C3b.1
+   identity, evaluated numerically, holds along the computed frontier to within 4% from 24 to 256 B [model; DESIGN-CLAIMS C3b.1
    item 4 and C3b.3 item 6; derivation checked by the referee §3].
 4. *Corrected.* Query type enters through ũ and through the class's own level widths w̄_ℓ, not through ũ alone. Within
    a class the answer size enters only through ũ, and the visible set is untested [measured; RESULTS §2; the referee
    §5, which replaces DESIGN-CLAIMS C4.1 item 4].
 
 On the model's frontier (group 12, c = 8, ideal curves) an item at a tenth of its zero-bit bound needs at most about
-56 B (the frontier is at 0.102 there), one at a hundredth at most about 215 B, and each further halving tends to n bits (96 B), so the law is not a power law
-[computed in the model; DESIGN-CLAIMS C4.1; the referee §3 and §5 make these upper bounds and find 217 B by
-interpolation]. The deterministic floor alone needs about 96 B at a tenth [computed in the model; same source].
+56 B (the frontier is at 0.102 there), one at a hundredth at most about 215 B, and each further halving tends to n bits (96 B), so the law is not a power law,
+as computed in the model [model; DESIGN-CLAIMS C4.1; the referee §3 and §5 make these upper bounds and find 217 B by
+interpolation]. The deterministic floor alone needs about 96 B at a tenth, computed in the model [model; same source].
 
 **The dump test** [measured; RESULTS §1 and §2]. The 50k verify dump holds 9,736,897 index-plan records from 10 item
 and 10 text queries at seven answer sizes (0.01% to 75%) over 49,500 BioCLIP-2 rows (n = 768); scripts
@@ -906,7 +908,7 @@ not a recoverable saving: the codes track puts the best package that keeps the d
 item, cumulative by level with the key, are 6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8 and 276.3. One
 (item, coded block, rise) costs 1 to 1.5 B (κ at 4 or 8 bits and tan φ at 4 bits), and each block costs 1 B of ‖y‖
 once. That is about 1% of what an item reaching 256 B stores, and the scalars are 4% to 5% of what a query reads at
-item 50% (about 14 of 301 B) [model on measured sizes; DESIGN-CLAIMS C5.1].
+item 50% (about 14 of 301 B), on the measured sizes [model; DESIGN-CLAIMS C5.1].
 
 **In time** [measured; SYSTEM.md §4.2 = `bd_p2c.out`, profiled, 999,000 BioCLIP-2 rows, one thread; as in §4.4's timed
 cost]:
@@ -949,7 +951,7 @@ in §4.9.6 [a rule of method, from DESIGN-CLAIMS C5 and the measurements above; 
 
 ### 4.9.5 The first randomised level with the scalars charged
 
-**The cost of one more coded block** [model with measured costs; DESIGN-CLAIMS C5.2, `c5a.py`, `c5a.log`]. A
+**The cost of one more coded block, with measured costs** [model; DESIGN-CLAIMS C5.2, `c5a.py`, `c5a.log`]. A
 narrower first level changes one count, the share of items entering 96 B, because an item enters a later level when its
 margin is inside the previous level's width and the later widths do not move. Per item of N, with J blocks coded at
 56 B in place of one,
@@ -964,7 +966,7 @@ margin, paying below 1.5 to 3.3 ns at 1% answers and 0.7 to 1.5 ns at 50%. In by
 save 0.2 to 2.9 B per item of N.
 
 The model over-predicts what a narrower first level gains: it gives a fall of 6% to 26% in the items entering 96 B
-where the native trial of three coded blocks at 56 B measured 2% [model against measured; DESIGN-CLAIMS C5.2 item 4,
+where the native trial of three coded blocks at 56 B measured 2% [model; DESIGN-CLAIMS C5.2 item 4,
 kept by the referee §4.1]. The likely cause is the model's block norms after the prefix, since the index's block 0 is
 about 1.5 times heavier [model; DESIGN-CLAIMS C5.2 item 4 and C3 (c) item 4].
 
