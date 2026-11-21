@@ -1,0 +1,17 @@
+[build2] fit loaded; anon 160 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 2097152 (2^21; 1344643 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 36.6657
+[build2] randomised constants 8.1s (sub-Gaussian c = 8.563): [([95], 6.98, ExactTail), ([95, 127, 255, 287], 8.041, Certificate)]
+[build2] plans 13.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 3.0, 1.0, 0.25], [5.0, 4.0, 2.0, 1.0]]
+[build2] calibration sample 494394 items from 672 clusters
+[build2] calibrated 28.0s; anon 1162 MB
+[build2] encoded 46.8s, with it the support table of 672 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 17.2 thread-seconds); anon 1276 MB
+[build2] assembled 48.4s; anon 1276 MB; x2 bound 1.564e-4; escapes: det norms 35, |y| 3784, kappa 14362, tan 33131; code hash 54cb35f7407f53f5
+[build2] saved to /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/encoded; store hash 7da7ddbf812be93d
+[repack] occupancy thresholds by level [0.14, 0.13, 0.06, 0.11, 0.15, 0.18] (timed in 0.0s)
+[approx] measured constants dir_us=0.49082605313977795 row_us_1=0.08768383859449701 row_us_4=0.10648238928914573 row_us_16=0.10730101374887796 row_us_64=0.09106137462170893 cl_us=11.391001378996673 cut_row_us_1=0.015720849783401644 cut_row_us_4=0.05967391516959175 cut_row_us_16=0.09861875491965226 cut_row_us_64=0.182064195583357 cut_us=1.44359375 grp_us=88.464 sig_us=1.09365625: timed: no cache at /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/compute-constants.txt; saved in /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/compute-constants.txt, in 0.4s; the exact planner's rule from them: r_rows=172 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/encoded in 0.489s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 7da7ddbf812be93d
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.808s in all: fit read 0.256s, key 0.024s, index opened 0.491s, repack timed 0.037s; anon 232 MB
+[approx] measured constants dir_us=0.14596364636815573 row_us_1=0.08570919707319168 row_us_4=0.09923990488551081 row_us_16=0.10476285340902317 row_us_64=0.10570974322194653 cl_us=9.870358092370724 cut_row_us_1=0.02011449151879395 cut_row_us_4=0.05634207681273547 cut_row_us_16=0.10083829970442511 cut_row_us_64=0.19601419424882371 cut_us=1.59203125 grp_us=88.798 sig_us=1.11665625: timed: no cache at /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/compute-constants.txt; saved in /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-a351f13/compute-constants.txt, in 0.4s; the exact planner's rule from them: r_rows=173 r_kappa=0.000

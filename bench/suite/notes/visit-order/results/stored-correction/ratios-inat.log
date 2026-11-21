@@ -1,0 +1,11 @@
+[build2] level ratios: 400 rows as queries, 5.8s
+[build2] assembled 156.4s; anon 756 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+[build2] saved to /home/joe/code/vexact-data/corr/val/inat/encoded; store hash 1a4a815f327d176d
+/home/joe/code/vexact-data/corr/val/inat: level ratios from 400 given queries in 5.7s on 8 threads
+reading the ratios as the reader does: 5.2 ns per cluster (123717.07)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 163.02s
+## inat: 250 clusters, 12 groups; 400 training queries; clusters with >= 3 pairs: 250; groups without a training row: 0
+  level 0: p10 / median / p90: replay 1.082 / 1.302 / 1.551, library (same queries) 1.082 / 1.302 / 1.551, build (its own rows) 1.073 / 1.313 / 1.587
+    |log(library / replay)| per cluster: median 4.06e-07, max 1.50e-06; |log(build / replay)|: median 0.030, p90 0.106
+  level 1: p10 / median / p90: replay 1.041 / 1.274 / 1.514, library (same queries) 1.041 / 1.274 / 1.514, build (its own rows) 1.034 / 1.291 / 1.562
+    |log(library / replay)| per cluster: median 4.88e-07, max 1.75e-06; |log(build / replay)|: median 0.028, p90 0.095

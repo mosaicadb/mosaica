@@ -1,0 +1,45 @@
+== inaturalist-resnet-2048-cosine 17:59:42: d999606 a351f13 99b033c 99b033c-lo15
+-- ab d999606 18:07:02
+   exit 0 18:09:25
+-- ab a351f13 18:09:25
+   exit 0 18:11:47
+-- ab 99b033c 18:11:47
+   exit 0 18:14:09
+-- ab 99b033c-lo15 18:14:09
+   exit 0 18:16:30
+== timed runs done inaturalist-resnet-2048-cosine 18:16:30
+/dev/sdd       1007G  896G   61G  94% /
+== laion-clip-512-normalized 18:16:31: d999606 a351f13 99b033c 99b033c-lo15
+-- ab d999606 18:18:06
+   exit 0 18:21:56
+-- ab a351f13 18:21:56
+   exit 0 18:25:17
+-- ab 99b033c 18:25:17
+   exit 0 18:28:43
+-- ab 99b033c-lo15 18:28:43
+   exit 0 18:31:52
+== timed runs done laion-clip-512-normalized 18:31:52
+/dev/sdd       1007G  896G   61G  94% /
+== yahoo-minilm-384-normalized 18:31:52: d999606 a351f13 99b033c 99b033c-lo15
+-- ab d999606 18:33:10
+   exit 0 18:34:25
+-- ab a351f13 18:34:25
+   exit 0 18:35:45
+-- ab 99b033c 18:35:45
+   exit 0 18:37:03
+-- ab 99b033c-lo15 18:37:03
+   exit 0 18:38:19
+== timed runs done yahoo-minilm-384-normalized 18:38:19
+/dev/sdd       1007G  896G   61G  94% /
+== arxiv-nomic-768-normalized 18:38:20: d999606 a351f13 99b033c 99b033c-lo15
+-- ab d999606 18:41:01
+   exit 0 18:43:28
+-- ab a351f13 18:43:28
+   exit 0 18:45:43
+-- ab 99b033c 18:45:43
+   exit 0 18:47:56
+-- ab 99b033c-lo15 18:47:56
+   exit 0 18:50:11
+== timed runs done arxiv-nomic-768-normalized 18:50:11
+/dev/sdd       1007G  896G   61G  94% /
+ALLDONE

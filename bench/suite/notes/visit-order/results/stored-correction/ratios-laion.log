@@ -1,0 +1,11 @@
+[build2] level ratios: 400 rows as queries, 1.1s
+[build2] assembled 31.8s; anon 651 MB; x2 bound 6.328e-4; escapes: det norms 1257, |y| 3486, kappa 11075, tan 23166; code hash f282d680b4f756a9
+[build2] saved to /home/joe/code/vexact-data/corr/val/laion/encoded; store hash 5ffaa6e690226222
+/home/joe/code/vexact-data/corr/val/laion: level ratios from 400 given queries in 1.2s on 8 threads
+reading the ratios as the reader does: 5.7 ns per cluster (238395.1)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 33.44s
+## laion: 500 clusters, 64 groups; 400 training queries; clusters with >= 3 pairs: 488; groups without a training row: 0
+  level 0: p10 / median / p90: replay 0.997 / 1.093 / 1.240, library (same queries) 0.997 / 1.093 / 1.240, build (its own rows) 0.995 / 1.090 / 1.228
+    |log(library / replay)| per cluster: median 7.22e-07, max 2.26e-06; |log(build / replay)|: median 0.027, p90 0.086
+  level 1: p10 / median / p90: replay 0.995 / 1.075 / 1.197, library (same queries) 0.995 / 1.075 / 1.197, build (its own rows) 0.987 / 1.067 / 1.196
+    |log(library / replay)| per cluster: median 9.00e-07, max 2.76e-06; |log(build / replay)|: median 0.022, p90 0.071

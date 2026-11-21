@@ -1272,6 +1272,9 @@ pub struct Index2 {
     /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
     /// None for an index without stored vectors.
     pub order: Option<Arc<order::OrderState>>,
+    /// The approximate k-NN's correction to its deterministic levels' width, per cluster and level (k x ndl,
+    /// `adaptive::level_ratios`; a compaction shares its parent's); None for an index without stored vectors.
+    pub lratio: Option<Arc<Vec<f32>>>,
 }
 
 /// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
@@ -1491,6 +1494,7 @@ impl Index2 {
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
             order: self.order.clone(),
+            lratio: self.lratio.clone(),
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -2307,7 +2311,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let apm = anchor_mhat(&anchors, &cl, n);
-    let ix = Index2 {
+    let mut ix = Index2 {
         order,
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
@@ -2339,7 +2343,14 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         x2,
         full,
         nrows,
+        lratio: None,
     };
+    if real {
+        let tr = Timer::new();
+        let (ratio, nq) = adaptive::build_level_ratios(&ix, o.seed);
+        ix.lratio = Some(Arc::new(ratio));
+        log(format!("level ratios: {nq} rows as queries, {:.1}s", tr.s()));
+    }
     if let Some(d) = dir {
         store::save_rest(&ix, d);
     }
