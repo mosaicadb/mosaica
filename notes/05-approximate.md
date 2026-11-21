@@ -623,6 +623,14 @@ constructed group the ratio for a cluster's own queries rises from 1.00 at one c
 [model] (`program/approximate/CLAIMS.md` A4.2; `out/a4_model.txt` there). The model gives the measured direction,
 larger with fewer groups and larger n, but not iNaturalist's numbers, whose N, K and bits it was never given.
 
+Measured since [measured, by the visit-order session; a replay, `study_width_decomp`] (`program/LOG-2026-11-21.md`,
+"Where the derived width's error comes from"): on iNaturalist at 12 groups and at 1 group the median of actual over
+predicted is 1.44 and 2.24 for the derived width against the coding error, 1.15 and 1.52 with the group's measured
+diagonal along the query, 1.15 and 1.47 with the cluster's own diagonal, unchanged by the mean, and 1.04 and 1.06
+with the cluster's second moment in the 16 directions that σ_c(q) projects on, where the 90th percentile falls from
+1.73 and 2.62 to 1.13 and 1.14. So the off-diagonal part carries the upper tail, the mean nothing, and the largest
+part at 12 groups is one this section does not name: the build's model of ρ against the group's measured diagonal.
+
 ### 5.9a.2 A neighbour's error is not a typical row's
 
 A row with s ≥ t is kept by a width Y if and only if e ≤ Y + (s − t), since â = s − e [proved, refereed]
@@ -1009,10 +1017,20 @@ query), which is where the formula misses. And at the measured slopes m the fram
   0.989 for ψ0 = 3 on LAION [measured, by the visit-order session].
 - At a fixed ψ0 = 3 the time to recall 0.9 / 0.95 / 0.99 over the earlier build is 0.84 / 0.59 / 0.56 on iNaturalist,
   0.93 / 1.06 / 1.31 on yahoo and 1.44 / 1.77 / – on LAION, and the rows past the deterministic levels at ψ = 5 on
-  LAION fall from 15,304 to 5,699 [measured, by the visit-order session, unfiltered]. What is left of LAION's cost is
-  the sample itself.
+  LAION fall from 15,304 to 5,699 [measured, by the visit-order session, unfiltered]. These ratios compare absolute
+  times across two runs whose baseline drifted; normalised within each run, yahoo's are 1.18 / 1.28 / 1.61, and the
+  other two have not been restated (`program/LOG-2026-11-21.md`, "The offset dial, timed"). What is left of LAION's
+  cost is the sample itself: about 2,000 µs of 5,852 a query at ψ = 6, a cost fixed per sampled cluster and not one
+  of bytes, without which the sampled width is faster than the derived (cluster reads 2,343 µs against 3,059).
 - The rule the evidence supports for the next timing is ψ0 = max(0, ψ − c) with c ≈ 1.5. The constant c is fitted, on
-  three datasets of 100 queries each (`referee-3.md`, "Verdicts in one place" and §6). The owner waits on its timing (21 November 2026).
+  three datasets of 100 queries each (`referee-3.md`, "Verdicts in one place" and §6).
+- Timed, the offset rule and ψ0 = 3 are within 7% of each other at recall 0.9 and 0.95 on LAION, yahoo, iNaturalist
+  and arxiv; at 0.99 the constant never arrives on LAION and the offset does. Against the derived-ρ build the offset
+  rule takes 1.39 / 1.70 / 2.10 times as long on LAION, 1.31 / 1.47 / 1.76 on yahoo, 1.03 / 0.99 / 1.14 on arxiv and
+  0.86 / 0.62 / 0.60 on iNaturalist, about where the sampled width stood with ψ0 = ψ [measured, by the visit-order
+  session; ratios computed by the PI] (`program/LOG-2026-11-21.md`, "The offset dial, timed"). So the dial is not what
+  makes the sampled width slow where the derived width is right, and the open question is where to sample, not how
+  to set the dial.
 - A way to remove the fitted constant, untested: measure θ_y and θ_u at build, from corpus items used as queries,
   for which the true neighbours are known. The derivation found estimates of them within one query too noisy, and
   the pooled sample's tail 3 to 12 times lighter than the neighbours' at a dial of 4 (`DIAL.md` §5 and §6).

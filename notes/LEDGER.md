@@ -514,6 +514,9 @@ chapter cites them; paths are those of the chapter.
 | 5.cw | The derived formula ψ0 = max(0, ψ − ū − s̄ + (1/√2)·ln(1/(κφ̂))) has nothing fitted | [refuted] | 5.9a.8 | `program/approximate/referee/referee-3.md` §4 |
 | 5.cx | The levels' dial must rise with ψ (0.72–0.85 per unit in replay); a constant caps LAION's recall at 0.970 / 0.989 for ψ0 = 2 / 3 | [model] | 5.9a.8 | `program/approximate/DIAL.md`; `program/approximate/referee/referee-3.md` |
 | 5.cy | Fixed ψ0 = 3: time over the earlier build 0.84/0.59/0.56 iNaturalist, 0.93/1.06/1.31 yahoo, 1.44/1.77/– LAION; LAION rows past the levels 15,304 → 5,699 | [measured] | 5.9a.8 | `program/LOG-2026-11-21.md`, visit-order session |
+| 5.cz | Offset dial ψ0 = max(0, ψ − 1.5) timed: within 7% of ψ0 = 3 at recall 0.9 / 0.95, reaches 0.99 where the constant does not; over the derived-ρ build 1.39/1.70/2.10 LAION, 1.31/1.47/1.76 yahoo, 1.03/0.99/1.14 arxiv, 0.86/0.62/0.60 iNaturalist | [measured] | 5.9a.8 | `program/LOG-2026-11-21.md`, visit-order session |
+| 5.da | Where the derived width's error lies (iNaturalist 12 / 1 groups, medians of actual over predicted): derived 1.44 / 2.24 against the coding error; group's measured diagonal 1.15 / 1.52; cluster diagonal 1.15 / 1.47; mean error nothing; 16 σ_c directions 1.04 / 1.06, p90 to 1.13 | [measured] | 5.9a.1 | `program/LOG-2026-11-21.md`, visit-order session (`sample-when-needed/decomp.txt`) |
+| 5.db | A per-cluster ratio from corpus rows as queries, no sample, reads the fewest rows at 0.9 kept (iNaturalist 144 against 253 derived, 163 sampled; LAION 428 against 518, 741); errs wide by 1.18 on LAION's text queries; sampling some clusters is worse than either pure rule | [measured] | 5.9a.8 | `program/LOG-2026-11-21.md`, visit-order session (`sample-when-needed/summary.txt`) |
 | 7.a | Block norms cut the text half-width by 10% or more only with J ≥ 8, and from J = 4 cost more bytes than they save; the mixed basis cuts text 21–33% and costs items 6–19%; 0 violations | [measured] | 7.1 | `stage0-block-norms/REPORT.md` "Verdict", "The numbers that decide it" |
 | 7.b | The best diagonal weighting per (query, item) pair sits at about 0.6 of the single norm for every kind of query | [measured] | 7.1 | `stage0-block-norms/REPORT.md` "What it shows" |
 | 7.c | The built code sits 1.31–1.77 times above the cap bound in tan (the bound is 3.bi, 4.ah); 1.31–1.42 where the variance sits, none of it nesting | [measured] | 7.2 | `codes/built.py`; `codes/REPORT.md` "Where the built code stands" |
@@ -584,12 +587,12 @@ chapter cites them; paths are those of the chapter.
 | [sketch: gap named] | 17 |
 | [conjecture] | 16 |
 | [refuted] | 32 |
-| [measured] | 135 |
+| [measured] | 138 |
 | [computed] | 49 |
 | [model] | 101 |
 | [cited] | 8 |
 | [cited, unchecked] | 15 |
-| total | 560 |
+| total | 563 |
 
 | Chapter | Rows |
 |---|---|
@@ -597,9 +600,9 @@ chapter cites them; paths are those of the chapter.
 | 2 | 59 |
 | 3 | 130 |
 | 4 | 83 |
-| 5 | 138 |
+| 5 | 141 |
 | 7 | 60 |
-| total | 560 |
+| total | 563 |
 
 Rows are claims as the chapters group them, so a measured row often holds several figures, and a row's secondary tags
 (a [conjecture] inside a [measured] row, for example) are not counted. Six results and one measurement appear in two

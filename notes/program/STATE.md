@@ -61,10 +61,16 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
   the fits at 0.2 and 0.5 on both query sets (floors B4d has the figures by formula). With the implementing session.
 - The levels' dial in approximate mode. The derivation of it from the stop's dial with nothing fitted did not succeed
   (`approximate/DIAL.md`; `approximate/referee/referee-3.md`: do not build the formula). What stands is the shape, an
-  offset of the stop's dial, and the criterion, equal risk per row declined. The owner waits on the timing of
-  ψ_ℓ = max(0, ψ − 1.5), where the 1.5 is fitted on three datasets of 100 queries. A later step if that pays:
-  replace the fitted offset by the two tail rates measured at build from corpus items used as queries (untested).
-  Untested under either: filters, and the randomised levels' dial.
+  offset of the stop's dial, and the criterion, equal risk per row declined. ψ_ℓ = max(0, ψ − 1.5), the 1.5 fitted
+  on three datasets of 100 queries, has been timed (`LOG-2026-11-21.md`, "The offset dial, timed"): level with a
+  constant 3 at recall 0.9 and 0.95, and no ceiling at 0.99; but no dial closes the sampled width's gap to the derived
+  width on LAION and yahoo (1.3 to 2.1 times). The later step, tail rates measured at build, would not change that;
+  it is moot. The open question became where to sample, and a replay answered it (`LOG-2026-11-21.md`, "Where the
+  derived width's error comes from"): a ratio stored per cluster and level, measured at build with corpus rows as
+  queries and read with no sample, passes the fewest rows. The visit-order session reports that the owner chose to
+  build that into the reader, and it is replaying beside it the PI's rule from Proposition 5.29 (the cluster's error
+  second moment in the 16 directions σ_c(q) uses; unrefereed, untested). Untested: filters, and the randomised
+  levels' dial.
 
 ## Rules for agents on this machine
 
