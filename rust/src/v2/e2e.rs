@@ -2338,8 +2338,9 @@ fn the_query_dial_leaves_the_deterministic_levels_to_the_reader() {
 }
 
 /// The build stores the W2 forms (M and N second moments, gamma at least 0, U above 0 for every cluster with rows); a
-/// saved index opens with the same forms, and one without either file is refused at the open, naming the file and a
-/// rebuild, as an index without forms is by the approximate queries.
+/// saved index opens with the same forms, and one without either file, or with its cluster file cut short, holding a
+/// value that is not a number or a negative gamma, is refused at the open with a rebuild, as an index without forms is
+/// by the approximate queries.
 #[test]
 fn the_w2_forms_are_stored_and_survive_a_reopen() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
@@ -2377,6 +2378,20 @@ fn the_w2_forms_are_stored_and_survive_a_reopen() {
         assert!(e.contains(name) && e.contains("rebuild"), "{e}");
         std::fs::rename(&keep, &path).unwrap();
     }
+    // a damaged forms file is refused too: cut short, holding a value that is not a number, or a negative gamma
+    let path = format!("{edir}/{}", wrule::FILES[1]);
+    let orig = std::fs::read(&path).unwrap();
+    let at = |i: usize, v: f32| -> Vec<u8> {
+        let mut b = orig.clone();
+        b[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+        b
+    };
+    for (what, bytes) in [("cut short", orig[..orig.len() - 4].to_vec()), ("a NaN", at(0, f32::NAN)), ("a negative gamma", at(wr * (wr + 1), -0.5))] {
+        std::fs::write(&path, &bytes).unwrap();
+        let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+        assert!(e.contains("rebuild"), "{what}: {e}");
+    }
+    std::fs::write(&path, &orig).unwrap();
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
 }
 

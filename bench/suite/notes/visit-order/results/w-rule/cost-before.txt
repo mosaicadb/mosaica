@@ -1,0 +1,2 @@
+test v2::e2e::study_w2_cost ... inat: 2000 (query, cluster) cases x 20, us per call, query by query / back to back on one case: w2_tau2 4.086 / 4.037, coefs_of 1.883 / 1.855 (-1.359e2)
+test v2::e2e::study_w2_cost ... laion: 2000 (query, cluster) cases x 20, us per call, query by query / back to back on one case: w2_tau2 1.411 / 1.340, coefs_of 0.516 / 0.484 (4.617e2)
