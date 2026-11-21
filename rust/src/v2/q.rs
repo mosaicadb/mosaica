@@ -133,6 +133,12 @@ impl Prep2 {
     pub fn from_w(&self, v: f64) -> f64 {
         v * pow2(self.sh)
     }
+    /// A caller's threshold in this query's units. Scores on stored vectors are multiples of 2^-48 (`exact_dot`), so t
+    /// is first raised to that grid, which keeps the answer and keeps a t below it from scaling to 0.
+    pub fn thr_w(&self, ix: &Index2, t: f64) -> f64 {
+        let t = if matches!(ix.full, Full2::Real { .. }) { (t * pow2(48)).ceil() * pow2(-48) } else { t };
+        self.to_w(t)
+    }
     /// The query scaled by a power of two to a norm in [2^-1/2, 2^1/2], the scale the bounds' absolute margins are
     /// sized for; itself when it is there. Its answers at to_w(t) are the caller's at t, exactly.
     pub fn unit(self) -> Prep2 {
@@ -3154,7 +3160,7 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
     match pr.scaled() {
         None => run(pr, t),
         Some(w) => {
-            let mut out = run(&w, w.to_w(t));
+            let mut out = run(&w, w.thr_w(ix, t));
             w.back(&mut out);
             out
         }

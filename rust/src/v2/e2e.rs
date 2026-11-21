@@ -203,6 +203,36 @@ fn queries_far_from_unit_norm_answer_exactly() {
     assert!(std::panic::catch_unwind(|| prep2(ix, &vec![0f32; ix.n()])).is_err(), "a zero query was taken");
 }
 
+/// Thresholds below the scores' grid (2^-48) on a query far from unit norm: row 0 scores exactly 0 against a query of
+/// two coordinates (a power of two times (x_j, -x_i) of row 0), and thresholds of the smallest subnormal either side
+/// of 0, scaled with the query, must not underflow to 0. Answers equal brute force on every plan, at |q| about 1.3
+/// (not scaled) and about 10 (scaled).
+#[test]
+fn tiny_thresholds_survive_the_query_scaling() {
+    let f = fixture();
+    let ix = &f.ix;
+    let x0: Vec<f32> = ix.full_row_f16(0).iter().map(|&h| crate::util::f16_to_f32(h)).collect();
+    let big: Vec<usize> = (0..ix.n()).filter(|&c| x0[c].abs() > 0.05).collect();
+    let (i, j) = (big[0], big[1]);
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    for c in [4.0f32, 32.0] {
+        let mut q = vec![0f32; ix.n()];
+        (q[i], q[j]) = (c * x0[j], -c * x0[i]);
+        let pr = prep2(ix, &q);
+        assert_eq!(exact_value2(ix, &pr, 0), 0.0, "row 0 does not score 0");
+        let t = truth(ix, &q, None);
+        for th in [f64::from_bits(1), 0.0, -f64::from_bits(1), 2f64.powi(-49), f64::MIN_POSITIVE] {
+            let want = answer(&t, th);
+            for (pname, plan) in plans() {
+                let r = threshold2(ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                assert_eq!(to_bitmap2(ix, &r.rows), want, "|q| {}, plan {pname}, t {th:e}", pr.qn);
+            }
+            let (a, _) = ad.threshold(ix, &q, th, None, f64::INFINITY, Plan::default());
+            assert_eq!(to_bitmap2(ix, &a.rows), want, "|q| {}, approximate at psi infinite, t {th:e}", pr.qn);
+        }
+    }
+}
+
 /// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
 /// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
 #[test]

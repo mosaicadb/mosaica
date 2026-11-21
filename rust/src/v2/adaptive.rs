@@ -939,7 +939,7 @@ impl Adaptive {
         }
         // the scaled query (Prep2::unit) and t in its units; its answer's scores are scaled back on the way out
         let pr = pr.unit();
-        let t = pr.to_w(t);
+        let t = pr.thr_w(ix, t);
         let tc = tick();
         let qm = self.centres.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - tc;
