@@ -150,33 +150,51 @@ pub fn errs(ix: &Index2, vinv: &[f64], centre: &[f32], c: usize) -> Vec<Vec<f64>
     u
 }
 
-/// Cluster c's order directions p_j (data space, as stored: int8 rows times their scale) and their images
-/// b_j = (V_q^T p_j) d_l at level l.
-pub fn order_dirs(ix: &Index2, c: usize, l: usize) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-    let n = ix.n();
-    let st = ix.order.as_ref().unwrap();
-    let gp = &ix.groups[ix.cl[c].g];
-    let ps: Vec<Vec<f64>> = (0..st.r).map(|j| st.dirs(c, st.r, n)[j * n..(j + 1) * n].iter().map(|&x| x as f64 * st.dsc[c * st.r + j] as f64).collect()).collect();
-    let bs = ps.iter().map(|pd| (0..n).map(|t| gp.vsc[t] * gp.v8t[t * n..(t + 1) * n].iter().zip(pd).map(|(&v, &x)| v as f64 * x).sum::<f64>() * gp.d[l][t] as f64).collect()).collect();
-    (ps, bs)
+/// Per level of a cluster with order directions `dirs8` (r rows of n int8) and scales `dsc` (p_j = dirs8_j dsc_j, as
+/// the order state holds them) in group `gp`: B~ = B (P'P)^-1 (r vectors of n), b_j = (V_q^T p_j) d_l, and an
+/// orthonormal basis of span B. V_q^T P is one product per cluster (the int8 basis taken to f64 a block of its rows
+/// at a time), scaled by d_l at each level; P'P is inverted once. A direction the order state left zero (a cluster
+/// too small to span r) has a zero column in B~ (its coefficient is 0 too), and P'P is inverted over the others.
+fn dual_dirs(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    const ROWS: usize = 256;
+    let r = dsc.len();
+    let p: Vec<f64> = (0..r * n).map(|i| dirs8[i] as f64 * dsc[i / n] as f64).collect();
+    // vp[j n + t] = (V_q^T p_j)_t = vsc_t sum_k v8t[t n + k] p_j[k]
+    let mut vp = vec![0f64; r * n];
+    let mut blk = Vec::with_capacity(ROWS * n);
+    for t0 in (0..n).step_by(ROWS) {
+        let t1 = (t0 + ROWS).min(n);
+        blk.clear();
+        blk.extend(gp.v8t[t0 * n..t1 * n].iter().map(|&v| v as f64));
+        unsafe {
+            matrixmultiply::dgemm(r, n, t1 - t0, 1.0, p.as_ptr(), n as isize, 1, blk.as_ptr(), 1, n as isize, 0.0, vp.as_mut_ptr().add(t0), n as isize, 1);
+        }
+    }
+    for j in 0..r {
+        for t in 0..n {
+            vp[j * n + t] *= gp.vsc[t];
+        }
+    }
+    let dot = |x: &[f64], y: &[f64]| x.iter().zip(y).map(|(a, b)| a * b).sum::<f64>();
+    let row = |j: usize| &p[j * n..(j + 1) * n];
+    let live: Vec<usize> = (0..r).filter(|&j| row(j).iter().any(|&x| x != 0.0)).collect();
+    let rl = live.len();
+    let ptp: Vec<f64> = (0..rl * rl).map(|i| dot(row(live[i / rl]), row(live[i % rl]))).collect();
+    let pinv = gauss_jordan_inverse(&ptp, rl);
+    (0..ndl).map(|l| {
+        let bs: Vec<Vec<f64>> = (0..r).map(|j| (0..n).map(|t| vp[j * n + t] * gp.d[l][t] as f64).collect()).collect();
+        let mut bt = vec![vec![0f64; n]; r];
+        for (jj, &j) in live.iter().enumerate() {
+            bt[j] = (0..n).map(|t| (0..rl).map(|kk| bs[live[kk]][t] * pinv[kk * rl + jj]).sum()).collect();
+        }
+        (bt, orthonormal(&bs))
+    }).collect()
 }
 
-/// B~ = B (P'P)^-1 (r vectors of n) and an orthonormal basis of span B, for cluster c at level l. A direction the
-/// order state left zero (a cluster too small to span r) has a zero column in B~ (its coefficient is 0 too), and
-/// P'P is inverted over the others.
-fn dual_dirs(ix: &Index2, c: usize, l: usize) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-    let n = ix.n();
-    let dot = |x: &[f64], y: &[f64]| x.iter().zip(y).map(|(a, b)| a * b).sum::<f64>();
-    let (ps, bs) = order_dirs(ix, c, l);
-    let live: Vec<usize> = (0..ps.len()).filter(|&j| ps[j].iter().any(|&x| x != 0.0)).collect();
-    let r = live.len();
-    let ptp: Vec<f64> = (0..r * r).map(|i| dot(&ps[live[i / r]], &ps[live[i % r]])).collect();
-    let pinv = gauss_jordan_inverse(&ptp, r);
-    let mut bt = vec![vec![0f64; n]; ps.len()];
-    for (jj, &j) in live.iter().enumerate() {
-        bt[j] = (0..n).map(|t| (0..r).map(|kk| bs[live[kk]][t] * pinv[kk * r + jj]).sum()).collect();
-    }
-    (bt, orthonormal(&bs))
+/// `dual_dirs` of cluster c of `ix`, from its order state.
+fn dual_of(ix: &Index2, c: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    let st = ix.order.as_ref().unwrap();
+    dual_dirs(&ix.groups[ix.cl[c].g], st.dirs(c, st.r, ix.n()), &st.dsc[c * st.r..(c + 1) * st.r], ix.n(), ix.meta.ndl())
 }
 
 /// The forms of `ix` (which holds stored vectors and the order state), with each group's inverse basis `vinv` (as
@@ -193,17 +211,18 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
         trs: Vec<f64>,
         trq: Vec<f64>,
         usq: Vec<Vec<f64>>,
+        dual: Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)>,
     }
     let ones: Vec<One> = (0..k).into_par_iter().map(|c| {
         let cl = &ix.cl[c];
         let nc = cl.r1 - cl.r0;
         if nc == 0 {
-            return One { m: vec![vec![0.0; r * r]; ndl], trs: vec![0.0; ndl], trq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl] };
+            return One { m: vec![vec![0.0; r * r]; ndl], trs: vec![0.0; ndl], trq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl], dual: Vec::new() };
         }
         let u = errs(ix, &vinv[cl.g], &centres[c * n..(c + 1) * n], c);
-        let mut one = One { m: Vec::new(), trs: Vec::new(), trq: Vec::new(), usq: Vec::new() };
-        for (l, ul) in u.iter().enumerate() {
-            let (bt, qb) = dual_dirs(ix, c, l);
+        let dual = dual_of(ix, c);
+        let mut one = One { m: Vec::new(), trs: Vec::new(), trq: Vec::new(), usq: Vec::new(), dual: Vec::new() };
+        for (ul, (bt, qb)) in u.iter().zip(&dual) {
             // Y = U B~ (nc x r), M = Y'Y / nc; the same for an orthonormal basis of span B
             let proj = |vs: &[Vec<f64>]| -> Vec<f64> {
                 let w: Vec<f64> = (0..n).flat_map(|t| vs.iter().map(move |v| v[t])).collect();
@@ -213,7 +232,7 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
                 }
                 y
             };
-            let (y, yq) = (proj(&bt), proj(&qb));
+            let (y, yq) = (proj(bt), proj(qb));
             let mut m = vec![0f64; r * r];
             for i in 0..nc {
                 let yi = &y[i * r..(i + 1) * r];
@@ -235,6 +254,7 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
             one.trs.push(usq.iter().sum::<f64>() / nc as f64);
             one.usq.push(usq);
         }
+        one.dual = dual;
         one
     }).collect();
     // G per group and level: mean u_t^2 over the group's rows
@@ -259,7 +279,8 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
         for l in 0..ndl {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
-            let (bt, qb) = if nc > 0 { dual_dirs(ix, c, l) } else { (vec![vec![0.0; n]; r], Vec::new()) };
+            let zero = (vec![vec![0.0; n]; r], Vec::new());
+            let (bt, qb) = if nc > 0 { &one.dual[l] } else { &zero };
             let nn: Vec<f64> = (0..r * r).map(|i| gq(&bt[i / r], &bt[i % r])).collect();
             let den = gd.iter().sum::<f64>() - qb.iter().map(|w| gq(w, w)).sum::<f64>();
             let gamma = if den > 0.0 { ((one.trs[l] - one.trq[l]) / den).max(0.0) } else { 0.0 };
