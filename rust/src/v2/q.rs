@@ -250,13 +250,32 @@ fn halves(fx: impl Iterator<Item = i64>) -> (Vec<i16>, Vec<i16>) {
     fx.map(|v| ((v >> 13) as i16, (v & 8191) as i16)).unzip()
 }
 
-/// The query rounded to f16, as f16 and as f32, and its norm. Refuses a query that is zero or not finite once rounded.
-pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
+fn round_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
     let q16: Vec<u16> = q.iter().map(|&x| f32_to_f16(x)).collect();
     let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
     let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-    assert!(qn > 0.0 && qn.is_finite(), "the query has norm {qn} once rounded to f16; give a nonzero vector of finite values within f16's range (|x| <= 65504; scale it, which changes no ranking)");
     (q16, q32, qn)
+}
+
+fn query_norm_ok(qn: f64) -> Result<(), String> {
+    if qn > 0.0 && qn.is_finite() {
+        return Ok(());
+    }
+    Err(format!("the query has norm {qn} once rounded to f16; give a nonzero vector of finite values within f16's range (|x| <= 65504; scale it, which changes no ranking)"))
+}
+
+/// Why the index cannot answer query q, if it cannot: it is zero or not finite once rounded to f16.
+pub fn query_ok(q: &[f32]) -> Result<(), String> {
+    query_norm_ok(round_f16(q).2)
+}
+
+/// The query rounded to f16, as f16 and as f32, and its norm. Refuses a query `query_ok` refuses.
+pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
+    let r = round_f16(q);
+    if let Err(e) = query_norm_ok(r.2) {
+        panic!("{e}");
+    }
+    r
 }
 
 pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
@@ -3110,9 +3129,20 @@ fn f32_outward(lb: f64, ub: f64) -> (f32, f32) {
     (-up(-lb as f32, -lb), up(ub as f32, ub))
 }
 
-/// Refuses a NaN threshold, which no score reaches and which the paths' comparisons would not all treat alike.
+/// Why a threshold cannot be answered, if it cannot: NaN, which no score reaches and which the paths' comparisons
+/// would not all treat alike.
+pub fn threshold_ok(t: f64) -> Result<(), String> {
+    if t.is_nan() {
+        return Err("the threshold is NaN; give a number (+inf for an empty answer, -inf for every visible item)".into());
+    }
+    Ok(())
+}
+
+/// Refuses a threshold `threshold_ok` refuses.
 pub fn check_threshold(t: f64) {
-    assert!(!t.is_nan(), "the threshold is NaN; give a number (+inf for an empty answer, -inf for every visible item)");
+    if let Err(e) = threshold_ok(t) {
+        panic!("{e}");
+    }
 }
 
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
