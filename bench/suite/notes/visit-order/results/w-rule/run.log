@@ -1,0 +1,39 @@
+== inaturalist-resnet-2048-cosine 19:36:41: d999606 99b033c 6f86a1c-w2
+-- ab d999606 19:44:41
+   exit 0 19:47:07
+-- ab 99b033c 19:47:07
+   exit 0 19:49:29
+-- ab 6f86a1c-w2 19:49:29
+   exit 0 19:51:50
+== timed runs done inaturalist-resnet-2048-cosine 19:51:50
+== profile done inaturalist-resnet-2048-cosine 19:52:06
+/dev/sdd       1007G  898G   59G  94% /
+== laion-clip-512-normalized 19:52:06: d999606 99b033c 6f86a1c-w2
+-- ab d999606 19:53:46
+   exit 0 19:57:38
+-- ab 99b033c 19:57:38
+   exit 0 20:00:58
+-- ab 6f86a1c-w2 20:00:58
+   exit 0 20:04:10
+== timed runs done laion-clip-512-normalized 20:04:10
+== profile done laion-clip-512-normalized 20:04:19
+/dev/sdd       1007G  898G   59G  94% /
+== yahoo-minilm-384-normalized 20:04:19: d999606 99b033c 6f86a1c-w2
+-- ab d999606 20:05:41
+   exit 0 20:06:57
+-- ab 99b033c 20:06:57
+   exit 0 20:08:16
+-- ab 6f86a1c-w2 20:08:16
+   exit 0 20:09:35
+== timed runs done yahoo-minilm-384-normalized 20:09:35
+/dev/sdd       1007G  898G   59G  94% /
+== arxiv-nomic-768-normalized 20:09:35: d999606 99b033c 6f86a1c-w2
+-- ab d999606 20:12:27
+   exit 0 20:14:48
+-- ab 99b033c 20:14:48
+   exit 0 20:17:15
+-- ab 6f86a1c-w2 20:17:15
+   exit 0 20:19:39
+== timed runs done arxiv-nomic-768-normalized 20:19:39
+/dev/sdd       1007G  898G   59G  94% /
+ALLDONE

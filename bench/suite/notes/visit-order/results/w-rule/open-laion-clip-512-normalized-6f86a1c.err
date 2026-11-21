@@ -1,0 +1,19 @@
+[build2] fit loaded; anon 76 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 1000448 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 7.3s (sub-Gaussian c = 8.482): [([63], 6.435, ExactTail), ([63, 79, 175, 191], 7.883, Certificate), ([175], 7.436, ExactTail)]
+[build2] plans 8.1s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[3.0, 0.0, 0.0, 0.0], [3.0, 1.0, 1.0, 0.25], [3.0, 3.0, 2.0, 1.0], [6.0, 4.0, 4.0, 2.0]]
+[build2] calibration sample 424248 items from 500 clusters
+[build2] calibrated 20.1s; anon 593 MB
+[build2] encoded 28.4s, with it the support table of 500 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 7.9 thread-seconds); anon 624 MB
+[build2] level ratios: 400 rows as queries, 1.1s
+[build2] W2 forms: 3.8s
+[build2] assembled 34.0s; anon 620 MB; x2 bound 6.328e-4; escapes: det norms 1257, |y| 3486, kappa 11075, tan 23166; code hash f282d680b4f756a9
+[build2] saved to /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/encoded; store hash af1cff8f0761902d
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.13, 0.19] (timed in 0.0s)
+[approx] measured constants dir_us=0.3683408697859396 row_us_1=0.05302261880362879 row_us_4=0.0644955949440488 row_us_16=0.05924908661277374 row_us_64=0.03697346100362564 cl_us=6.768786602796515 cut_row_us_1=0.015578575177815345 cut_row_us_4=0.061403034539737424 cut_row_us_16=0.11338211652592042 cut_row_us_64=0.1950442892622745 cut_us=1.208 grp_us=35.493 sig_us=0.8521875000000001: timed: no cache at /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/compute-constants.txt; saved in /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/compute-constants.txt, in 0.2s; the exact planner's rule from them: r_rows=203 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/encoded in 0.270s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash af1cff8f0761902d
+[repack] occupancy thresholds by level [0.12, 0.13, 0.06, 0.1, 0.13, 0.17] (timed in 0.0s)
+[open] 0.439s in all: fit read 0.121s, key 0.011s, index opened 0.271s, repack timed 0.037s; anon 116 MB
+[approx] measured constants dir_us=0.49489130373677603 row_us_1=0.05656737992859773 row_us_4=0.06340049438008871 row_us_16=0.06000590455718017 row_us_64=0.03743814456134723 cl_us=6.518089568808356 cut_row_us_1=0.017560666031925198 cut_row_us_4=0.06023436530520597 cut_row_us_16=0.11940428153149181 cut_row_us_64=0.22497497116475673 cut_us=1.4570625 grp_us=36.33 sig_us=0.87071875: timed: no cache at /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/compute-constants.txt; saved in /home/joe/code/vexact-data/wrule/idx/laion-clip-512-normalized-6f86a1c/compute-constants.txt, in 0.3s; the exact planner's rule from them: r_rows=192 r_kappa=0.000

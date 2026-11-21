@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-d999606/encoded in 0.188s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.12, 0.13, 0.06, 0.12, 0.13, 0.18] (timed in 0.0s)
+[open] 0.296s in all: fit read 0.064s, key 0.006s, index opened 0.189s, repack timed 0.037s; anon 81 MB
+[approx] measured constants dir_us=0.31640429382959795 row_us_1=0.04829563027516639 row_us_4=0.0527925848791423 row_us_16=0.033258001312230084 row_us_64=0.029260550411348438 cl_us=1.2206009240182913 cut_row_us_1=0.019675662368695994 cut_row_us_4=0.07068043480761078 cut_row_us_16=0.14505097243631754 cut_row_us_64=0.34974487461350945 cut_us=1.164125 grp_us=34.804 sig_us=0.70628125: read from /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=72 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-d999606/encoded in 0.183s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.12, 0.17] (timed in 0.0s)
+[open] 0.294s in all: fit read 0.068s, key 0.006s, index opened 0.183s, repack timed 0.037s; anon 152 MB
+[approx] measured constants dir_us=0.31640429382959795 row_us_1=0.04829563027516639 row_us_4=0.0527925848791423 row_us_16=0.033258001312230084 row_us_64=0.029260550411348438 cl_us=1.2206009240182913 cut_row_us_1=0.019675662368695994 cut_row_us_4=0.07068043480761078 cut_row_us_16=0.14505097243631754 cut_row_us_64=0.34974487461350945 cut_us=1.164125 grp_us=34.804 sig_us=0.70628125: read from /home/joe/code/vexact-data/wrule/idx/yahoo-minilm-384-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=72 r_kappa=0.000
