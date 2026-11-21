@@ -4,9 +4,9 @@ use crate::util::*;
 /// The stored key's error bound: half its step, plus the f32 evaluation of m . r from it (q::cluster_q2w's fixed
 /// term), within 4 u (1 + |m|) |m| for u = 2^-24, which 5e-7 covers while |m| <= CENTRE_NORM_MAX.
 pub const DA: f64 = 0.5 / 32767.0 + 5e-7;
-/// The largest centre norm DA covers; the build refuses a larger one. The mean of normalised vectors has norm at most
-/// 1, and the fit's int8 quantisation of it (one scale per centre) can carry it past 1, by more as n grows (about
-/// 1.02 at n = 768 and 1.09 at n = 4096 at worst; real fits stay below 1).
+/// The largest centre norm DA covers; a fit with a larger one is refused when it is read (`centres_of`). The mean of
+/// normalised vectors has norm at most 1, and the fit's int8 quantisation of it (one scale per centre) can carry it
+/// past 1, by more as n grows (about 1.02 at n = 768 and 1.09 at n = 4096 at worst; real fits stay below 1).
 pub const CENTRE_NORM_MAX: f64 = 1.09;
 
 /// The stored key of a row whose x . mhat the build computes as `a`, and how far `a` lies outside [-1, 1], where the
@@ -121,7 +121,17 @@ fn centres_of(dir: &str, n: usize, k: usize) -> Result<(usize, usize, Vec<f32>),
     if k.checked_mul(n) != Some(mq8.len()) || msc.len() != k {
         return Err(format!("{dir}: mq8.npy / msc.npy do not hold {k} centres of {n}; refit"));
     }
-    Ok((n, k, (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect()))
+    let centres: Vec<f32> = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
+    for (c, m) in centres.chunks(n.max(1)).enumerate() {
+        let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+        if !(mn > 0.0) {
+            return Err(format!("{dir}: cluster {c}'s centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors"));
+        }
+        if !(mn <= CENTRE_NORM_MAX) {
+            return Err(format!("{dir}: cluster {c}'s centre has norm {mn}, above the {CENTRE_NORM_MAX} the key's error bound covers: the mean of normalised vectors stays near 1, and only the centre's int8 quantisation carries it past; normalise the vectors and refit"));
+        }
+    }
+    Ok((n, k, centres))
 }
 
 /// A fixed hash of a fit's stored centres (K x n), which `anchors.json` records for the fit its anchors were made for.

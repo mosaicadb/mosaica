@@ -1522,8 +1522,8 @@ fn tree_tables_decoding_past_their_bound_are_refused() {
     assert!(std::panic::catch_unwind(|| DetTab::new(&p)).is_err(), "tables decoding to {DECODED_MAX} accepted");
 }
 
-/// A fit whose centres reach past CENTRE_NORM_MAX is refused before anything is built (synth4k's centres stored at
-/// 1.5 times their norm).
+/// A fit whose centres reach past CENTRE_NORM_MAX, or with a zero centre, is refused when it is read, before anything
+/// is built or opened (synth4k's centres stored at 1.5 times their norm; its first centre's scale set to 0).
 #[test]
 fn centres_past_the_norm_the_key_covers_are_refused() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
@@ -1534,9 +1534,13 @@ fn centres_past_the_norm_the_key_covers_are_refused() {
         let e = e.unwrap();
         std::fs::copy(e.path(), tmp.join(e.file_name())).unwrap();
     }
-    let msc: Vec<u8> = crate::util::try_read_npy(&format!("{dir}/msc.npy")).unwrap().f64s().iter().flat_map(|&v| (v * 1.5).to_le_bytes()).collect();
-    crate::util::write_npy(tmp.join("msc.npy").to_str().unwrap(), "<f8", &[msc.len() / 8], &msc);
-    assert!(prepare(tmp.to_str().unwrap(), &o).is_err(), "centres of norm above {} accepted", crate::index::CENTRE_NORM_MAX);
+    let msc = crate::util::try_read_npy(&format!("{dir}/msc.npy")).unwrap().f64s();
+    let tdir = tmp.to_str().unwrap();
+    for (what, scaled) in [("norm above CENTRE_NORM_MAX", msc.iter().map(|&v| v * 1.5).collect::<Vec<f64>>()), ("a zero centre", msc.iter().enumerate().map(|(c, &v)| if c == 0 { 0.0 } else { v }).collect())] {
+        let b: Vec<u8> = scaled.iter().flat_map(|v| v.to_le_bytes()).collect();
+        crate::util::write_npy(tmp.join("msc.npy").to_str().unwrap(), "<f8", &[scaled.len()], &b);
+        assert!(crate::index::load_params(tdir).is_err() && prepare(tdir, &o).is_err(), "{what} accepted");
+    }
 }
 
 /// The calibration and the encoding give the same index on one thread as on several (code and store hashes), with the
