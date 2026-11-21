@@ -1,0 +1,7 @@
+(a) n = 16, two rounds, y = e1, Delta = e2, all 2^16 choices of D2 (D1 changes only signs): mean square of error/sd = 0.9863 (law: 1), max |error/sd| = 2.196 (law: at most 3.873)
+     Pr[|error| > 1.5 sd]: exact 8.203e-02   sphere law 1.383e-01   ratio 0.59
+     Pr[|error| > 2.0 sd]: exact 8.203e-02   sphere law 4.057e-02   ratio 2.02
+     Pr[|error| > 2.5 sd]: exact 0.000e+00   sphere law 6.921e-03   ratio 0.00
+     Pr[|error| > 3.0 sd]: exact 0.000e+00   sphere law 4.264e-04   ratio 0.00
+     Pr[|error| > 3.4 sd]: exact 0.000e+00   sphere law 7.820e-06   ratio 0.00
+     Pr[|error| > 3.7 sd]: exact 0.000e+00   sphere law 8.446e-09   ratio 0.00

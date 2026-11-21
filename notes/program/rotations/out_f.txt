@@ -1,0 +1,64 @@
+c = 7.8; 400 items per row; widths as multiples of the one-rotation half-width
+n = 256 flat depth 1 b = 128 k =  2: own scalars 1.001; shared worst 1.119 (radial 0.096 + max 1.023); B*sqrt(b)/A = 0.53; sqrt(k)/c = 0.181
+n = 256 flat depth 1 b =  64 k =  4: own scalars 1.001; shared worst 1.262 (radial 0.201 + max 1.061); B*sqrt(b)/A = 0.79; sqrt(k)/c = 0.256
+n = 256 flat depth 1 b =  32 k =  8: own scalars 1.003; shared worst 1.437 (radial 0.321 + max 1.116); B*sqrt(b)/A = 0.89; sqrt(k)/c = 0.363
+n = 256 flat depth 2 b = 128 k =  2: own scalars 1.000; shared worst 1.164 (radial 0.131 + max 1.034); B*sqrt(b)/A = 0.72; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.064 (radial 0.014 + max 1.050)
+n = 256 flat depth 2 b =  64 k =  4: own scalars 0.999; shared worst 1.369 (radial 0.282 + max 1.087); B*sqrt(b)/A = 1.10; sqrt(k)/c = 0.256; gains equalised by the encoder: shared worst 1.191 (radial 0.056 + max 1.135)
+n = 256 flat depth 2 b =  32 k =  8: own scalars 0.995; shared worst 1.616 (radial 0.447 + max 1.169); B*sqrt(b)/A = 1.24; sqrt(k)/c = 0.363; gains equalised by the encoder: shared worst 1.416 (radial 0.164 + max 1.252)
+n = 256 flat depth 4 b = 128 k =  2: own scalars 0.999; shared worst 1.201 (radial 0.149 + max 1.052); B*sqrt(b)/A = 0.82; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.091 (radial 0.031 + max 1.060)
+n = 256 flat depth 4 b =  64 k =  4: own scalars 0.995; shared worst 1.428 (radial 0.300 + max 1.128); B*sqrt(b)/A = 1.17; sqrt(k)/c = 0.256; gains equalised by the encoder: shared worst 1.237 (radial 0.068 + max 1.168)
+n = 256 flat depth 4 b =  32 k =  8: own scalars 0.990; shared worst 1.702 (radial 0.457 + max 1.244); B*sqrt(b)/A = 1.26; sqrt(k)/c = 0.363; gains equalised by the encoder: shared worst 1.500 (radial 0.117 + max 1.383)
+n = 256 skew depth 1 b = 128 k =  2: own scalars 0.878; shared worst 1.733 (radial 0.790 + max 0.943); B*sqrt(b)/A = 4.37; sqrt(k)/c = 0.181
+n = 256 skew depth 1 b =  64 k =  4: own scalars 0.923; shared worst 1.664 (radial 0.657 + max 1.007); B*sqrt(b)/A = 2.57; sqrt(k)/c = 0.256
+n = 256 skew depth 1 b =  32 k =  8: own scalars 0.940; shared worst 1.712 (radial 0.644 + max 1.068); B*sqrt(b)/A = 1.78; sqrt(k)/c = 0.363
+n = 256 skew depth 2 b = 128 k =  2: own scalars 0.953; shared worst 1.507 (radial 0.434 + max 1.073); B*sqrt(b)/A = 2.40; sqrt(k)/c = 0.181
+n = 256 skew depth 2 b =  64 k =  4: own scalars 0.961; shared worst 1.668 (radial 0.530 + max 1.138); B*sqrt(b)/A = 2.07; sqrt(k)/c = 0.256
+n = 256 skew depth 2 b =  32 k =  8: own scalars 0.964; shared worst 1.817 (radial 0.606 + max 1.212); B*sqrt(b)/A = 1.67; sqrt(k)/c = 0.363
+n = 256 skew depth 4 b = 128 k =  2: own scalars 0.994; shared worst 1.221 (radial 0.152 + max 1.069); B*sqrt(b)/A = 0.84; sqrt(k)/c = 0.181
+n = 256 skew depth 4 b =  64 k =  4: own scalars 0.991; shared worst 1.481 (radial 0.312 + max 1.169); B*sqrt(b)/A = 1.22; sqrt(k)/c = 0.256
+n = 256 skew depth 4 b =  32 k =  8: own scalars 0.986; shared worst 1.771 (radial 0.472 + max 1.300); B*sqrt(b)/A = 1.30; sqrt(k)/c = 0.363
+
+n = 768 flat depth 1 b = 384 k =  2: own scalars 1.000; shared worst 1.122 (radial 0.109 + max 1.013); B*sqrt(b)/A = 0.60; sqrt(k)/c = 0.181
+n = 768 flat depth 1 b = 256 k =  3: own scalars 1.000; shared worst 1.192 (radial 0.168 + max 1.024); B*sqrt(b)/A = 0.76; sqrt(k)/c = 0.222
+n = 768 flat depth 1 b = 128 k =  6: own scalars 1.001; shared worst 1.321 (radial 0.269 + max 1.052); B*sqrt(b)/A = 0.86; sqrt(k)/c = 0.314
+n = 768 flat depth 1 b =  64 k = 12: own scalars 1.001; shared worst 1.500 (radial 0.407 + max 1.093); B*sqrt(b)/A = 0.92; sqrt(k)/c = 0.444
+n = 768 flat depth 2 b = 384 k =  2: own scalars 1.000; shared worst 1.176 (radial 0.155 + max 1.021); B*sqrt(b)/A = 0.86; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.045 (radial 0.012 + max 1.032)
+n = 768 flat depth 2 b = 256 k =  3: own scalars 0.999; shared worst 1.271 (radial 0.233 + max 1.038); B*sqrt(b)/A = 1.05; sqrt(k)/c = 0.222; gains equalised by the encoder: shared worst 1.079 (radial 0.019 + max 1.060)
+n = 768 flat depth 2 b = 128 k =  6: own scalars 0.999; shared worst 1.479 (radial 0.397 + max 1.082); B*sqrt(b)/A = 1.26; sqrt(k)/c = 0.314; gains equalised by the encoder: shared worst 1.189 (radial 0.051 + max 1.137)
+n = 768 flat depth 2 b =  64 k = 12: own scalars 0.997; shared worst 1.742 (radial 0.594 + max 1.148); B*sqrt(b)/A = 1.34; sqrt(k)/c = 0.444; gains equalised by the encoder: shared worst 1.394 (radial 0.158 + max 1.236)
+n = 768 flat depth 4 b = 384 k =  2: own scalars 0.999; shared worst 1.208 (radial 0.166 + max 1.042); B*sqrt(b)/A = 0.92; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.094 (radial 0.048 + max 1.047)
+n = 768 flat depth 4 b = 256 k =  3: own scalars 0.999; shared worst 1.337 (radial 0.257 + max 1.080); B*sqrt(b)/A = 1.16; sqrt(k)/c = 0.222; gains equalised by the encoder: shared worst 1.156 (radial 0.063 + max 1.093)
+n = 768 flat depth 4 b = 128 k =  6: own scalars 0.997; shared worst 1.614 (radial 0.433 + max 1.181); B*sqrt(b)/A = 1.38; sqrt(k)/c = 0.314; gains equalised by the encoder: shared worst 1.317 (radial 0.094 + max 1.223)
+n = 768 flat depth 4 b =  64 k = 12: own scalars 0.994; shared worst 1.982 (radial 0.643 + max 1.339); B*sqrt(b)/A = 1.45; sqrt(k)/c = 0.444; gains equalised by the encoder: shared worst 1.606 (radial 0.138 + max 1.468)
+n = 768 skew depth 1 b = 384 k =  2: own scalars 0.875; shared worst 2.304 (radial 1.368 + max 0.936); B*sqrt(b)/A = 7.55; sqrt(k)/c = 0.181
+n = 768 skew depth 1 b = 256 k =  3: own scalars 0.907; shared worst 2.160 (radial 1.194 + max 0.966); B*sqrt(b)/A = 5.38; sqrt(k)/c = 0.222
+n = 768 skew depth 1 b = 128 k =  6: own scalars 0.932; shared worst 2.063 (radial 1.056 + max 1.007); B*sqrt(b)/A = 3.36; sqrt(k)/c = 0.314
+n = 768 skew depth 1 b =  64 k = 12: own scalars 0.942; shared worst 2.086 (radial 1.033 + max 1.053); B*sqrt(b)/A = 2.33; sqrt(k)/c = 0.444
+n = 768 skew depth 2 b = 384 k =  2: own scalars 0.953; shared worst 1.816 (radial 0.740 + max 1.076); B*sqrt(b)/A = 4.08; sqrt(k)/c = 0.181
+n = 768 skew depth 2 b = 256 k =  3: own scalars 0.956; shared worst 1.993 (radial 0.876 + max 1.117); B*sqrt(b)/A = 3.95; sqrt(k)/c = 0.222
+n = 768 skew depth 2 b = 128 k =  6: own scalars 0.963; shared worst 2.054 (radial 0.896 + max 1.158); B*sqrt(b)/A = 2.86; sqrt(k)/c = 0.314
+n = 768 skew depth 2 b =  64 k = 12: own scalars 0.965; shared worst 2.183 (radial 0.968 + max 1.214); B*sqrt(b)/A = 2.18; sqrt(k)/c = 0.444
+n = 768 skew depth 4 b = 384 k =  2: own scalars 0.994; shared worst 1.330 (radial 0.245 + max 1.086); B*sqrt(b)/A = 1.35; sqrt(k)/c = 0.181
+n = 768 skew depth 4 b = 256 k =  3: own scalars 0.992; shared worst 1.537 (radial 0.385 + max 1.152); B*sqrt(b)/A = 1.74; sqrt(k)/c = 0.222
+n = 768 skew depth 4 b = 128 k =  6: own scalars 0.991; shared worst 1.778 (radial 0.518 + max 1.260); B*sqrt(b)/A = 1.65; sqrt(k)/c = 0.314
+n = 768 skew depth 4 b =  64 k = 12: own scalars 0.989; shared worst 2.097 (radial 0.687 + max 1.410); B*sqrt(b)/A = 1.55; sqrt(k)/c = 0.444
+
+n = 688 flat depth 1 b = 344 k =  2: own scalars 1.000; shared worst 1.118 (radial 0.103 + max 1.014); B*sqrt(b)/A = 0.57; sqrt(k)/c = 0.181
+n = 688 flat depth 1 b = 172 k =  4: own scalars 1.000; shared worst 1.244 (radial 0.208 + max 1.036); B*sqrt(b)/A = 0.81; sqrt(k)/c = 0.256
+n = 688 flat depth 1 b =  86 k =  8: own scalars 1.001; shared worst 1.401 (radial 0.330 + max 1.072); B*sqrt(b)/A = 0.91; sqrt(k)/c = 0.363
+n = 688 flat depth 2 b = 344 k =  2: own scalars 1.000; shared worst 1.165 (radial 0.143 + max 1.022); B*sqrt(b)/A = 0.79; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.046 (radial 0.012 + max 1.034)
+n = 688 flat depth 2 b = 172 k =  4: own scalars 0.999; shared worst 1.354 (radial 0.294 + max 1.060); B*sqrt(b)/A = 1.15; sqrt(k)/c = 0.256; gains equalised by the encoder: shared worst 1.123 (radial 0.028 + max 1.096)
+n = 688 flat depth 2 b =  86 k =  8: own scalars 0.998; shared worst 1.581 (radial 0.468 + max 1.113); B*sqrt(b)/A = 1.29; sqrt(k)/c = 0.363; gains equalised by the encoder: shared worst 1.275 (radial 0.091 + max 1.185)
+n = 688 flat depth 4 b = 344 k =  2: own scalars 0.999; shared worst 1.200 (radial 0.157 + max 1.043); B*sqrt(b)/A = 0.87; sqrt(k)/c = 0.181; gains equalised by the encoder: shared worst 1.091 (radial 0.043 + max 1.047)
+n = 688 flat depth 4 b = 172 k =  4: own scalars 0.998; shared worst 1.440 (radial 0.321 + max 1.120); B*sqrt(b)/A = 1.25; sqrt(k)/c = 0.256; gains equalised by the encoder: shared worst 1.216 (radial 0.075 + max 1.141)
+n = 688 flat depth 4 b =  86 k =  8: own scalars 0.996; shared worst 1.744 (radial 0.503 + max 1.241); B*sqrt(b)/A = 1.39; sqrt(k)/c = 0.363; gains equalised by the encoder: shared worst 1.415 (radial 0.107 + max 1.308)
+n = 688 skew depth 1 b = 344 k =  2: own scalars 0.875; shared worst 2.234 (radial 1.299 + max 0.935); B*sqrt(b)/A = 7.17; sqrt(k)/c = 0.181
+n = 688 skew depth 1 b = 172 k =  4: own scalars 0.921; shared worst 2.044 (radial 1.061 + max 0.984); B*sqrt(b)/A = 4.14; sqrt(k)/c = 0.256
+n = 688 skew depth 1 b =  86 k =  8: own scalars 0.938; shared worst 2.015 (radial 0.987 + max 1.027); B*sqrt(b)/A = 2.72; sqrt(k)/c = 0.363
+n = 688 skew depth 2 b = 344 k =  2: own scalars 0.953; shared worst 1.773 (radial 0.698 + max 1.075); B*sqrt(b)/A = 3.85; sqrt(k)/c = 0.181
+n = 688 skew depth 2 b = 172 k =  4: own scalars 0.959; shared worst 1.974 (radial 0.843 + max 1.132); B*sqrt(b)/A = 3.29; sqrt(k)/c = 0.256
+n = 688 skew depth 2 b =  86 k =  8: own scalars 0.965; shared worst 2.044 (radial 0.867 + max 1.177); B*sqrt(b)/A = 2.39; sqrt(k)/c = 0.363
+n = 688 skew depth 4 b = 344 k =  2: own scalars 0.994; shared worst 1.313 (radial 0.225 + max 1.087); B*sqrt(b)/A = 1.24; sqrt(k)/c = 0.181
+n = 688 skew depth 4 b = 172 k =  4: own scalars 0.991; shared worst 1.632 (radial 0.437 + max 1.196); B*sqrt(b)/A = 1.70; sqrt(k)/c = 0.256
+n = 688 skew depth 4 b =  86 k =  8: own scalars 0.990; shared worst 1.891 (radial 0.574 + max 1.317); B*sqrt(b)/A = 1.59; sqrt(k)/c = 0.363
+

@@ -1,0 +1,2 @@
+butterfly n = 1024, depth 1, 4000 draws: |error| equals the formula of D2 to 6.3e-12; rms of error/sd = 5.75 (law: 1); Pr[|error| > 7.8 sd] = 0.201; median |error|/sd = 4.97; sqrt(n-1) = 31.98
+butterfly n = 1024, depth 2, 4000 draws: |error| equals the formula of D2 to 1.2e-12; rms of error/sd = 6.96 (law: 1); Pr[|error| > 7.8 sd] = 0.373; median |error|/sd = 6.90; sqrt(n-1) = 31.98

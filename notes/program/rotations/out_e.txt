@@ -1,0 +1,122 @@
+built code, rms tan(phi) by depth 1..8: 0.7540 0.3647 0.1942 0.1049 0.0555 0.0288 0.0147 0.0076
+share of the random half-width = rho*sqrt(n-1)/(c*sin(phi)), c = 7.8; shown at depths 1, 2, 4, 8
+
+n = 64: max|R_ij| = 0.4498 (3.60/sqrt(n)); |R^T R - I|_F = 5.4e-15
+   f32   range = max entry           : op norm 4.916e-08 (svd), certified 4.917e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.656e-07, Frobenius 2.043e-07
+         share with certified op norm at depth 1/2/4/8: 8.31e-06% / 1.46e-05% / 4.8e-05% / 0.00066%;  with Frobenius: 3.45e-05% / 6.07e-05% / 0.000199% / 0.00274%
+   int16 range = max entry           : op norm 6.015e-05 (svd), certified 6.015e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.550e-04, Frobenius 2.540e-04
+         share with certified op norm at depth 1/2/4/8: 0.0102% / 0.0179% / 0.0587% / 0.808%;  with Frobenius: 0.0429% / 0.0754% / 0.248% / 3.41%
+   int8  range = max entry           : op norm 1.557e-02 (svd), certified 1.557e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 6.603e-02, Frobenius 6.538e-02
+         share with certified op norm at depth 1/2/4/8: 2.63% / 4.62% / 15.2% / 209%;  with Frobenius: 11.1% / 19.4% / 63.8% / 878%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.376e-01 (svd), certified 1.378e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.810e-01, Frobenius 3.773e-01
+         share with certified op norm at depth 1/2/4/8: 23.3% / 40.9% / 134% / 1.85e+03%;  with Frobenius: 63.8% / 112% / 368% / 5.07e+03%
+   int8  range = 3.0/sqrt(n), clipped: op norm 7.547e-02 (svd), certified 7.551e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.199e-01, Frobenius 1.374e-01
+         share with certified op norm at depth 1/2/4/8: 12.8% / 22.4% / 73.7% / 1.01e+03%;  with Frobenius: 23.2% / 40.8% / 134% / 1.84e+03%
+   int8  range = 3.5/sqrt(n), clipped: op norm 1.724e-02 (svd), certified 1.724e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 6.900e-02, Frobenius 6.568e-02
+         share with certified op norm at depth 1/2/4/8: 2.91% / 5.12% / 16.8% / 231%;  with Frobenius: 11.1% / 19.5% / 64.1% / 882%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 5.68e-14; share at depth 1/2/4/8: 9.6e-12% / 1.7e-11% / 5.5e-11% / 7.6e-10%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 3.05e-05; share at depth 1/2/4/8: 0.0052% / 0.0091% / 0.03% / 0.41%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.054, max 0.221
+
+n = 128: max|R_ij| = 0.3768 (4.26/sqrt(n)); |R^T R - I|_F = 9.7e-15
+   f32   range = max entry           : op norm 4.982e-08 (svd), certified 4.983e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.242e-07, Frobenius 2.866e-07
+         share with certified op norm at depth 1/2/4/8: 1.2e-05% / 2.1e-05% / 6.9e-05% / 0.00095%;  with Frobenius: 6.88e-05% / 0.000121% / 0.000397% / 0.00546%
+   int16 range = max entry           : op norm 7.421e-05 (svd), certified 7.422e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 4.105e-04, Frobenius 4.261e-04
+         share with certified op norm at depth 1/2/4/8: 0.0178% / 0.0313% / 0.103% / 1.41%;  with Frobenius: 0.102% / 0.18% / 0.59% / 8.12%
+   int8  range = max entry           : op norm 1.861e-02 (svd), certified 1.869e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.076e-01, Frobenius 1.100e-01
+         share with certified op norm at depth 1/2/4/8: 4.49% / 7.88% / 25.9% / 356%;  with Frobenius: 26.4% / 46.4% / 152% / 2.1e+03%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.795e-01 (svd), certified 1.795e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.629e-01, Frobenius 5.676e-01
+         share with certified op norm at depth 1/2/4/8: 43.1% / 75.7% / 249% / 3.42e+03%;  with Frobenius: 136% / 239% / 786% / 1.08e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 1.205e-01 (svd), certified 1.205e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.921e-01, Frobenius 2.509e-01
+         share with certified op norm at depth 1/2/4/8: 28.9% / 50.8% / 167% / 2.3e+03%;  with Frobenius: 60.2% / 106% / 348% / 4.78e+03%
+   int8  range = 3.5/sqrt(n), clipped: op norm 6.840e-02 (svd), certified 6.840e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.466e-01, Frobenius 1.317e-01
+         share with certified op norm at depth 1/2/4/8: 16.4% / 28.8% / 94.7% / 1.3e+03%;  with Frobenius: 31.6% / 55.5% / 182% / 2.51e+03%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 1.61e-13; share at depth 1/2/4/8: 3.9e-11% / 6.8e-11% / 2.2e-10% / 3.1e-09%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 8.63e-05; share at depth 1/2/4/8: 0.021% / 0.036% / 0.12% / 1.6%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.033, max 0.102
+
+n = 256: max|R_ij| = 0.3196 (5.11/sqrt(n)); |R^T R - I|_F = 1.7e-14
+   f32   range = max entry           : op norm 4.980e-08 (svd), certified 4.996e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.123e-07, Frobenius 4.053e-07
+         share with certified op norm at depth 1/2/4/8: 1.7e-05% / 2.98e-05% / 9.8e-05% / 0.00135%;  with Frobenius: 0.000138% / 0.000242% / 0.000795% / 0.0109%
+   int16 range = max entry           : op norm 8.925e-05 (svd), certified 8.948e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 6.928e-04, Frobenius 7.208e-04
+         share with certified op norm at depth 1/2/4/8: 0.0304% / 0.0535% / 0.176% / 2.42%;  with Frobenius: 0.245% / 0.431% / 1.41% / 19.5%
+   int8  range = max entry           : op norm 2.311e-02 (svd), certified 2.313e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.795e-01, Frobenius 1.864e-01
+         share with certified op norm at depth 1/2/4/8: 7.86% / 13.8% / 45.4% / 625%;  with Frobenius: 63.4% / 111% / 366% / 5.03e+03%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.724e-01 (svd), certified 1.724e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.148e-01, Frobenius 7.795e-01
+         share with certified op norm at depth 1/2/4/8: 58.6% / 103% / 338% / 4.66e+03%;  with Frobenius: 265% / 466% / 1.53e+03% / 2.11e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 1.334e-01 (svd), certified 1.334e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.370e-01, Frobenius 3.412e-01
+         share with certified op norm at depth 1/2/4/8: 45.4% / 79.7% / 262% / 3.6e+03%;  with Frobenius: 116% / 204% / 670% / 9.22e+03%
+   int8  range = 3.5/sqrt(n), clipped: op norm 1.015e-01 (svd), certified 1.015e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.132e-01, Frobenius 1.883e-01
+         share with certified op norm at depth 1/2/4/8: 34.5% / 60.6% / 199% / 2.74e+03%;  with Frobenius: 64% / 112% / 369% / 5.09e+03%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 4.55e-13; share at depth 1/2/4/8: 1.5e-10% / 2.7e-10% / 8.9e-10% / 1.2e-08%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 2.44e-04; share at depth 1/2/4/8: 0.083% / 0.15% / 0.48% / 6.6%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.024, max 0.087
+
+n = 336: max|R_ij| = 0.2506 (4.59/sqrt(n)); |R^T R - I|_F = 2.0e-14
+   f32   range = max entry           : op norm 5.009e-08 (svd), certified 5.015e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.503e-07, Frobenius 4.620e-07
+         share with certified op norm at depth 1/2/4/8: 1.95e-05% / 3.43e-05% / 0.000113% / 0.00155%;  with Frobenius: 0.00018% / 0.000316% / 0.00104% / 0.0143%
+   int16 range = max entry           : op norm 7.899e-05 (svd), certified 7.936e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 7.027e-04, Frobenius 7.423e-04
+         share with certified op norm at depth 1/2/4/8: 0.0309% / 0.0543% / 0.178% / 2.46%;  with Frobenius: 0.289% / 0.508% / 1.67% / 23%
+   int8  range = max entry           : op norm 2.068e-02 (svd), certified 2.070e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.802e-01, Frobenius 1.911e-01
+         share with certified op norm at depth 1/2/4/8: 8.07% / 14.2% / 46.6% / 641%;  with Frobenius: 74.5% / 131% / 430% / 5.92e+03%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.330e-01 (svd), certified 1.330e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.100e-01, Frobenius 8.671e-01
+         share with certified op norm at depth 1/2/4/8: 51.8% / 91.1% / 299% / 4.12e+03%;  with Frobenius: 338% / 594% / 1.95e+03% / 2.68e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 9.257e-02 (svd), certified 9.257e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.145e-01, Frobenius 3.545e-01
+         share with certified op norm at depth 1/2/4/8: 36.1% / 63.4% / 208% / 2.87e+03%;  with Frobenius: 138% / 243% / 797% / 1.1e+04%
+   int8  range = 3.5/sqrt(n), clipped: op norm 6.077e-02 (svd), certified 6.077e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.847e-01, Frobenius 1.805e-01
+         share with certified op norm at depth 1/2/4/8: 23.7% / 41.6% / 137% / 1.88e+03%;  with Frobenius: 70.4% / 124% / 406% / 5.59e+03%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 6.84e-13; share at depth 1/2/4/8: 2.7e-10% / 4.7e-10% / 1.5e-09% / 2.1e-08%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 3.67e-04; share at depth 1/2/4/8: 0.14% / 0.25% / 0.83% / 11%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.022, max 0.091
+
+n = 512: max|R_ij| = 0.1966 (4.45/sqrt(n)); |R^T R - I|_F = 2.7e-14
+   f32   range = max entry           : op norm 5.032e-08 (svd), certified 5.044e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 4.356e-07, Frobenius 5.714e-07
+         share with certified op norm at depth 1/2/4/8: 2.43e-05% / 4.27e-05% / 0.00014% / 0.00193%;  with Frobenius: 0.000275% / 0.000483% / 0.00159% / 0.0219%
+   int16 range = max entry           : op norm 7.797e-05 (svd), certified 7.826e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 8.220e-04, Frobenius 8.867e-04
+         share with certified op norm at depth 1/2/4/8: 0.0377% / 0.0662% / 0.217% / 2.99%;  with Frobenius: 0.427% / 0.75% / 2.46% / 33.9%
+   int8  range = max entry           : op norm 2.022e-02 (svd), certified 2.026e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.120e-01, Frobenius 2.292e-01
+         share with certified op norm at depth 1/2/4/8: 9.75% / 17.1% / 56.3% / 775%;  with Frobenius: 110% / 194% / 637% / 8.76e+03%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.304e-01 (svd), certified 1.304e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.927e-01, Frobenius 1.094e+00
+         share with certified op norm at depth 1/2/4/8: 62.8% / 110% / 362% / 4.99e+03%;  with Frobenius: 526% / 925% / 3.04e+03% / 4.18e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 7.396e-02 (svd), certified 7.398e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.594e-01, Frobenius 4.653e-01
+         share with certified op norm at depth 1/2/4/8: 35.6% / 62.6% / 206% / 2.83e+03%;  with Frobenius: 224% / 394% / 1.29e+03% / 1.78e+04%
+   int8  range = 3.5/sqrt(n), clipped: op norm 4.374e-02 (svd), certified 4.392e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.053e-01, Frobenius 2.389e-01
+         share with certified op norm at depth 1/2/4/8: 21.1% / 37.1% / 122% / 1.68e+03%;  with Frobenius: 115% / 202% / 664% / 9.14e+03%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 1.29e-12; share at depth 1/2/4/8: 6.2e-10% / 1.1e-09% / 3.6e-09% / 4.9e-08%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 6.91e-04; share at depth 1/2/4/8: 0.33% / 0.58% / 1.9% / 26%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.018, max 0.055
+
+n = 688: max|R_ij| = 0.1719 (4.51/sqrt(n)); |R^T R - I|_F = 3.2e-14
+   f32   range = max entry           : op norm 5.035e-08 (svd), certified 5.049e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 4.914e-07, Frobenius 6.644e-07
+         share with certified op norm at depth 1/2/4/8: 2.82e-05% / 4.95e-05% / 0.000163% / 0.00224%;  with Frobenius: 0.000371% / 0.000652% / 0.00214% / 0.0295%
+   int16 range = max entry           : op norm 7.998e-05 (svd), certified 8.005e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 9.588e-04, Frobenius 1.042e-03
+         share with certified op norm at depth 1/2/4/8: 0.0447% / 0.0785% / 0.258% / 3.55%;  with Frobenius: 0.582% / 1.02% / 3.36% / 46.2%
+   int8  range = max entry           : op norm 2.032e-02 (svd), certified 2.043e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.472e-01, Frobenius 2.689e-01
+         share with certified op norm at depth 1/2/4/8: 11.4% / 20% / 65.8% / 906%;  with Frobenius: 150% / 264% / 866% / 1.19e+04%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.173e-01 (svd), certified 1.173e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.833e-01, Frobenius 1.287e+00
+         share with certified op norm at depth 1/2/4/8: 65.5% / 115% / 378% / 5.2e+03%;  with Frobenius: 719% / 1.26e+03% / 4.15e+03% / 5.71e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 7.258e-02 (svd), certified 7.258e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.710e-01, Frobenius 5.468e-01
+         share with certified op norm at depth 1/2/4/8: 40.5% / 71.2% / 234% / 3.22e+03%;  with Frobenius: 305% / 536% / 1.76e+03% / 2.42e+04%
+   int8  range = 3.5/sqrt(n), clipped: op norm 4.470e-02 (svd), certified 4.470e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.337e-01, Frobenius 2.753e-01
+         share with certified op norm at depth 1/2/4/8: 24.9% / 43.8% / 144% / 1.98e+03%;  with Frobenius: 154% / 270% / 887% / 1.22e+04%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 2.00e-12; share at depth 1/2/4/8: 1.1e-09% / 2e-09% / 6.5e-09% / 8.9e-08%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 1.08e-03; share at depth 1/2/4/8: 0.6% / 1.1% / 3.5% / 48%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.016, max 0.062
+
+n = 768: max|R_ij| = 0.1689 (4.68/sqrt(n)); |R^T R - I|_F = 3.5e-14
+   f32   range = max entry           : op norm 5.007e-08 (svd), certified 5.035e-08 (Schatten-128), sqrt(|N|_1 |N|_inf) 5.258e-07, Frobenius 7.028e-07
+         share with certified op norm at depth 1/2/4/8: 2.97e-05% / 5.22e-05% / 0.000171% / 0.00236%;  with Frobenius: 0.000414% / 0.000728% / 0.00239% / 0.0329%
+   int16 range = max entry           : op norm 8.219e-05 (svd), certified 8.260e-05 (Schatten-128), sqrt(|N|_1 |N|_inf) 1.051e-03, Frobenius 1.142e-03
+         share with certified op norm at depth 1/2/4/8: 0.0487% / 0.0856% / 0.281% / 3.87%;  with Frobenius: 0.673% / 1.18% / 3.89% / 53.5%
+   int8  range = max entry           : op norm 2.121e-02 (svd), certified 2.128e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.718e-01, Frobenius 2.950e-01
+         share with certified op norm at depth 1/2/4/8: 12.6% / 22.1% / 72.4% / 997%;  with Frobenius: 174% / 306% / 1e+03% / 1.38e+04%
+   int8  range = 2.5/sqrt(n), clipped: op norm 1.174e-01 (svd), certified 1.174e-01 (Schatten-128), sqrt(|N|_1 |N|_inf) 3.930e-01, Frobenius 1.339e+00
+         share with certified op norm at depth 1/2/4/8: 69.3% / 122% / 400% / 5.5e+03%;  with Frobenius: 790% / 1.39e+03% / 4.56e+03% / 6.27e+04%
+   int8  range = 3.0/sqrt(n), clipped: op norm 7.320e-02 (svd), certified 7.321e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.711e-01, Frobenius 5.703e-01
+         share with certified op norm at depth 1/2/4/8: 43.2% / 75.9% / 249% / 3.43e+03%;  with Frobenius: 336% / 591% / 1.94e+03% / 2.67e+04%
+   int8  range = 3.5/sqrt(n), clipped: op norm 4.542e-02 (svd), certified 4.543e-02 (Schatten-128), sqrt(|N|_1 |N|_inf) 2.485e-01, Frobenius 2.920e-01
+         share with certified op norm at depth 1/2/4/8: 26.8% / 47.1% / 155% / 2.13e+03%;  with Frobenius: 172% / 303% / 994% / 1.37e+04%
+   product in f64 accumulation: bound gamma_n*sqrt(n) = 2.36e-12; share at depth 1/2/4/8: 1.4e-09% / 2.4e-09% / 8e-09% / 1.1e-07%
+   product in f32 accumulation: bound gamma_n*sqrt(n) = 1.27e-03; share at depth 1/2/4/8: 0.75% / 1.3% / 4.3% / 59%
+   int8, depth 2, 200 random pairs: actual change of the estimate / allowance: mean 0.015, max 0.055
+

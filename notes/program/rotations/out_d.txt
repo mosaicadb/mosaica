@@ -1,0 +1,8 @@
+butterfly n = 64, depth 1, 20000 draws: |error| equals the formula of D2 to 1.2e-11; rms of error/sd = 2.40 (law: 1); Pr[|error| > 7.8 sd] = 0.000; median |error|/sd = 2.13; sqrt(n-1) = 7.94
+butterfly n = 64, depth 2, 20000 draws: |error| equals the formula of D2 to 8.0e-12; rms of error/sd = 2.36 (law: 1); Pr[|error| > 7.8 sd] = 0.000; median |error|/sd = 2.24; sqrt(n-1) = 7.94
+butterfly n = 256, depth 1, 20000 draws: |error| equals the formula of D2 to 1.5e-11; rms of error/sd = 3.68 (law: 1); Pr[|error| > 7.8 sd] = 0.000; median |error|/sd = 3.25; sqrt(n-1) = 15.97
+butterfly n = 256, depth 2, 20000 draws: |error| equals the formula of D2 to 4.3e-12; rms of error/sd = 4.06 (law: 1); Pr[|error| > 7.8 sd] = 0.000; median |error|/sd = 4.03; sqrt(n-1) = 15.97
+Kac walk n = 64, T = 1 n = 64 steps, 20000 draws: share with coordinate 0 never touched = 0.1322 (exp(-2T/n) = 0.1353); mean square of error/sd = 1.00; Pr[|error| > 4 sd] = 0.00e+00 (law 5.1e-05 at d = 255, 3.5e-05 at d = 63); max = 2.8
+Kac walk n = 64, T = 2 n = 128 steps, 20000 draws: share with coordinate 0 never touched = 0.0174 (exp(-2T/n) = 0.0183); mean square of error/sd = 0.98; Pr[|error| > 4 sd] = 0.00e+00 (law 5.1e-05 at d = 255, 3.5e-05 at d = 63); max = 3.6
+Kac walk n = 64, T = 4 n = 256 steps, 20000 draws: share with coordinate 0 never touched = 0.0003 (exp(-2T/n) = 0.0003); mean square of error/sd = 1.00; Pr[|error| > 4 sd] = 2.00e-04 (law 5.1e-05 at d = 255, 3.5e-05 at d = 63); max = 4.6
+Kac walk n = 64, T = 8 n = 512 steps, 20000 draws: share with coordinate 0 never touched = 0.0000 (exp(-2T/n) = 0.0000); mean square of error/sd = 1.00; Pr[|error| > 4 sd] = 0.00e+00 (law 5.1e-05 at d = 255, 3.5e-05 at d = 63); max = 3.8

@@ -1,0 +1,7 @@
+(c) k rounds, the first k-1 structured: D_j on the current support equal to a character (times a sign).
+    P(structure) is exact; the conditional rate is Monte Carlo; the product bounds Pr[|error| > 7.8 sd] from below.
+    n = 256, |V| = 16, k = 2: log2 P(structure) = -11; conditional: mean square of error/sd 1.02, max 8.6, Pr[>6 sd] 2.82e-04, Pr[>7.8 sd] 5.00e-06  =>  Pr[fail] >= 2^-28.6
+    n = 256, |V| = 16, k = 3: log2 P(structure) = -22; conditional: mean square of error/sd 0.99, max 6.6, Pr[>6 sd] 1.00e-05, Pr[>7.8 sd] 0.00e+00  =>  Pr[fail] >= 2^-inf
+    n = 256, |V| = 16, k = 4: log2 P(structure) = -33; conditional: mean square of error/sd 0.99, max 5.6, Pr[>6 sd] 0.00e+00, Pr[>7.8 sd] 0.00e+00  =>  Pr[fail] >= 2^-inf
+    n = 256, |V| = 16, k = 5: log2 P(structure) = -44; conditional: mean square of error/sd 0.99, max 4.5, Pr[>6 sd] 0.00e+00, Pr[>7.8 sd] 0.00e+00  =>  Pr[fail] >= 2^-inf
+    n = 256, |V| = 16, k = 6: log2 P(structure) = -55; conditional: mean square of error/sd 0.99, max 5.0, Pr[>6 sd] 0.00e+00, Pr[>7.8 sd] 0.00e+00  =>  Pr[fail] >= 2^-inf

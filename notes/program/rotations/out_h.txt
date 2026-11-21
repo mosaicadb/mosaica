@@ -1,0 +1,9 @@
+y = e0 + e1, Delta = e0 - e1, n = 64, depth 1, 20000 draws
+   complex scale: mean square 1.014 (law 1), kurtosis 2.972 (law 2.906), Pr[|.| > 3] 2.55e-03, max 3.98
+   real scale, read against the real law: mean square 1.016, max 3.96; allowance |beta| |y| |Delta| as a share of c*sd: mean 0.102, 90% 0.211
+y = e0 + e1, Delta = i e0 + 0.3 e1 (has a component along Iy), n = 64, depth 2, 20000 draws
+   complex scale: mean square 1.014 (law 1), kurtosis 2.914 (law 2.906), Pr[|.| > 3] 2.20e-03, max 4.12
+   real scale, read against the real law: mean square 0.997, max 4.02; allowance |beta| |y| |Delta| as a share of c*sd: mean 0.102, 90% 0.207
+fixed Gaussian pair, n = 64, depth 2, 20000 draws
+   complex scale: mean square 1.012 (law 1), kurtosis 2.927 (law 2.906), Pr[|.| > 3] 2.05e-03, max 4.05
+   real scale, read against the real law: mean square 1.009, max 4.09; allowance |beta| |y| |Delta| as a share of c*sd: mean 0.101, 90% 0.206

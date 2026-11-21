@@ -1,0 +1,12 @@
+N = 1e9
+  n = 768, four blocks (95, 127, 255, 287): R4 = 8.815 (theta = 1.00231); sphere in sum(d+2)-2 = 770 dimensions: 8.695
+  n = 2048, four blocks (255, 335, 687, 767): R4 = 8.944 (theta = 1.00086); sphere in sum(d+2)-2 = 2050 dimensions: 8.830
+  n = 2048, each block halved (8 sub-blocks): R4 = 8.952 (theta = 1.00185); sphere in sum(d+2)-2 = 2054 dimensions: 8.830
+  n = 2048, 32 sub-blocks of 64: R4 = 8.969 (theta = 1.00385); sphere in sum(d+2)-2 = 2078 dimensions: 8.831
+  n = 2048, 128 sub-blocks of 16: R4 = 9.079 (theta = 1.01666); sphere in sum(d+2)-2 = 2174 dimensions: 8.834
+N = 2^20
+  n = 768, four blocks (95, 127, 255, 287): R4 = 8.083 (theta = 1.00231); sphere in sum(d+2)-2 = 770 dimensions: 7.954
+  n = 2048, four blocks (255, 335, 687, 767): R4 = 8.179 (theta = 1.00086); sphere in sum(d+2)-2 = 2050 dimensions: 8.055
+  n = 2048, each block halved (8 sub-blocks): R4 = 8.187 (theta = 1.00185); sphere in sum(d+2)-2 = 2054 dimensions: 8.055
+  n = 2048, 32 sub-blocks of 64: R4 = 8.202 (theta = 1.00385); sphere in sum(d+2)-2 = 2078 dimensions: 8.056
+  n = 2048, 128 sub-blocks of 16: R4 = 8.304 (theta = 1.01666); sphere in sum(d+2)-2 = 2174 dimensions: 8.059
