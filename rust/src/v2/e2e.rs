@@ -2401,19 +2401,17 @@ fn an_index_with_a_zero_row_builds_and_opens() {
     assert_eq!(opened.store_hash(), built.store_hash());
 }
 
-/// The W2 forms do not depend on the threads that build them.
+/// The W2 forms do not depend on the threads that build them: a build of synth4k on 1 and on 3 threads stores the
+/// forms the fixture's build does, bit for bit.
 #[test]
 fn the_w2_forms_do_not_depend_on_the_threads() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-    let ix = &fixture().ix;
-    let (p, _) = prepare(dir, &BuildOptions::default()).unwrap();
-    let n = ix.n();
-    let vinv: Vec<Vec<f64>> = (0..ix.groups.len()).map(|g| quant_basis(&p.v[g * n * n..(g + 1) * n * n], n).2).collect();
-    let w = ix.wforms.as_ref().unwrap();
+    let w = fixture().ix.wforms.as_ref().unwrap();
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     for threads in [1, 3] {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
-        let x = pool.install(|| wrule::build(ix, &vinv, &p.centres[..ix.k() * n]));
+        let (_, ix) = pool.install(|| build(dir, &BuildOptions::default(), &mut |_| {})).unwrap();
+        let x = ix.wforms.as_ref().unwrap();
         assert_eq!((bits(&x.g), bits(&x.c)), (bits(&w.g), bits(&w.c)), "{threads} threads");
     }
 }

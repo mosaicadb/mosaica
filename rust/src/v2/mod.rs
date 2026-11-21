@@ -1668,7 +1668,9 @@ fn roundup_abs(v: f64, steps: f64, floor_log: f64) -> f64 {
     r
 }
 
-fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta: &Meta2, rots: &[Vec<f64>], mn32: f32, calib: bool) -> ClusterCode2 {
+/// Cluster `it` encoded; `w2`, when given, takes each row's error vector at each deterministic level (`wrule::Sums`).
+#[allow(clippy::too_many_arguments)]
+fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta: &Meta2, rots: &[Vec<f64>], mn32: f32, calib: bool, mut w2: Option<&mut wrule::Sums>) -> ClusterCode2 {
     let n = meta.n;
     let nc = it.ah.len();
     let nblk = (nc + BLK - 1) / BLK;
@@ -1687,6 +1689,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let svec: Vec<f32> = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).collect();
     let mut wmat = vec![0f64; nc * n];
     let mut val = vec![0f64; n];
+    let mut uvec = vec![0f64; n];
     for i in 0..nc {
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
@@ -1707,7 +1710,11 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
             for c in 0..n {
                 let e = z[c] - s * gp.sig[c] as f64 * val[c];
                 let q = e / gp.d[l][c] as f64;
+                uvec[c] = q;
                 rho2 += q * q;
+            }
+            if let Some(w) = w2.as_deref_mut() {
+                w.add(l, &uvec);
             }
             let rho = rho2.sqrt();
             let need = rho * (1.0 + 1e-6) + 1e-12;
@@ -2073,7 +2080,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&(c, per)| {
         let g = p.grp[c];
         let it = src.sample(c, p, &groups[g], &mhats[c], per);
-        (g, encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], true).calib.unwrap())
+        (g, encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], true, None).calib.unwrap())
     }).collect();
     log(format!("calibration sample {} items from {} clusters", cals.iter().map(|c| c.1.ypool[0].len()).sum::<usize>(), calc.len()));
     for g in 0..p.meta.g {
@@ -2180,21 +2187,33 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let ord_lam = store::Out::<f32>::new(dir, order::FILES[1], kr * ord_r);
     let ord_dsc = store::Out::<f32>::new(dir, order::FILES[2], kr * ord_r);
     let ord_dirs = store::Out::<i8>::new(dir, order::FILES[3], kr * ord_r * n);
-    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid and
-    // the seconds its order state took
+    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid,
+    // the seconds its order state took and its W2 sums
     struct Done {
         esc: Vec<(u8, u8, u32, f32)>,
         x2max: f64,
         kx: f64,
         numax: f64,
         ord_s: f64,
+        w2: Option<wrule::Summed>,
     }
-    let done: Vec<Done> = (0..k).into_par_iter().map(|c| {
+    let mut done: Vec<Done> = (0..k).into_par_iter().map(|c| {
         let gp = &groups[p.grp[c]];
         let it = src.items(c, p, gp, &mhats[c]);
         let it = if nusort { it.sort_by_nu(n) } else { it };
         assert_eq!(it.ah.len(), sizes[c], "cluster {c} gave {} items where the source gave its size as {}", it.ah.len(), sizes[c]);
-        let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false);
+        // the order state, from the rows as they are encoded, first: the W2 sums are taken during the encoding along
+        // its directions
+        let to = Timer::new();
+        let co = real.then(|| {
+            assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
+            let row = |i: usize, out: &mut [f32]| out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h));
+            order::cluster(sizes[c], &row, &p.centres[c * n..(c + 1) * n], ord_r, order::SAMPLE, order::PASSES, c as u64)
+        });
+        let ord_s = to.s();
+        let mut w2 = co.as_ref().map(|co| wrule::Sums::new(gp, &co.dirs8, &co.dsc, n, meta.ndl()));
+        let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false, w2.as_mut());
+        let w2 = w2.map(|w| w.done());
         let r0 = row0[c];
         // SAFETY (each put below): cluster c writes only its own ranges, fixed above from the sizes before encoding
         // (rows row0[c]..row0[c + 1], level bytes coff/soff[l][c] for its blocks), so concurrent writes are disjoint
@@ -2215,8 +2234,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
             let key: Vec<u16> = it.nu.iter().map(|&v| ((v / numax * 65535.0).ceil() as u32).min(65535) as u16).collect();
             unsafe { nukey.put(r0, &key) };
         }
-        if real {
-            assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
+        if let Some(co) = co {
             unsafe { vecs.put(r0 * n, &it.x16) };
             if nanch > 0 {
                 let (hi, lo) = support_bounds(&it.x16, n, &anchors, &anchors32);
@@ -2228,9 +2246,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                     }
                 }
             }
-            let to = Timer::new();
-            let row = |i: usize, out: &mut [f32]| out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h));
-            let co = order::cluster(sizes[c], &row, &p.centres[c * n..(c + 1) * n], ord_r, order::SAMPLE, order::PASSES, c as u64);
             // SAFETY: cluster c writes only its own entries of each array
             unsafe {
                 ord_rad.put(c, &[co.rad]);
@@ -2238,10 +2253,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 ord_dsc.put(c * ord_r, &co.dsc);
                 ord_dirs.put(c * ord_r * n, &co.dirs8);
             }
-            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: to.s() }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s, w2 }
         } else {
             unsafe { ext.put(r0, &it.ext) };
-            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: 0.0 }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: 0.0, w2: None }
         }
     }).collect();
     log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
@@ -2271,10 +2286,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         info
     }).collect();
     let esc = done.iter().zip(&row0).flat_map(|(d, &r0)| d.esc.iter().map(move |&(l, slot, i, v)| ((l, slot, (r0 + i as usize) as u32), v))).collect();
+    let w2sums: Option<Vec<wrule::Summed>> = done.iter_mut().map(|d| d.w2.take()).collect();
     drop(done);
-    // the inverse bases, kept for the W2 forms
-    let vinv: Vec<Vec<f64>> = groups.iter_mut().map(|gp| std::mem::take(&mut gp.vinv)).collect();
     for gp in groups.iter_mut() {
+        gp.vinv = Vec::new();
         gp.vq = Vec::new();
     }
     let row_ent = row_ent.finish();
@@ -2334,12 +2349,12 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         nrows,
         wforms: None,
     };
-    if real {
+    if let Some(sums) = w2sums {
         let tw = Timer::new();
-        ix.wforms = Some(Arc::new(wrule::build(&ix, &vinv, &p.centres[..k * n])));
-        log(format!("W2 forms: {:.1}s", tw.s()));
+        let secs: f64 = sums.iter().map(|s| s.secs).sum();
+        ix.wforms = Some(Arc::new(wrule::finish(&ix, &sums)));
+        log(format!("W2 forms: {secs:.1} thread-seconds of sums during the encoding, then {:.1}s", tw.s()));
     }
-    drop(vinv);
     if let Some(d) = dir {
         store::save_rest(&ix, d);
     }

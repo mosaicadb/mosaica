@@ -108,48 +108,6 @@ pub fn orthonormal(vs: &[Vec<f64>]) -> Vec<Vec<f64>> {
     qb
 }
 
-/// Cluster c's rows' error vectors per level (nc x n, index row order), the encoding replayed from the index's stored
-/// rows with its group's inverse basis `vinv` and its centre `centre`, as the build encoded them.
-pub fn errs(ix: &Index2, vinv: &[f64], centre: &[f32], c: usize) -> Vec<Vec<f64>> {
-    let (n, ndl) = (ix.n(), ix.meta.ndl());
-    let cl = &ix.cl[c];
-    let gp = &ix.groups[cl.g];
-    let nc = cl.r1 - cl.r0;
-    let mut rmat = vec![0f64; nc * n];
-    for i in 0..nc {
-        let x = ix.full_row_f16(cl.r0 + i);
-        for t in 0..n {
-            rmat[i * n + t] = crate::util::f16_to_f32(x[t]) as f64 - centre[t] as f64;
-        }
-    }
-    let mut z = vec![0f64; nc * n];
-    unsafe {
-        matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
-    }
-    let mut u = vec![vec![0f64; nc * n]; ndl];
-    let mut val = vec![0f64; n];
-    for i in 0..nc {
-        let s = crate::index::item_scale(ix.ahat[cl.r0 + i], cl.mn32, gp.lamsum) as f64;
-        val.iter_mut().for_each(|v| *v = 0.0);
-        let zi = &z[i * n..(i + 1) * n];
-        for (l, ul) in u.iter_mut().enumerate() {
-            for f in &gp.levels[l].parts[0].fields {
-                let cc = f.widx as usize;
-                let uu = zi[cc] / (gp.sig[cc] as f64 * s);
-                let code = match f.kind {
-                    FK::Tree { to } => ix.codes.index(to as usize, uu),
-                    _ => (uu - val[cc] >= 0.0) as usize,
-                };
-                val[cc] += ix.etab.e[f.eid as usize][code << f.off] as f64;
-            }
-            for cc in 0..n {
-                ul[i * n + cc] = (zi[cc] - s * gp.sig[cc] as f64 * val[cc]) / gp.d[l][cc] as f64;
-            }
-        }
-    }
-    u
-}
-
 /// Per level of a cluster with order directions `dirs8` (r rows of n int8) and scales `dsc` (p_j = dirs8_j dsc_j, as
 /// the order state holds them) in group `gp`: B~ = B (P'P)^-1 (r vectors of n), b_j = (V_q^T p_j) d_l, and an
 /// orthonormal basis of span B. V_q^T P is one product per cluster (the int8 basis taken to f64 a block of its rows
@@ -197,72 +155,113 @@ fn dual_of(ix: &Index2, c: usize) -> Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
     dual_dirs(&ix.groups[ix.cl[c].g], st.dirs(c, st.r, ix.n()), &st.dsc[c * st.r..(c + 1) * st.r], ix.n(), ix.meta.ndl())
 }
 
-/// The forms of `ix` (which holds stored vectors and the order state), with each group's inverse basis `vinv` (as
-/// the build's `GroupPlan2::vinv`) and the clusters' centres `centres` (k x n). Every row of every cluster: each
-/// cluster's errors replayed once (`errs`), from which M, tr S_c and tr S_c within span B, and G's sums; then N and
-/// gamma from G.
-pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
+/// What W2 needs of one cluster's rows' coding errors, summed as the build encodes them (`encode_cluster`, which hands
+/// each row's error vector u at each deterministic level to `add`): per level, over the rows, the sums of (B~'u)(B~'u)'
+/// (r x r), of |Q'u|^2 (Q an orthonormal basis of span B) and of u_t^2 per coordinate. The rows wait in a block of
+/// `Sums::ROWS` per level, taken in by one product each.
+pub struct Sums {
+    /// per level: B~ as n x r and Q as n x rq (row-major, for the products), and the rows waiting
+    bt: Vec<Vec<f64>>,
+    qb: Vec<Vec<f64>>,
+    rq: Vec<usize>,
+    wait: Vec<Vec<f64>>,
+    n: usize,
+    r: usize,
+    pub yy: Vec<Vec<f64>>,
+    pub qq: Vec<f64>,
+    pub usq: Vec<Vec<f64>>,
+    pub rows: usize,
+    /// seconds spent in `new` and taking rows in
+    secs: f64,
+}
+
+impl Sums {
+    const ROWS: usize = 256;
+
+    /// The sums of a cluster with order directions `dirs8` and scales `dsc` in group `gp`, none taken yet.
+    pub fn new(gp: &GroupPlan2, dirs8: &[i8], dsc: &[f32], n: usize, ndl: usize) -> Sums {
+        let t = Timer::new();
+        let r = dsc.len();
+        let (mut bt, mut qb, mut rq) = (Vec::new(), Vec::new(), Vec::new());
+        for (b, q) in dual_dirs(gp, dirs8, dsc, n, ndl) {
+            bt.push((0..n).flat_map(|t| b.iter().map(move |v| v[t])).collect());
+            rq.push(q.len());
+            qb.push((0..n).flat_map(|t| q.iter().map(move |v| v[t])).collect());
+        }
+        Sums { bt, qb, rq, wait: vec![Vec::with_capacity(Self::ROWS * n); ndl], n, r, yy: vec![vec![0.0; r * r]; ndl], qq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl], rows: 0, secs: t.s() }
+    }
+
+    /// Row error vector `u` (n values) at level l; level 0 counts the row.
+    pub fn add(&mut self, l: usize, u: &[f64]) {
+        self.rows += (l == 0) as usize;
+        self.wait[l].extend_from_slice(u);
+        if self.wait[l].len() == Self::ROWS * self.n {
+            self.take(l);
+        }
+    }
+
+    /// The rows waiting at level l, taken into the sums.
+    fn take(&mut self, l: usize) {
+        let t = Timer::new();
+        let (n, r, rq) = (self.n, self.r, self.rq[l]);
+        let w = std::mem::take(&mut self.wait[l]);
+        let m = w.len() / n;
+        let prod = |b: &[f64], k: usize| -> Vec<f64> {
+            let mut y = vec![0f64; m * k];
+            unsafe {
+                matrixmultiply::dgemm(m, n, k, 1.0, w.as_ptr(), n as isize, 1, b.as_ptr(), k as isize, 1, 0.0, y.as_mut_ptr(), k as isize, 1);
+            }
+            y
+        };
+        let (y, yq) = (prod(&self.bt[l], r), prod(&self.qb[l], rq));
+        for i in 0..m {
+            let yi = &y[i * r..(i + 1) * r];
+            for a in 0..r {
+                for b in 0..r {
+                    self.yy[l][a * r + b] += yi[a] * yi[b];
+                }
+            }
+            for t in 0..n {
+                self.usq[l][t] += w[i * n + t] * w[i * n + t];
+            }
+        }
+        self.qq[l] += yq.iter().map(|x| x * x).sum::<f64>();
+        self.wait[l] = w;
+        self.wait[l].clear();
+        self.secs += t.s();
+    }
+
+    /// The sums once every row is in (what the forms keep of the cluster: the bases are dropped).
+    pub fn done(mut self) -> Summed {
+        for l in 0..self.wait.len() {
+            self.take(l);
+        }
+        Summed { yy: self.yy, qq: self.qq, usq: self.usq, rows: self.rows, secs: self.secs }
+    }
+}
+
+/// A cluster's `Sums`, every row in, and the seconds they took.
+pub struct Summed {
+    pub yy: Vec<Vec<f64>>,
+    pub qq: Vec<f64>,
+    pub usq: Vec<Vec<f64>>,
+    pub rows: usize,
+    pub secs: f64,
+}
+
+/// The forms of `ix` (which holds stored vectors and the order state) from each cluster's sums (`Sums`, taken as it was
+/// encoded): M and the traces of S_c from them, G over each group's rows, then N and gamma from G (B~ and Q formed
+/// again from the order state, one product per cluster, rather than all clusters' kept), and U from the stored norms.
+pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
     use rayon::prelude::*;
     let (n, ndl, k, ng) = (ix.n(), ix.meta.ndl(), ix.k(), ix.groups.len());
     let r = ix.order.as_ref().expect("the W2 forms read the order state").r;
-    // per cluster and level: M (r x r), tr S, tr S within span B; and the cluster's sums of u_t^2 per level
-    struct One {
-        m: Vec<Vec<f64>>,
-        trs: Vec<f64>,
-        trq: Vec<f64>,
-        usq: Vec<Vec<f64>>,
-        dual: Vec<(Vec<Vec<f64>>, Vec<Vec<f64>>)>,
-    }
-    let ones: Vec<One> = (0..k).into_par_iter().map(|c| {
-        let cl = &ix.cl[c];
-        let nc = cl.r1 - cl.r0;
-        if nc == 0 {
-            return One { m: vec![vec![0.0; r * r]; ndl], trs: vec![0.0; ndl], trq: vec![0.0; ndl], usq: vec![vec![0.0; n]; ndl], dual: Vec::new() };
-        }
-        let u = errs(ix, &vinv[cl.g], &centres[c * n..(c + 1) * n], c);
-        let dual = dual_of(ix, c);
-        let mut one = One { m: Vec::new(), trs: Vec::new(), trq: Vec::new(), usq: Vec::new(), dual: Vec::new() };
-        for (ul, (bt, qb)) in u.iter().zip(&dual) {
-            // Y = U B~ (nc x r), M = Y'Y / nc; the same for an orthonormal basis of span B
-            let proj = |vs: &[Vec<f64>]| -> Vec<f64> {
-                let w: Vec<f64> = (0..n).flat_map(|t| vs.iter().map(move |v| v[t])).collect();
-                let mut y = vec![0f64; nc * vs.len()];
-                unsafe {
-                    matrixmultiply::dgemm(nc, n, vs.len(), 1.0, ul.as_ptr(), n as isize, 1, w.as_ptr(), vs.len() as isize, 1, 0.0, y.as_mut_ptr(), vs.len() as isize, 1);
-                }
-                y
-            };
-            let (y, yq) = (proj(bt), proj(qb));
-            let mut m = vec![0f64; r * r];
-            for i in 0..nc {
-                let yi = &y[i * r..(i + 1) * r];
-                for a in 0..r {
-                    for b in 0..r {
-                        m[a * r + b] += yi[a] * yi[b];
-                    }
-                }
-            }
-            m.iter_mut().for_each(|x| *x /= nc as f64);
-            one.m.push(m);
-            one.trq.push(yq.iter().map(|x| x * x).sum::<f64>() / nc as f64);
-            let mut usq = vec![0f64; n];
-            for i in 0..nc {
-                for t in 0..n {
-                    usq[t] += ul[i * n + t] * ul[i * n + t];
-                }
-            }
-            one.trs.push(usq.iter().sum::<f64>() / nc as f64);
-            one.usq.push(usq);
-        }
-        one.dual = dual;
-        one
-    }).collect();
     // G per group and level: mean u_t^2 over the group's rows
     let mut g = vec![0f64; ng * ndl * n];
     let mut rows = vec![0f64; ng];
-    for (c, one) in ones.iter().enumerate() {
+    for (c, one) in sums.iter().enumerate() {
         let gi = ix.cl[c].g;
-        rows[gi] += (ix.cl[c].r1 - ix.cl[c].r0) as f64;
+        rows[gi] += one.rows as f64;
         for l in 0..ndl {
             for t in 0..n {
                 g[(gi * ndl + l) * n + t] += one.usq[l][t];
@@ -273,19 +272,22 @@ pub fn build(ix: &Index2, vinv: &[Vec<f64>], centres: &[f32]) -> WForms {
         *x /= rows[i / (ndl * n)].max(1.0);
     }
     let recs: Vec<Vec<f32>> = (0..k).into_par_iter().map(|c| {
-        let (cl, one) = (&ix.cl[c], &ones[c]);
-        let nc = cl.r1 - cl.r0;
+        let (cl, one) = (&ix.cl[c], &sums[c]);
+        let nc = one.rows;
+        let dual = if nc > 0 { dual_of(ix, c) } else { Vec::new() };
         let mut out = Vec::with_capacity(ndl * WForms::rec(r));
         for l in 0..ndl {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
             let zero = (vec![vec![0.0; n]; r], Vec::new());
-            let (bt, qb) = if nc > 0 { &one.dual[l] } else { &zero };
+            let (bt, qb) = if nc > 0 { &dual[l] } else { &zero };
+            let m: Vec<f64> = one.yy[l].iter().map(|x| x / nc.max(1) as f64).collect();
             let nn: Vec<f64> = (0..r * r).map(|i| gq(&bt[i / r], &bt[i % r])).collect();
+            let (trs, trq) = (one.usq[l].iter().sum::<f64>() / nc.max(1) as f64, one.qq[l] / nc.max(1) as f64);
             let den = gd.iter().sum::<f64>() - qb.iter().map(|w| gq(w, w)).sum::<f64>();
-            let gamma = if den > 0.0 { ((one.trs[l] - one.trq[l]) / den).max(0.0) } else { 0.0 };
+            let gamma = if den > 0.0 { ((trs - trq) / den).max(0.0) } else { 0.0 };
             let uu = if nc > 0 { (cl.r0..cl.r1).map(|row| det_norm(ix, c, l, row).powi(2)).sum::<f64>() / nc as f64 } else { 0.0 };
-            out.extend(pack(&one.m[l], r));
+            out.extend(pack(&m, r));
             out.extend(pack(&nn, r));
             out.extend([gamma as f32, uu as f32]);
         }
