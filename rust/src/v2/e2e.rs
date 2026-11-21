@@ -392,7 +392,7 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let variants = [
         ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, u32::MAX, 2),
         ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ..BuildOptions::default() }, 0b10, 2),
-        ("3 levels, 4/16/28", BuildOptions { dlv: Some(vec![4, 16, 28]), ..BuildOptions::default() }, u32::MAX, 3),
+        ("3 levels, 4/16/32", BuildOptions { dlv: Some(vec![4, 16, 32]), ..BuildOptions::default() }, u32::MAX, 3),
         ("6 levels, none deciding", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0, 6),
         ("6 levels, deciding at the first and last", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0b100001, 6),
     ];
@@ -778,10 +778,10 @@ fn the_vectors_file_is_checked_at_open() {
         let r = damage(name, &|b: &mut Vec<u8>| match what {
             "an offset near u64::MAX" => b[8..16].copy_from_slice(&(u64::MAX - 8).to_le_bytes()),
             "a record cut short" => b.truncate(b.len() - 3),
-            // the first cluster's record: 4 u64, 7 f64, an f32, bm, b2, l1m, mhat, mv32, wmr, then the table count and
+            // the first cluster's record: 4 u64, 8 f64, an f32, bm, b2, l1m, mhat, mv32, wmr, then the table count and
             // the first table's th length
             _ => {
-                let mut o = 4 * 8 + 7 * 8 + 4;
+                let mut o = 4 * 8 + 8 * 8 + 4;
                 for el in [8, 8, 4, 8, 4, 4] {
                     let len = u64::from_le_bytes(b[o..o + 8].try_into().unwrap()) as usize;
                     o += 8 + len * el;
