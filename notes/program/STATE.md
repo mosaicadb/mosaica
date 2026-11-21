@@ -63,3 +63,11 @@ then free for this program's native and timing work.
 One thread, nice 10, pinned to the core the brief names, under 100 MB resident per job, no command that walks the
 disk, no pass over a large data file, no builds, no git changes. Four datasets of another session's timings were
 re-run on 21 November because agents of this program broke looser versions of these rules.
+
+## Notes to fix at the next pass
+
+- Chapter 5, section 5.13 calls spilled copies "a design never run"; `bench/REPORT.md` records a SOAR second
+  assignment that was run (12 to 15% fewer items for the same recall, no faster, because the copies are scattered
+  rows). Reported by the session that added the SOAR and SPANN references.
+- Chapter 2, Editor's query 18: whether κ_k − k is least at k = 1 for every k (computed to 10⁷, not proved).
+- Chapter 6, section 6.2's summary of chapter 2's query 8 is out of date.
