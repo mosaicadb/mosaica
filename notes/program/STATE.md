@@ -125,3 +125,16 @@ Files: /home/joe/code/vexact-data/suite/rho-dump/; scripts under bench/suite/not
 
 Owed: the theorist's checked write-up (A4) to that session; a derivation of the slope; what breaks the rule under
 filters and for clusters smaller than the sample.
+
+## The level width under filters (visit-order session, 21 November; [measured, by that session])
+
+- With heights from the visible rows the width holds under random-25 and region-25 but reads 1.4 to 2.5 times the plain
+  rule's rows under an in-cluster bottom quarter, and about twice under a top quarter on LAION. The scatter's tail is
+  heavier than Laplace (99.9th percentile 4.6 to 7.5) and widens with height.
+- With the height and f taken from the whole cluster (the library's μ_c and 16-direction σ_c) and tau from the visible
+  sample, the PI's predictions held: bottom quarter becomes the plain rule (rows 2,160 / 2,321 / 2,844 against plain
+  2,159 / 2,302 / 2,773), top quarter loses its over-coverage, random and region sets are within noise. Unfiltered,
+  iNaturalist gains (0.951 kept at ψ0 = 2, was 0.918) and LAION loses 2 to 3 points and 3 to 17% rows, presumably the
+  16-direction σ's error.
+- Across 18 cases the rule keeps 0.93 to 0.99 at ψ0 = 2, at rows within 0 to 5% of the best rule for each case, except
+  LAION at 8 groups unfiltered (+17%).

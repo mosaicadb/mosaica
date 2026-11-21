@@ -1,0 +1,23 @@
+n = 256; (a) y = e_a + e_b
+  a,b = 0,1  s = 1  depth 1: supports of E over all sign choices {(np.int64(0), np.int64(1))}; A = 1.414214, tan = 1.0; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 0,1  s = 1  depth 2: supports of E over all sign choices {(np.int64(0), np.int64(1))}; A = 0.471405, tan = 0.333333; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 0,1  s = 1  depth 3: supports of E over all sign choices {(np.int64(0), np.int64(1))}; A = 0.282843, tan = 0.2; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+    query on the error's coordinates, 4000 draws: error/sd takes values [-15.969  15.969]; Pr[error > 7.8 sd] = 0.509, Pr[error < -7.8 sd] = 0.491; sqrt(n-1) = 15.969
+    query e_s alone: |error|/sd values [0.]
+  a,b = 1,2  s = 3  depth 1: supports of E over all sign choices {(np.int64(0), np.int64(3))}; A = 1.414214, tan = 1.0; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 1,2  s = 3  depth 2: supports of E over all sign choices {(np.int64(0), np.int64(3))}; A = 0.471405, tan = 0.333333; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 1,2  s = 3  depth 3: supports of E over all sign choices {(np.int64(0), np.int64(3))}; A = 0.282843, tan = 0.2; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+    query on the error's coordinates, 4000 draws: error/sd takes values [-15.969   0.     15.969]; Pr[error > 7.8 sd] = 0.256, Pr[error < -7.8 sd] = 0.252; sqrt(n-1) = 15.969
+    query e_s alone: |error|/sd values [11.292]
+  a,b = 5,200  s = 205  depth 1: supports of E over all sign choices {(np.int64(0), np.int64(205))}; A = 1.414214, tan = 1.0; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 5,200  s = 205  depth 2: supports of E over all sign choices {(np.int64(0), np.int64(205))}; A = 0.471405, tan = 0.333333; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+  a,b = 5,200  s = 205  depth 3: supports of E over all sign choices {(np.int64(0), np.int64(205))}; A = 0.282843, tan = 0.2; E = (A/|.|)(d0 e0 - da db ds es) in every case: True
+    query on the error's coordinates, 4000 draws: error/sd takes values [-15.969   0.     15.969]; Pr[error > 7.8 sd] = 0.261, Pr[error < -7.8 sd] = 0.243; sqrt(n-1) = 15.969
+    query e_s alone: |error|/sd values [11.292]
+(b) y with k random non-zero coordinates on random positions; depth 2
+  k = 2: |xor-span| = 4; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 10.26, max 10.26, Pr[|error| > 7.8 sd] = 1.0000 (law: 2.5e-19 per side at the built budget)
+  k = 3: |xor-span| = 8; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 7.88, max 7.88, Pr[|error| > 7.8 sd] = 1.0000 (law: 2.5e-19 per side at the built budget)
+  k = 4: |xor-span| = 16; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 3.77, max 8.04, Pr[|error| > 7.8 sd] = 0.0599 (law: 2.5e-19 per side at the built budget)
+  k = 5: |xor-span| = 32; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 2.45, max 8.20, Pr[|error| > 7.8 sd] = 0.0008 (law: 2.5e-19 per side at the built budget)
+  k = 6: |xor-span| = 64; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 1.93, max 6.35, Pr[|error| > 7.8 sd] = 0.0000 (law: 2.5e-19 per side at the built budget)
+  k = 7: |xor-span| = 128; largest share of |E|^2 outside the span = 0.00e+00; error/sd: rms 1.38, max 5.45, Pr[|error| > 7.8 sd] = 0.0000 (law: 2.5e-19 per side at the built budget)
