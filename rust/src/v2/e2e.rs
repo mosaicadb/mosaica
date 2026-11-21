@@ -392,7 +392,7 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let variants = [
         ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, u32::MAX, 2),
         ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ..BuildOptions::default() }, 0b10, 2),
-        ("3 levels, 4/16/32", BuildOptions { dlv: Some(vec![4, 16, 32]), ..BuildOptions::default() }, u32::MAX, 3),
+        ("3 levels, 4/16/28", BuildOptions { dlv: Some(vec![4, 16, 28]), ..BuildOptions::default() }, u32::MAX, 3),
         ("6 levels, none deciding", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0, 6),
         ("6 levels, deciding at the first and last", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0b100001, 6),
     ];
