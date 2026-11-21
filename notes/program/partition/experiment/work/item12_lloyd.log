@@ -1,0 +1,9 @@
+[      3s] pass 1 {'pass': 1, 'moved_fit': 0.043255826363042114, 'moved_all': 0.04412206103051526, 'K': 200, 'mean_key_fit_sample': 0.9184896108214347}
+[     26s] A1-lloyd1 coding done {'Si_S1a_mean': 0.2072, 'Si_S1a_rms': 0.2213, 'Si_S1d_4': 0.1474, 'Si_S1d_8': 0.1235, 'Si_S1d_16': 0.0957, 'Si_S1d_32': 0.0664, 'Si_S1b_0.03': 81.8944, 'Si_S1b_0.06': 36.7026, 'Si_S1b_0.12': 10.487}
+[     38s] A1-lloyd1 structure done; violations 0 0
+[     39s] pass 2 {'pass': 2, 'moved_fit': 0.031489707981483706, 'moved_all': 0.031945972986493244, 'K': 200, 'mean_key_fit_sample': 0.9186389561021706}
+[     58s] A1-lloyd2 coding done {'Si_S1a_mean': 0.2065, 'Si_S1a_rms': 0.2205, 'Si_S1d_4': 0.1468, 'Si_S1d_8': 0.123, 'Si_S1d_16': 0.0952, 'Si_S1d_32': 0.0661, 'Si_S1b_0.03': 81.5252, 'Si_S1b_0.06': 36.4248, 'Si_S1b_0.12': 10.3399}
+[     70s] A1-lloyd2 structure done; violations 0 0
+[     70s] pass 3 {'pass': 3, 'moved_fit': 0.026813943250490253, 'moved_all': 0.027368684342171084, 'K': 200, 'mean_key_fit_sample': 0.918781579824665}
+[     71s] pass 4 {'pass': 4, 'moved_fit': 0.022885233654833848, 'moved_all': 0.023366683341670837, 'K': 200, 'mean_key_fit_sample': 0.9189076137990023}
+[     71s] pass 5 {'pass': 5, 'moved_fit': 0.01998372487026587, 'moved_all': 0.020475237618809403, 'K': 200, 'mean_key_fit_sample': 0.9190224484152328}

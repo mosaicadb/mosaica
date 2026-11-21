@@ -1,0 +1,36 @@
+records 19473729 kept (index plan) 9736897
+queries [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19] sizes [0 1 2 3 4 5 6]
+levels (array([0, 1, 2, 3]), array([3816651, 3173871, 1868363,  878012]))
+sd check: max rel diff 5.267137923165344e-07
+level 0 item: n 1527489; coded sets (array([1]), array([1527489]))
+   mean share [1. 0. 0. 0.]  median [1. 0. 0. 0.]  p10 [1. 0. 0. 0.]  p90 [1. 0. 0. 0.]
+   mean: 9.33*sd 0.01584  uncoded CS 0.04266  other det 0.00004  |est-t| median 0.02793  |truth-t| median 0.02797
+   z=(truth-est)/sd: std 2.024 kurt 3.744 max|z| 21.29
+level 0 text: n 2289162; coded sets (array([1]), array([2289162]))
+   mean share [1. 0. 0. 0.]  median [1. 0. 0. 0.]  p10 [1. 0. 0. 0.]  p90 [1. 0. 0. 0.]
+   mean: 9.33*sd 0.01969  uncoded CS 0.07449  other det 0.00004  |est-t| median 0.03910  |truth-t| median 0.03922
+   z=(truth-est)/sd: std 2.525 kurt 3.802 max|z| 16.76
+level 1 item: n 1229526; coded sets (array([15]), array([1229526]))
+   mean share [0.336 0.398 0.26  0.005]  median [0.305 0.4   0.254 0.005]  p10 [0.176 0.266 0.138 0.002]  p90 [0.548 0.528 0.388 0.009]
+   mean: 9.33*sd 0.02707  uncoded CS 0.00000  other det 0.00008  |est-t| median 0.02175  |truth-t| median 0.02170
+   z=(truth-est)/sd: std 0.975 kurt 3.004 max|z| 4.93
+level 1 text: n 1944345; coded sets (array([15]), array([1944345]))
+   mean share [0.221 0.419 0.344 0.016]  median [0.193 0.417 0.342 0.015]  p10 [0.104 0.297 0.218 0.008]  p90 [0.377 0.545 0.474 0.025]
+   mean: 9.33*sd 0.04269  uncoded CS 0.00000  other det 0.00011  |est-t| median 0.03216  |truth-t| median 0.03204
+   z=(truth-est)/sd: std 0.976 kurt 2.991 max|z| 4.50
+level 2 item: n 696541; coded sets (array([15]), array([696541]))
+   mean share [0.371 0.227 0.385 0.017]  median [0.362 0.176 0.385 0.015]  p10 [0.181 0.102 0.22  0.008]  p90 [0.573 0.492 0.547 0.027]
+   mean: 9.33*sd 0.01148  uncoded CS 0.00000  other det 0.00005  |est-t| median 0.01179  |truth-t| median 0.01179
+   z=(truth-est)/sd: std 0.971 kurt 2.995 max|z| 4.79
+level 2 text: n 1171822; coded sets (array([15]), array([1171822]))
+   mean share [0.216 0.257 0.481 0.046]  median [0.2   0.182 0.495 0.044]  p10 [0.066 0.105 0.306 0.025]  p90 [0.378 0.553 0.635 0.071]
+   mean: 9.33*sd 0.01878  uncoded CS 0.00000  other det 0.00007  |est-t| median 0.01817  |truth-t| median 0.01817
+   z=(truth-est)/sd: std 0.974 kurt 2.991 max|z| 5.15
+level 3 item: n 313977; coded sets (array([15]), array([313977]))
+   mean share [0.147 0.173 0.622 0.058]  median [0.126 0.101 0.632 0.054]  p10 [0.028 0.047 0.467 0.034]  p90 [0.296 0.383 0.764 0.087]
+   mean: 9.33*sd 0.00437  uncoded CS 0.00000  other det 0.00006  |est-t| median 0.00524  |truth-t| median 0.00523
+   z=(truth-est)/sd: std 0.976 kurt 2.984 max|z| 4.48
+level 3 text: n 564035; coded sets (array([15]), array([564035]))
+   mean share [0.068 0.149 0.64  0.144]  median [0.053 0.099 0.656 0.133]  p10 [0.007 0.04  0.489 0.087]  p90 [0.147 0.308 0.765 0.216]
+   mean: 9.33*sd 0.00787  uncoded CS 0.00000  other det 0.00007  |est-t| median 0.00855  |truth-t| median 0.00855
+   z=(truth-est)/sd: std 0.979 kurt 2.987 max|z| 5.54

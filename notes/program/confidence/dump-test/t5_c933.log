@@ -1,0 +1,19 @@
+constants [9.330163258547264, 9.330163258547264, 9.330163258547264, 9.330163258547264]; bits added on entering levels 1-3: [328.0, 541.6, 808.8]
+item: w-bar [0.714, 0.3314, 0.1395, 0.0532]; mean sum_j n_j cos^2 phi_j by level [81.6, 272.1, 425.1, 532.5]
+   step 0->1: 328 bits / log2(0.7140/0.3314) = 296 bits per halving; sum n cos^2 phi at level 1 = 272; ratio 1.09
+   step 1->2: 542 bits / log2(0.3314/0.1395) = 434 bits per halving; sum n cos^2 phi at level 2 = 425; ratio 1.02
+   step 2->3: 809 bits / log2(0.1395/0.0532) = 582 bits per halving; sum n cos^2 phi at level 3 = 533; ratio 1.09
+   rms tan phi by level (rows) and block (columns):
+     L0 0.4245  nan  nan  nan
+     L1 0.4255  0.7643  1.4986  3.0481
+     L2 0.1960  0.2471  0.7620  2.2307
+     L3 0.0476  0.0785  0.3702  1.6177
+text: w-bar [0.7636, 0.3466, 0.1507, 0.0634]; mean sum_j n_j cos^2 phi_j by level [81.5, 272.0, 424.3, 528.7]
+   step 0->1: 328 bits / log2(0.7636/0.3466) = 288 bits per halving; sum n cos^2 phi at level 1 = 272; ratio 1.06
+   step 1->2: 542 bits / log2(0.3466/0.1507) = 451 bits per halving; sum n cos^2 phi at level 2 = 424; ratio 1.06
+   step 2->3: 809 bits / log2(0.1507/0.0634) = 647 bits per halving; sum n cos^2 phi at level 3 = 529; ratio 1.22
+   rms tan phi by level (rows) and block (columns):
+     L0 0.4263  nan  nan  nan
+     L1 0.4269  0.7642  1.4986  3.0478
+     L2 0.1890  0.2648  0.7622  2.2309
+     L3 0.0451  0.0821  0.3704  1.6958

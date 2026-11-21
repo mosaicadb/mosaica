@@ -1,0 +1,83 @@
+constants [6.724, 7.639, 7.639, 7.639]; model eta = kappa F_g, mean F = 0.1577; model w_l (built, c = 8) = [0.8271, 0.6734, 0.5738, 0.5013, 0.4005, 0.3322, 0.2456, 0.116, 0.0386, 0.0169]
+measured eta = sum_j R_j at 56 B: mean over entrants, item 0.0821, text 0.1234; model's equivalent w_32 F = 0.0524
+records that the law (true margin) would keep but that have no record at the next level: 9512 of 5364191
+
+item 1% (kappa 1.0): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins             9.0 +     8.5 =    17.4   entrants 56 B 0.068, full 0.0021
+  X1 model, measured margins             4.1 +     5.5 =     9.6   entrants 56 B 0.034, full 0.0016
+  X2 index det, model abs widths         6.4 +     6.5 =    12.9   entrants 56 B 0.070
+  X3a model w_l/w_32 x own eta           6.4 +     9.0 =    15.4
+  X3 measured widths, true margins       6.4 +     7.7 =    14.1   (without uncoded CS 6.1, without c sd 3.2, without other det 7.7)
+  X4 index (estimate)                    6.4 +     7.7 =    14.1   [full-read check vs run: largest diff 0]
+
+item 10% (kappa 1.0): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            19.7 +    47.9 =    67.5   entrants 56 B 0.288, full 0.0138
+  X1 model, measured margins            20.9 +    25.8 =    46.7   entrants 56 B 0.255, full 0.0054
+  X2 index det, model abs widths        27.4 +    31.8 =    59.2   entrants 56 B 0.470
+  X3a model w_l/w_32 x own eta          27.4 +    47.8 =    75.2
+  X3 measured widths, true margins      27.4 +    40.7 =    68.1   (without uncoded CS 30.5, without c sd 20.5, without other det 40.5)
+  X4 index (estimate)                   27.4 +    40.8 =    68.2   [full-read check vs run: largest diff 0]
+
+item 30% (kappa 1.0): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            26.4 +    90.4 =   116.8   entrants 56 B 0.483, full 0.0274
+  X1 model, measured margins            30.1 +   155.6 =   185.7   entrants 56 B 0.659, full 0.0514
+  X2 index det, model abs widths        34.0 +   160.5 =   194.5   entrants 56 B 0.830
+  X3a model w_l/w_32 x own eta          34.0 +   215.2 =   249.2
+  X3 measured widths, true margins      34.0 +   192.1 =   226.1   (without uncoded CS 159.0, without c sd 50.8, without other det 190.4)
+  X4 index (estimate)                   34.0 +   192.0 =   226.0   [full-read check vs run: largest diff 0]
+
+item 50% (kappa 1.0): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            28.1 +   102.7 =   130.8   entrants 56 B 0.536, full 0.0313
+  X1 model, measured margins            30.8 +   188.7 =   219.5   entrants 56 B 0.700, full 0.0658
+  X2 index det, model abs widths        34.2 +   193.0 =   227.2   entrants 56 B 0.849
+  X3a model w_l/w_32 x own eta          34.2 +   256.9 =   291.0
+  X3 measured widths, true margins      34.2 +   229.9 =   264.1   (without uncoded CS 195.0, without c sd 54.2, without other det 227.7)
+  X4 index (estimate)                   34.2 +   229.5 =   263.7   [full-read check vs run: largest diff 1]
+
+item 75% (kappa 1.0): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            25.4 +    83.1 =   108.5   entrants 56 B 0.452, full 0.0250
+  X1 model, measured margins            29.9 +   125.7 =   155.6   entrants 56 B 0.637, full 0.0382
+  X2 index det, model abs widths        33.9 +   131.3 =   165.2   entrants 56 B 0.831
+  X3a model w_l/w_32 x own eta          33.9 +   178.6 =   212.5
+  X3 measured widths, true margins      33.9 +   158.2 =   192.1   (without uncoded CS 126.4, without c sd 48.8, without other det 156.8)
+  X4 index (estimate)                   33.9 +   158.4 =   192.3   [full-read check vs run: largest diff 1]
+
+text 1% (kappa 1.742): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            28.7 +    42.5 =    71.3   entrants 56 B 0.480, full 0.0063
+  X1 model, measured margins            22.3 +    30.5 =    52.8   entrants 56 B 0.286, full 0.0056
+  X2 index det, model abs widths        24.4 +    34.5 =    58.9   entrants 56 B 0.428
+  X3a model w_l/w_32 x own eta          24.4 +    46.0 =    70.4
+  X3 measured widths, true margins      24.4 +    44.7 =    69.1   (without uncoded CS 30.4, without c sd 21.7, without other det 44.5)
+  X4 index (estimate)                   24.4 +    44.7 =    69.1   [full-read check vs run: largest diff 0]
+
+text 10% (kappa 1.742): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            33.8 +   140.3 =   174.1   entrants 56 B 0.756, full 0.0409
+  X1 model, measured margins            31.8 +   105.0 =   136.8   entrants 56 B 0.651, full 0.0284
+  X2 index det, model abs widths        34.8 +   109.4 =   144.2   entrants 56 B 0.821
+  X3a model w_l/w_32 x own eta          34.8 +   142.1 =   177.0
+  X3 measured widths, true margins      34.8 +   139.3 =   174.2   (without uncoded CS 106.3, without c sd 46.1, without other det 138.6)
+  X4 index (estimate)                   34.8 +   139.7 =   174.6   [full-read check vs run: largest diff 0]
+
+text 30% (kappa 1.742): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            35.8 +   234.6 =   270.3   entrants 56 B 0.883, full 0.0807
+  X1 model, measured margins            35.2 +   251.7 =   287.0   entrants 56 B 0.861, full 0.0904
+  X2 index det, model abs widths        36.8 +   254.9 =   291.6   entrants 56 B 0.968
+  X3a model w_l/w_32 x own eta          36.8 +   312.4 =   349.2
+  X3 measured widths, true margins      36.8 +   311.1 =   347.8   (without uncoded CS 261.5, without c sd 64.1, without other det 308.7)
+  X4 index (estimate)                   36.8 +   311.0 =   347.8   [full-read check vs run: largest diff 0]
+
+text 50% (kappa 1.742): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            36.1 +   261.4 =   297.6   entrants 56 B 0.910, full 0.0925
+  X1 model, measured margins            35.4 +   291.0 =   326.4   entrants 56 B 0.882, full 0.1091
+  X2 index det, model abs widths        36.7 +   293.4 =   330.0   entrants 56 B 0.964
+  X3a model w_l/w_32 x own eta          36.7 +   349.1 =   385.8
+  X3 measured widths, true margins      36.7 +   349.3 =   386.0   (without uncoded CS 297.0, without c sd 66.3, without other det 346.8)
+  X4 index (estimate)                   36.7 +   348.9 =   385.5   [full-read check vs run: largest diff 0]
+
+text 75% (kappa 1.742): bytes per item of N, deterministic + randomised = total
+  X0 model, Gaussian margins            35.5 +   218.7 =   254.3   entrants 56 B 0.865, full 0.0738
+  X1 model, measured margins            35.0 +   224.6 =   259.6   entrants 56 B 0.850, full 0.0766
+  X2 index det, model abs widths        36.4 +   227.6 =   264.1   entrants 56 B 0.953
+  X3a model w_l/w_32 x own eta          36.4 +   270.5 =   306.9
+  X3 measured widths, true margins      36.4 +   266.9 =   303.3   (without uncoded CS 216.0, without c sd 64.8, without other det 264.9)
+  X4 index (estimate)                   36.4 +   266.8 =   303.2   [full-read check vs run: largest diff 0]

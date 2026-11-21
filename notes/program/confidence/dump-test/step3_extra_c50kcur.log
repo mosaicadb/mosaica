@@ -1,0 +1,20 @@
+constants [6.724, 7.639, 7.639, 7.639]
+(a) kappa_eff: the model's eta scale that reproduces the index's total bytes (X4) on the measured margins; then the same model on Gaussian margins
+  item 10%: index 68.2, model X0 67.5; kappa_eff 1.391 (model's 1.0); Gaussian margins at kappa_eff 92.1: widths first x1.36, then margins x0.74 | margins first x0.69, then the rest x1.46
+  item 30%: index 226.0, model X0 116.8; kappa_eff 1.304 (model's 1.0); Gaussian margins at kappa_eff 145.5: widths first x1.24, then margins x1.55 | margins first x1.59, then the rest x1.22
+  item 50%: index 263.7, model X0 130.8; kappa_eff 1.287 (model's 1.0); Gaussian margins at kappa_eff 160.3: widths first x1.23, then margins x1.65 | margins first x1.68, then the rest x1.20
+  item 75%: index 192.3, model X0 108.5; kappa_eff 1.320 (model's 1.0); Gaussian margins at kappa_eff 137.0: widths first x1.26, then margins x1.40 | margins first x1.43, then the rest x1.24
+  text 10%: index 174.6, model X0 174.1; kappa_eff 2.371 (model's 1.742); Gaussian margins at kappa_eff 218.8: widths first x1.26, then margins x0.80 | margins first x0.79, then the rest x1.28
+  text 30%: index 347.8, model X0 270.3; kappa_eff 2.283 (model's 1.742); Gaussian margins at kappa_eff 327.1: widths first x1.21, then margins x1.06 | margins first x1.06, then the rest x1.21
+  text 50%: index 385.5, model X0 297.6; kappa_eff 2.203 (model's 1.742); Gaussian margins at kappa_eff 350.8: widths first x1.18, then margins x1.10 | margins first x1.10, then the rest x1.18
+  text 75%: index 303.2, model X0 254.3; kappa_eff 2.167 (model's 1.742); Gaussian margins at kappa_eff 297.0: widths first x1.17, then margins x1.02 | margins first x1.02, then the rest x1.17
+
+(b) eta = sum_j R_j at 56 B, entrants: mean (median) by answer size; model w_32 * F mean 0.0524
+  item: 0.01% 0.1029 (0.0983)  0.10% 0.0964 (0.0903)  1.00% 0.0941 (0.0881)  10.00% 0.0904 (0.0878)  30.00% 0.0798 (0.0771)  50.00% 0.0796 (0.0769)  75.00% 0.0805 (0.0777)
+  text: 0.01% 0.1443 (0.1384)  0.10% 0.1407 (0.1354)  1.00% 0.1353 (0.1318)  10.00% 0.1235 (0.1206)  30.00% 0.1184 (0.1154)  50.00% 0.1184 (0.1152)  75.00% 0.1183 (0.1151)
+
+(c) mean measured half-width of entrants against the model's absolute width w_l * mean F (kappa 1), and the normalised w = h / eta against w_l / w_32
+  item 10%: L0: h 0.05945 / model 0.03875 = 1.53; w 0.6572 / 0.7394 = 0.89 | L1: h 0.02600 / model 0.01830 = 1.42; w 0.2718 / 0.3491 = 0.78 | L2: h 0.01103 / model 0.00608 = 1.81; w 0.1106 / 0.1161 = 0.95 | L3: h 0.00395 / model 0.00267 = 1.48; w 0.0389 / 0.0510 = 0.76
+  item 50%: L0: h 0.05258 / model 0.03875 = 1.36; w 0.6620 / 0.7394 = 0.90 | L1: h 0.02149 / model 0.01830 = 1.17; w 0.2714 / 0.3491 = 0.78 | L2: h 0.00925 / model 0.00608 = 1.52; w 0.1147 / 0.1161 = 0.99 | L3: h 0.00359 / model 0.00267 = 1.35; w 0.0442 / 0.0510 = 0.87
+  text 10%: L0: h 0.08869 / model 0.06750 = 1.31; w 0.7182 / 0.7394 = 0.97 | L1: h 0.03647 / model 0.03187 = 1.14; w 0.2841 / 0.3491 = 0.81 | L2: h 0.01699 / model 0.01060 = 1.60; w 0.1241 / 0.1161 = 1.07 | L3: h 0.00722 / model 0.00465 = 1.55; w 0.0519 / 0.0510 = 1.02
+  text 50%: L0: h 0.08498 / model 0.06750 = 1.26; w 0.7181 / 0.7394 = 0.97 | L1: h 0.03356 / model 0.03187 = 1.05; w 0.2832 / 0.3491 = 0.81 | L2: h 0.01484 / model 0.01060 = 1.40; w 0.1232 / 0.1161 = 1.06 | L3: h 0.00632 / model 0.00465 = 1.36; w 0.0521 / 0.0510 = 1.02

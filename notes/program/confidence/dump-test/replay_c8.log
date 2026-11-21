@@ -1,0 +1,24 @@
+item level 0: n 1527489  w: geometric mean 0.6867, cv 0.079, sd ln 0.081 | half survive at u = 0.6872 | 90%/10% at 0.5831/0.8022
+item level 1: n 1199474  w: geometric mean 0.2843, cv 0.083, sd ln 0.081 | half survive at u = 0.2819 | 90%/10% at 0.2288/0.3466
+item level 2: n 609909  w: geometric mean 0.1198, cv 0.103, sd ln 0.101 | half survive at u = 0.1190 | 90%/10% at 0.0947/0.1467
+item level 3: n 270625  w: geometric mean 0.0457, cv 0.141, sd ln 0.146 | half survive at u = 0.0454 | 90%/10% at 0.0347/0.0576
+text level 0: n 2289162  w: geometric mean 0.7408, cv 0.063, sd ln 0.064 | half survive at u = 0.7418 | 90%/10% at 0.6509/0.8363
+text level 1: n 1914298  w: geometric mean 0.2974, cv 0.075, sd ln 0.074 | half survive at u = 0.2968 | 90%/10% at 0.2387/0.3632
+text level 2: n 1035505  w: geometric mean 0.1293, cv 0.092, sd ln 0.091 | half survive at u = 0.1281 | 90%/10% at 0.1031/0.1591
+text level 3: n 487627  w: geometric mean 0.0544, cv 0.113, sd ln 0.115 | half survive at u = 0.0540 | 90%/10% at 0.0421/0.0666
+T3: predicted / actual pooled 1.001; per (query, size) rms relative error 0.049, worst 0.180
+T3 by class and answer size: actual B/item of N (randomised levels + full vectors), predicted / actual, rms rel. error over the 10 queries
+  item   0.01%: actual    0.69 B/item, predicted/actual 1.052, rms 0.088
+  item   0.10%: actual    2.17 B/item, predicted/actual 1.008, rms 0.048
+  item   1.00%: actual    7.99 B/item, predicted/actual 1.036, rms 0.073
+  item  10.00%: actual   42.28 B/item, predicted/actual 1.038, rms 0.080
+  item  30.00%: actual  198.94 B/item, predicted/actual 0.996, rms 0.037
+  item  50.00%: actual  237.86 B/item, predicted/actual 0.996, rms 0.038
+  item  75.00%: actual  163.91 B/item, predicted/actual 1.000, rms 0.034
+  text   0.01%: actual   12.10 B/item, predicted/actual 0.992, rms 0.041
+  text   0.10%: actual   19.01 B/item, predicted/actual 0.993, rms 0.032
+  text   1.00%: actual   46.31 B/item, predicted/actual 0.994, rms 0.031
+  text  10.00%: actual  144.73 B/item, predicted/actual 1.000, rms 0.030
+  text  30.00%: actual  321.93 B/item, predicted/actual 1.001, rms 0.029
+  text  50.00%: actual  361.51 B/item, predicted/actual 1.000, rms 0.029
+  text  75.00%: actual  276.27 B/item, predicted/actual 1.003, rms 0.029

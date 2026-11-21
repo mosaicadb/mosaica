@@ -1,0 +1,5 @@
+records 9736897 levels [3816651 3173871 1868363  878012] deeper records without their previous level: 0
+queries [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] sizes [0, 1, 2, 3, 4, 5, 6]
+level-0 records per (query class, size):
+   item [5629, 12335, 34588, 232475, 410806, 420088, 411568]
+   text [105526, 136985, 211978, 406451, 479108, 477251, 471863]

@@ -1,0 +1,14 @@
+criterion 1 (sd of ln w <= 0.3) and criterion 2 (half-survival within 10% of w-bar; 10-90 span <= 2x predicted with T1's spread)
+  item level 0   sd ln w 0.076 [ok] | u50 / w-bar 0.995 [ok] | ln 10-90 span measured 0.304, predicted 0.276, with T1 spread 0.338, ratio 0.90 [ok]
+  item level 1   sd ln w 0.081 [ok] | u50 / w-bar 0.991 [ok] | ln 10-90 span measured 0.391, predicted 0.276, with T1 spread 0.346, ratio 1.13 [ok]
+  item level 2   sd ln w 0.101 [ok] | u50 / w-bar 0.994 [ok] | ln 10-90 span measured 0.393, predicted 0.276, with T1 spread 0.379, ratio 1.04 [ok]
+  item level 3   sd ln w 0.146 [ok] | u50 / w-bar 0.996 [ok] | ln 10-90 span measured 0.480, predicted 0.276, with T1 spread 0.466, ratio 1.03 [ok]
+  text level 0   sd ln w 0.061 [ok] | u50 / w-bar 1.005 [ok] | ln 10-90 span measured 0.263, predicted 0.276, with T1 spread 0.318, ratio 0.83 [ok]
+  text level 1   sd ln w 0.074 [ok] | u50 / w-bar 0.999 [ok] | ln 10-90 span measured 0.371, predicted 0.276, with T1 spread 0.336, ratio 1.10 [ok]
+  text level 2   sd ln w 0.091 [ok] | u50 / w-bar 0.991 [ok] | ln 10-90 span measured 0.407, predicted 0.276, with T1 spread 0.362, ratio 1.12 [ok]
+  text level 3   sd ln w 0.116 [ok] | u50 / w-bar 0.992 [ok] | ln 10-90 span measured 0.417, predicted 0.276, with T1 spread 0.405, ratio 1.03 [ok]
+criterion 2, last part: survival of item and text entrants at the same u (bins with >= 200 entrants in both classes)
+  level 0: largest |S_item - S_text| at the same u = 28.3 points (u = 0.7390) [REFUTES]; w-bar item 0.7140, text 0.7636; at the same u / w-bar the largest difference is 6.1 points
+  level 1: largest |S_item - S_text| at the same u = 14.2 points (u = 0.3318) [REFUTES]; w-bar item 0.3314, text 0.3466; at the same u / w-bar the largest difference is 2.5 points
+  level 2: largest |S_item - S_text| at the same u = 20.2 points (u = 0.1490) [REFUTES]; w-bar item 0.1395, text 0.1507; at the same u / w-bar the largest difference is 2.4 points
+  level 3: largest |S_item - S_text| at the same u = 39.5 points (u = 0.0586) [REFUTES]; w-bar item 0.0532, text 0.0634; at the same u / w-bar the largest difference is 3.5 points

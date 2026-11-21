@@ -1,0 +1,93 @@
+constants [6.724, 7.639, 7.639, 7.639]
+
+item 10%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  232475 (0.470) |   9752 | 107372 |  115351 | 1.05/1.28/1.57 | 0.19/0.67/0.95 |      0 (0.000) | 0.00 |   4765 |   4444 | 0.212 / 0.787 / 0.0007 | 0.05945 | 23248 per query | 23248 per query
+  1 |  115351 (0.233) |  12102 |  74018 |   29231 | 1.22/1.87/2.41 | 0.12/0.56/0.95 |   4444 (0.039) | 0.37 |   1757 |   1940 | 0.997 / 0.000 / 0.0034 | 0.02600 | 46140 per query | 34605 per query
+  2 |   29231 (0.059) |   6277 |  12472 |   10482 | 1.16/1.78/2.50 | 0.10/0.51/0.93 |   1940 (0.066) | 0.27 |    487 |    565 | 0.994 / 0.000 / 0.0057 | 0.01103 | 11692 per query | 11692 per query
+  3 |   10482 (0.021) |   3010 |   3848 |    3624 | 1.19/1.92/2.85 | 0.09/0.50/0.92 |    565 (0.054) | 0.12 |    181 |    180 | 0.983 / 0.000 / 0.0172 | 0.00395 | 4193 per query | 3473 per query
+  full vectors: 3624 (0.0073 of N per query)
+
+item 30%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  410806 (0.830) |  15996 |  54748 |  340062 | 1.04/1.26/1.62 | 0.07/0.37/0.82 |      0 (0.000) | 0.00 |   3624 |   3957 | 0.209 / 0.791 / 0.0008 | 0.05277 | 41081 per query | 41081 per query
+  1 |  340062 (0.687) |  32383 | 125566 |  182113 | 1.08/1.58/2.25 | 0.09/0.47/0.90 |   3957 (0.012) | 0.33 |   8151 |   7729 | 0.996 / 0.000 / 0.0035 | 0.02167 | 136025 per query | 102019 per query
+  2 |  182113 (0.368) |  31585 |  69527 |   81001 | 1.11/1.66/2.35 | 0.10/0.49/0.92 |   7729 (0.042) | 1.06 |   4078 |   3966 | 0.994 / 0.000 / 0.0056 | 0.00939 | 72845 per query | 72845 per query
+  3 |   81001 (0.164) |  20117 |  29334 |   31550 | 1.15/1.80/2.63 | 0.10/0.50/0.92 |   3966 (0.049) | 0.81 |   1629 |   1584 | 0.984 / 0.000 / 0.0157 | 0.00364 | 32400 per query | 31687 per query
+  full vectors: 31550 (0.0637 of N per query)
+
+item 50%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  420088 (0.849) |  24643 |  33695 |  361750 | 1.04/1.27/1.65 | 0.06/0.32/0.78 |      0 (0.000) | 0.00 |   2919 |   3136 | 0.209 / 0.790 / 0.0008 | 0.05258 | 42009 per query | 42009 per query
+  1 |  361750 (0.731) |  71247 |  73944 |  216559 | 1.06/1.51/2.20 | 0.09/0.45/0.88 |   3136 (0.009) | 0.26 |   9006 |   8139 | 0.996 / 0.000 / 0.0035 | 0.02149 | 144700 per query | 108525 per query
+  2 |  216559 (0.437) |  58917 |  55773 |  101869 | 1.11/1.63/2.33 | 0.10/0.49/0.91 |   8139 (0.038) | 1.11 |   4908 |   4743 | 0.994 / 0.000 / 0.0056 | 0.00925 | 86624 per query | 86624 per query
+  3 |  101869 (0.206) |  31299 |  30576 |   39994 | 1.14/1.79/2.60 | 0.10/0.49/0.91 |   4743 (0.047) | 0.97 |   2032 |   1922 | 0.984 / 0.000 / 0.0155 | 0.00359 | 40748 per query | 40008 per query
+  full vectors: 39994 (0.0808 of N per query)
+
+item 75%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  411568 (0.831) |  59347 |  23092 |  329129 | 1.03/1.25/1.60 | 0.09/0.45/0.86 |      0 (0.000) | 0.00 |   4391 |   4856 | 0.211 / 0.788 / 0.0008 | 0.05305 | 41157 per query | 41157 per query
+  1 |  329129 (0.665) | 147866 |  31787 |  149476 | 1.10/1.62/2.27 | 0.10/0.51/0.92 |   4856 (0.015) | 0.40 |   7704 |   7707 | 0.997 / 0.000 / 0.0035 | 0.02211 | 131652 per query | 98739 per query
+  2 |  149476 (0.302) |  63164 |  24042 |   62270 | 1.13/1.70/2.39 | 0.10/0.50/0.92 |   7707 (0.052) | 1.05 |   3062 |   3164 | 0.994 / 0.000 / 0.0056 | 0.00959 | 59790 per query | 59790 per query
+  3 |   62270 (0.126) |  23482 |  15127 |   23661 | 1.16/1.83/2.65 | 0.10/0.51/0.92 |   3164 (0.051) | 0.65 |   1148 |   1143 | 0.984 / 0.000 / 0.0158 | 0.00367 | 24908 per query | 23961 per query
+  full vectors: 23661 (0.0478 of N per query)
+
+text 10%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  406451 (0.821) |   3943 | 101321 |  301187 | 1.03/1.22/1.48 | 0.10/0.50/0.89 |      0 (0.000) | 0.00 |   5607 |   5884 | 0.160 / 0.839 / 0.0005 | 0.08869 | 40645 per query | 40645 per query
+  1 |  301187 (0.608) |  14904 | 168605 |  117678 | 1.14/1.74/2.39 | 0.10/0.51/0.92 |   5884 (0.020) | 0.49 |   6129 |   6258 | 0.997 / 0.000 / 0.0031 | 0.03647 | 120475 per query | 90356 per query
+  2 |  117678 (0.238) |  11378 |  56161 |   50139 | 1.12/1.66/2.33 | 0.10/0.50/0.93 |   6258 (0.053) | 0.86 |   2574 |   2642 | 0.996 / 0.000 / 0.0040 | 0.01699 | 47071 per query | 47071 per query
+  3 |   50139 (0.101) |   9606 |  19842 |   20691 | 1.13/1.71/2.42 | 0.10/0.50/0.93 |   2642 (0.053) | 0.54 |   1057 |   1118 | 0.989 / 0.000 / 0.0105 | 0.00722 | 20056 per query | 18397 per query
+  full vectors: 20691 (0.0418 of N per query)
+
+text 30%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  479108 (0.968) |  14670 |  30569 |  433869 | 1.02/1.19/1.46 | 0.05/0.30/0.76 |      0 (0.000) | 0.00 |   2933 |   3380 | 0.161 / 0.839 / 0.0005 | 0.08505 | 47911 per query | 47911 per query
+  1 |  433869 (0.877) |  26967 | 139954 |  266948 | 1.06/1.54/2.27 | 0.08/0.43/0.87 |   3380 (0.008) | 0.28 |  10164 |   8837 | 0.997 / 0.000 / 0.0032 | 0.03381 | 173548 per query | 130161 per query
+  2 |  266948 (0.539) |  39554 |  92937 |  134457 | 1.09/1.58/2.24 | 0.10/0.48/0.91 |   8837 (0.033) | 1.21 |   6279 |   6079 | 0.996 / 0.000 / 0.0043 | 0.01529 | 106779 per query | 106779 per query
+  3 |  134457 (0.272) |  31107 |  44510 |   58840 | 1.12/1.66/2.36 | 0.10/0.50/0.92 |   6079 (0.045) | 1.24 |   2893 |   2894 | 0.989 / 0.000 / 0.0111 | 0.00659 | 53783 per query | 51800 per query
+  full vectors: 58840 (0.1189 of N per query)
+
+text 50%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  477251 (0.964) |  15883 |  15077 |  446291 | 1.02/1.21/1.49 | 0.05/0.26/0.66 |      0 (0.000) | 0.00 |   1920 |   2006 | 0.161 / 0.839 / 0.0005 | 0.08498 | 47725 per query | 47725 per query
+  1 |  446291 (0.902) |  57041 |  81306 |  307944 | 1.02/1.43/2.17 | 0.08/0.43/0.86 |   2006 (0.004) | 0.17 |  11375 |   9504 | 0.997 / 0.000 / 0.0032 | 0.03356 | 178516 per query | 133887 per query
+  2 |  307944 (0.622) |  79869 |  72315 |  155760 | 1.09/1.57/2.22 | 0.10/0.49/0.91 |   9504 (0.031) | 1.30 |   7415 |   7136 | 0.996 / 0.000 / 0.0043 | 0.01484 | 123178 per query | 123178 per query
+  3 |  155760 (0.315) |  46072 |  42166 |   67522 | 1.12/1.67/2.36 | 0.10/0.50/0.92 |   7136 (0.046) | 1.46 |   3464 |   3369 | 0.989 / 0.000 / 0.0112 | 0.00632 | 62304 per query | 59562 per query
+  full vectors: 67522 (0.1364 of N per query)
+
+text 75%: per level, counts summed over 10 queries (share of N per query in brackets)
+  level | entrants | in | out | undecided | mu/h decided p10/p50/p90 | mu/h undecided p10/p50/p90 | needless entries (mu > previous h) | B/item they add here | early exits | kept with mu > h | h parts: c sd / uncoded CS / other det (share of mean h) | mean h | (item, coded block) | rises
+  0 |  471863 (0.953) |  21648 |   5443 |  444772 | 1.02/1.20/1.50 | 0.07/0.35/0.74 |      0 (0.000) | 0.00 |   1888 |   2298 | 0.161 / 0.839 / 0.0005 | 0.08496 | 47186 per query | 47186 per query
+  1 |  444772 (0.899) | 159852 |  35341 |  249579 | 1.06/1.48/2.18 | 0.10/0.49/0.91 |   2298 (0.005) | 0.19 |  12029 |  11213 | 0.997 / 0.000 / 0.0032 | 0.03361 | 177909 per query | 133432 per query
+  2 |  249579 (0.504) | 102551 |  35551 |  111477 | 1.11/1.63/2.30 | 0.10/0.50/0.92 |  11213 (0.045) | 1.53 |   5577 |   5515 | 0.996 / 0.000 / 0.0043 | 0.01492 | 99832 per query | 99832 per query
+  3 |  111477 (0.225) |  39912 |  24857 |   46708 | 1.13/1.70/2.40 | 0.10/0.50/0.92 |   5515 (0.049) | 1.13 |   2372 |   2341 | 0.989 / 0.000 / 0.0114 | 0.00625 | 44591 per query | 41261 per query
+  full vectors: 46708 (0.0944 of N per query)
+
+step 4: share of each level's mean half-width (c sd / uncoded CS / other det) and (item, coded block) pairs and rises per query, every size
+  item   0.01%: L0: 0.23/0.77/0.001 pairs 563 rises 563 | L1: 1.00/0.00/0.004 pairs 613 rises 460 | L2: 0.99/0.00/0.009 pairs 136 rises 136 | L3: 0.97/0.00/0.032 pairs 45 rises 34
+  item   0.10%: L0: 0.23/0.77/0.001 pairs 1234 rises 1234 | L1: 1.00/0.00/0.004 pairs 1894 rises 1420 | L2: 0.99/0.00/0.007 pairs 519 rises 519 | L3: 0.98/0.00/0.024 pairs 213 rises 160
+  item   1.00%: L0: 0.23/0.77/0.001 pairs 3459 rises 3459 | L1: 1.00/0.00/0.004 pairs 7039 rises 5279 | L2: 0.99/0.00/0.006 pairs 2582 rises 2582 | L3: 0.98/0.00/0.019 pairs 1038 rises 779
+  item  10.00%: L0: 0.21/0.79/0.001 pairs 23248 rises 23248 | L1: 1.00/0.00/0.003 pairs 46140 rises 34605 | L2: 0.99/0.00/0.006 pairs 11692 rises 11692 | L3: 0.98/0.00/0.017 pairs 4193 rises 3473
+  item  30.00%: L0: 0.21/0.79/0.001 pairs 41081 rises 41081 | L1: 1.00/0.00/0.004 pairs 136025 rises 102019 | L2: 0.99/0.00/0.006 pairs 72845 rises 72845 | L3: 0.98/0.00/0.016 pairs 32400 rises 31687
+  item  50.00%: L0: 0.21/0.79/0.001 pairs 42009 rises 42009 | L1: 1.00/0.00/0.004 pairs 144700 rises 108525 | L2: 0.99/0.00/0.006 pairs 86624 rises 86624 | L3: 0.98/0.00/0.016 pairs 40748 rises 40008
+  item  75.00%: L0: 0.21/0.79/0.001 pairs 41157 rises 41157 | L1: 1.00/0.00/0.003 pairs 131652 rises 98739 | L2: 0.99/0.00/0.006 pairs 59790 rises 59790 | L3: 0.98/0.00/0.016 pairs 24908 rises 23961
+  text   0.01%: L0: 0.16/0.84/0.000 pairs 10553 rises 10553 | L1: 1.00/0.00/0.003 pairs 20913 rises 15685 | L2: 1.00/0.00/0.004 pairs 1682 rises 1682 | L3: 0.99/0.00/0.013 pairs 206 rises 170
+  text   0.10%: L0: 0.16/0.84/0.000 pairs 13698 rises 13698 | L1: 1.00/0.00/0.003 pairs 29720 rises 22290 | L2: 1.00/0.00/0.004 pairs 4656 rises 4656 | L3: 0.99/0.00/0.011 pairs 838 rises 709
+  text   1.00%: L0: 0.16/0.84/0.000 pairs 21198 rises 21198 | L1: 1.00/0.00/0.003 pairs 52743 rises 39557 | L2: 1.00/0.00/0.004 pairs 15238 rises 15238 | L3: 0.99/0.00/0.011 pairs 4828 rises 4130
+  text  10.00%: L0: 0.16/0.84/0.000 pairs 40645 rises 40645 | L1: 1.00/0.00/0.003 pairs 120475 rises 90356 | L2: 1.00/0.00/0.004 pairs 47071 rises 47071 | L3: 0.99/0.00/0.011 pairs 20056 rises 18397
+  text  30.00%: L0: 0.16/0.84/0.000 pairs 47911 rises 47911 | L1: 1.00/0.00/0.003 pairs 173548 rises 130161 | L2: 1.00/0.00/0.004 pairs 106779 rises 106779 | L3: 0.99/0.00/0.011 pairs 53783 rises 51800
+  text  50.00%: L0: 0.16/0.84/0.000 pairs 47725 rises 47725 | L1: 1.00/0.00/0.003 pairs 178516 rises 133887 | L2: 1.00/0.00/0.004 pairs 123178 rises 123178 | L3: 0.99/0.00/0.011 pairs 62304 rises 59562
+  text  75.00%: L0: 0.16/0.84/0.000 pairs 47186 rises 47186 | L1: 1.00/0.00/0.003 pairs 177909 rises 133432 | L2: 1.00/0.00/0.004 pairs 99832 rises 99832 | L3: 0.99/0.00/0.011 pairs 44591 rises 41261
+
+share of all rows within x of the threshold: measured | Gaussian, model sd | Gaussian, the query's own mean and sd   (mean over the 10 queries)
+  item    1%: x=0.0025: 0.0015 | 0.0020 | 0.0003  x=0.005: 0.0029 | 0.0039 | 0.0006  x=0.01: 0.0058 | 0.0080 | 0.0011  x=0.02: 0.0119 | 0.0167 | 0.0025  x=0.04: 0.0248 | 0.0393 | 0.0068  x=0.08: 0.0536 | 0.1249 | 0.0304
+  item   10%: x=0.0025: 0.0050 | 0.0129 | 0.0168  x=0.005: 0.0101 | 0.0258 | 0.0336  x=0.01: 0.0204 | 0.0517 | 0.0673  x=0.02: 0.0449 | 0.1042 | 0.1350  x=0.04: 0.1262 | 0.2133 | 0.2718  x=0.08: 0.5116 | 0.4512 | 0.5427
+  item   30%: x=0.0025: 0.0481 | 0.0256 | 0.0301  x=0.005: 0.0958 | 0.0511 | 0.0602  x=0.01: 0.1899 | 0.1020 | 0.1200  x=0.02: 0.3648 | 0.2024 | 0.2373  x=0.04: 0.6197 | 0.3925 | 0.4536  x=0.08: 0.8078 | 0.6983 | 0.7707
+  item   50%: x=0.0025: 0.0617 | 0.0293 | 0.0309  x=0.005: 0.1223 | 0.0586 | 0.0617  x=0.01: 0.2395 | 0.1169 | 0.1230  x=0.02: 0.4390 | 0.2313 | 0.2429  x=0.04: 0.6732 | 0.4436 | 0.4633  x=0.08: 0.8241 | 0.7606 | 0.7808
+  item   75%: x=0.0025: 0.0357 | 0.0234 | 0.0281  x=0.005: 0.0717 | 0.0467 | 0.0562  x=0.01: 0.1436 | 0.0933 | 0.1121  x=0.02: 0.2913 | 0.1855 | 0.2220  x=0.04: 0.5713 | 0.3623 | 0.4271  x=0.08: 0.8329 | 0.6601 | 0.7400
+  text    1%: x=0.0025: 0.0030 | 0.0033 | 0.0030  x=0.005: 0.0059 | 0.0067 | 0.0060  x=0.01: 0.0127 | 0.0139 | 0.0122  x=0.02: 0.0289 | 0.0315 | 0.0259  x=0.04: 0.0817 | 0.0919 | 0.0632  x=0.08: 0.2427 | 0.3721 | 0.2013
+  text   10%: x=0.0025: 0.0153 | 0.0219 | 0.0193  x=0.005: 0.0304 | 0.0439 | 0.0387  x=0.01: 0.0616 | 0.0883 | 0.0775  x=0.02: 0.1275 | 0.1798 | 0.1564  x=0.04: 0.2780 | 0.3779 | 0.3208  x=0.08: 0.6231 | 0.7632 | 0.6442
+  text   30%: x=0.0025: 0.0489 | 0.0434 | 0.0390  x=0.005: 0.0974 | 0.0868 | 0.0778  x=0.01: 0.1927 | 0.1725 | 0.1549  x=0.02: 0.3703 | 0.3374 | 0.3039  x=0.04: 0.6391 | 0.6191 | 0.5649  x=0.08: 0.8767 | 0.9242 | 0.8796
+  text   50%: x=0.0025: 0.0590 | 0.0498 | 0.0413  x=0.005: 0.1172 | 0.0995 | 0.0824  x=0.01: 0.2320 | 0.1974 | 0.1639  x=0.02: 0.4374 | 0.3829 | 0.3206  x=0.04: 0.7122 | 0.6827 | 0.5894  x=0.08: 0.8928 | 0.9545 | 0.8947
+  text   75%: x=0.0025: 0.0414 | 0.0397 | 0.0357  x=0.005: 0.0824 | 0.0793 | 0.0714  x=0.01: 0.1645 | 0.1580 | 0.1422  x=0.02: 0.3244 | 0.3106 | 0.2799  x=0.04: 0.6091 | 0.5806 | 0.5265  x=0.08: 0.8871 | 0.9038 | 0.8479

@@ -1,0 +1,2 @@
+item_q shapes (500, 768) (1000, 768) first 20 identical: False
+4 probe rows of the 50k corpus found in the 1M corpus: [True, True, True, True] ; 1M rows 999000
