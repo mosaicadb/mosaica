@@ -269,46 +269,73 @@ impl Sums {
         self.secs += t.s();
     }
 
-    /// The sums once every row is in (what the forms keep of the cluster: the bases are dropped).
-    pub fn done(mut self) -> Summed {
+    /// What the forms keep of the cluster once every row is in: M packed, the traces of S_c and of S_c within span B,
+    /// and the rows (`Summed`); and the sums of u_t^2 per level, for its group's G (`GroupSums::add`).
+    pub fn done(mut self) -> (Summed, Vec<Vec<f64>>) {
         for l in 0..self.wait.len() {
             self.take(l);
         }
-        Summed { yy: self.yy, qq: self.qq, usq: self.usq, rows: self.rows, secs: self.secs }
+        let (r, nc) = (self.r, self.rows as f64);
+        let mut s = Summed { m: Vec::new(), trs: Vec::new(), trq: Vec::new(), rows: self.rows, secs: self.secs };
+        if self.rows > 0 {
+            for l in 0..self.yy.len() {
+                let m: Vec<f64> = self.yy[l].iter().map(|x| x / nc).collect();
+                s.m.extend(pack(&m, r));
+                s.trs.push(self.usq[l].iter().sum::<f64>() / nc);
+                s.trq.push(self.qq[l] / nc);
+            }
+        }
+        (s, self.usq)
     }
 }
 
-/// A cluster's `Sums`, every row in, and the seconds they took.
+/// What the forms keep of a cluster's `Sums` (none of its rows' bases or u_t^2 sums): per level M packed (`pack`), tr S_c
+/// and tr S_c within span B; its rows; and the seconds the sums took.
 pub struct Summed {
-    yy: Vec<Vec<f64>>,
-    qq: Vec<f64>,
-    usq: Vec<Vec<f64>>,
+    m: Vec<f32>,
+    trs: Vec<f64>,
+    trq: Vec<f64>,
     rows: usize,
     pub secs: f64,
 }
 
-/// The forms of `ix` (which holds stored vectors and the order state) from each cluster's sums (`Sums`, taken as it was
-/// encoded): M and the traces of S_c from them, G over each group's rows, then N and gamma from G (B~ and Q formed
-/// again from the order state, one product per cluster, rather than all clusters' kept), U from the stored norms, and
-/// P'm.
-pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
+/// Each group's sums of u_t^2 per level and its rows, for G: the build adds each cluster's in cluster order
+/// (`add`), so that they do not depend on the threads, and drops them.
+pub struct GroupSums {
+    g: Vec<f64>,
+    rows: Vec<f64>,
+    ndl: usize,
+    n: usize,
+}
+
+impl GroupSums {
+    /// No rows yet, for `ng` groups at `ndl` levels of `n` dimensions.
+    pub fn new(ng: usize, ndl: usize, n: usize) -> GroupSums {
+        GroupSums { g: vec![0.0; ng * ndl * n], rows: vec![0.0; ng], ndl, n }
+    }
+
+    /// A cluster of group g: its sums of u_t^2 per level (`Sums::done`) and its rows (`summed`).
+    pub fn add(&mut self, g: usize, summed: &Summed, usq: &[Vec<f64>]) {
+        self.rows[g] += summed.rows as f64;
+        for (l, u) in usq.iter().enumerate() {
+            for (x, &y) in self.g[(g * self.ndl + l) * self.n..(g * self.ndl + l + 1) * self.n].iter_mut().zip(u) {
+                *x += y;
+            }
+        }
+    }
+}
+
+/// The forms of `ix` (which holds stored vectors and the order state) from each cluster's sums (`Summed`, taken as it
+/// was encoded) and its group's (`GroupSums`): G over each group's rows, then N and gamma from G (B~ and Q formed again
+/// from the order state, one product per cluster, rather than all clusters' kept), U from the stored norms, and P'm.
+pub fn finish(ix: &Index2, sums: &[Summed], gs: GroupSums) -> WForms {
     use rayon::prelude::*;
     let (n, ndl, k, ng) = (ix.n(), ix.meta.ndl(), ix.k(), ix.groups.len());
     let r = ix.order.as_ref().expect("the W2 forms read the order state").r;
     // G per group and level: mean u_t^2 over the group's rows
-    let mut g = vec![0f64; ng * ndl * n];
-    let mut rows = vec![0f64; ng];
-    for (c, one) in sums.iter().enumerate() {
-        let gi = ix.cl[c].g;
-        rows[gi] += one.rows as f64;
-        for l in 0..ndl {
-            for t in 0..n {
-                g[(gi * ndl + l) * n + t] += one.usq[l][t];
-            }
-        }
-    }
+    let mut g = gs.g;
     for (i, x) in g.iter_mut().enumerate() {
-        *x /= rows[i / (ndl * n)].max(1.0);
+        *x /= gs.rows[i / (ndl * n)].max(1.0);
     }
     let recs: Vec<Vec<f32>> = (0..k).into_par_iter().map(|c| {
         let (cl, one) = (&ix.cl[c], &sums[c]);
@@ -322,14 +349,14 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
         for (l, (bt, qb)) in dual.iter().enumerate() {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
-            let m: Vec<f64> = one.yy[l].iter().map(|x| x / nc as f64).collect();
             // the upper triangle alone (`pack` reads no other)
             let nn: Vec<f64> = (0..r * r).map(|i| if i % r >= i / r { gq(&bt[i / r], &bt[i % r]) } else { 0.0 }).collect();
-            let (trs, trq) = (one.usq[l].iter().sum::<f64>() / nc as f64, one.qq[l] / nc as f64);
+            let (trs, trq) = (one.trs[l], one.trq[l]);
             let den = gd.iter().sum::<f64>() - qb.iter().map(|w| gq(w, w)).sum::<f64>();
             let gamma = if den > 0.0 { ((trs - trq) / den).max(0.0) } else { 0.0 };
             let uu = (cl.r0..cl.r1).map(|row| det_norm(ix, c, l, row).powi(2)).sum::<f64>() / nc as f64;
-            out.extend(pack(&m, r));
+            let rp = r * (r + 1) / 2;
+            out.extend_from_slice(&one.m[l * rp..(l + 1) * rp]);
             out.extend(pack(&nn, r));
             out.extend([gamma as f32, uu as f32]);
         }

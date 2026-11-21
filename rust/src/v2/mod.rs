@@ -2200,8 +2200,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         numax: f64,
         ord_s: f64,
         w2: Option<wrule::Summed>,
+        usq: Option<Vec<Vec<f64>>>,
     }
-    let mut done: Vec<Done> = (0..k).into_par_iter().map(|c| {
+    let encode_one = |c: usize| -> Done {
         let gp = &groups[p.grp[c]];
         let it = src.items(c, p, gp, &mhats[c]);
         let it = if nusort { it.sort_by_nu(n) } else { it };
@@ -2217,7 +2218,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         let ord_s = to.s();
         let mut w2 = co.as_ref().map(|co| wrule::Sums::new(gp, &co.dirs8, &co.dsc, n, meta.ndl()));
         let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false, w2.as_mut());
-        let w2 = w2.map(|w| w.done());
+        let (w2, usq) = match w2.map(|w| w.done()) {
+            Some((s, u)) => (Some(s), Some(u)),
+            None => (None, None),
+        };
         let r0 = row0[c];
         // SAFETY (each put below): cluster c writes only its own ranges, fixed above from the sizes before encoding
         // (rows row0[c]..row0[c + 1], level bytes coff/soff[l][c] for its blocks), so concurrent writes are disjoint
@@ -2257,12 +2261,25 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 ord_dsc.put(c * ord_r, &co.dsc);
                 ord_dirs.put(c * ord_r * n, &co.dirs8);
             }
-            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s, w2 }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s, w2, usq }
         } else {
             unsafe { ext.put(r0, &it.ext) };
-            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: 0.0, w2: None }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: 0.0, w2: None, usq: None }
         }
-    }).collect();
+    };
+    // the clusters in blocks: after each, its clusters' sums of u_t^2 go into their groups' in cluster order (so that G
+    // does not depend on the threads) and are dropped, rather than every cluster's held until the end
+    let mut gsums = real.then(|| wrule::GroupSums::new(groups.len(), meta.ndl(), n));
+    let mut done: Vec<Done> = Vec::with_capacity(k);
+    for c0 in (0..k).step_by(ENCODE_BLOCK) {
+        let part: Vec<Done> = (c0..(c0 + ENCODE_BLOCK).min(k)).into_par_iter().map(&encode_one).collect();
+        for (c, mut d) in (c0..).zip(part) {
+            if let (Some(gs), Some(w), Some(u)) = (gsums.as_mut(), d.w2.as_ref(), d.usq.take()) {
+                gs.add(p.grp[c], w, &u);
+            }
+            done.push(d);
+        }
+    }
     log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
                 t.s(), order::SAMPLE, done.iter().map(|d| d.ord_s).sum::<f64>(), crate::util::anon_mb()));
     let order = real.then(|| Arc::new(order::OrderState {
@@ -2353,10 +2370,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         nrows,
         wforms: None,
     };
-    if let Some(sums) = w2sums {
+    if let (Some(sums), Some(gs)) = (w2sums, gsums) {
         let tw = Timer::new();
         let secs: f64 = sums.iter().map(|s| s.secs).sum();
-        ix.wforms = Some(Arc::new(wrule::finish(&ix, &sums)));
+        ix.wforms = Some(Arc::new(wrule::finish(&ix, &sums, gs)));
         log(format!("W2 forms: {secs:.1} thread-seconds of sums during the encoding, then {:.1}s", tw.s()));
     }
     if let Some(d) = dir {
@@ -2499,6 +2516,10 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     }
     Ok(ix)
 }
+
+/// The clusters a build encodes at once (`build2`): each block's W2 sums of u_t^2 are folded into their groups' and
+/// dropped before the next; a structural size, not tuned (large enough to keep the threads busy).
+const ENCODE_BLOCK: usize = 256;
 
 /// The repack thresholds, timed on this machine (they choose how the query side packs slots, not what it reads).
 fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
