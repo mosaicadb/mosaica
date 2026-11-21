@@ -87,7 +87,8 @@ pub const SHARES: [u64; 4] = [1, 4, 16, 64];
 /// - `cut_row_us[s]`: one visible row its sorted range leaves, through the levels and, where it survives them, its
 ///   stored vector, at visible share 1 / `SHARES[s]`;
 /// - `cut_us`: a cluster's sorted range at a k-th best (its centre score in f64, the range, the visible rows in it);
-/// - `grp_us`: a group's setup (the query's projections on the group's basis and its rotations);
+/// - `grp_us`: a group's setup as the index path pays it (the query's projections on the group's basis, `get_gq2`,
+///   and the group's rotations, `get_rot`, alone);
 /// - `sig_us`: one cluster's sigma (its r directions' products with the query).
 ///
 /// Every `row_us` is above 0, the others at least 0, all finite (`check`).
@@ -360,9 +361,12 @@ fn measure_once(ix: &Index2) -> Option<Measured> {
             }
             if vis.is_none() {
                 for &g in gs.iter().take(T_GROUPS) {
-                    let p2 = prep2(ix, q);
+                    // as the index path sets a group up: its projections, then its rotations once a randomised
+                    // level reads them
+                    let (p2, mut st) = (prep2(ix, q), Stats::new(nl));
                     let t = Instant::now();
-                    setup_groups(ix, &p2, &[g], &mut Stats::new(nl));
+                    get_gq2(ix, &p2, g, &mut st);
+                    get_rot(ix, &p2, g, &mut st);
                     grp.push(us(t));
                 }
             }
@@ -407,7 +411,7 @@ pub fn measure(ix: &Index2) -> Result<Measured, String> {
 /// The cache of the measured constants in an index directory.
 pub const COMPUTE_CACHE: &str = "compute-constants.txt";
 /// The version of its key: changed when the timing or the key changes, so older caches are timed again.
-pub const COMPUTE_KEY_VERSION: u32 = 8;
+pub const COMPUTE_KEY_VERSION: u32 = 9;
 
 /// The key the measured constants are cached under: the key's version; the machine and CPU (`machine_and_cpu`) and the
 /// instruction set the library was built for; the library (`store::LIB_FINGERPRINT`); the index (its shape and its
