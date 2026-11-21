@@ -217,8 +217,9 @@ pub const RATIO_MIN_PAIRS: usize = 3;
 /// each, of a cluster with at least two, gives z = (s - m) / (rho_g,l h) at each level (s its score, m and h its
 /// certified interval's midpoint and half-width there). A cluster's ratio is the root mean square of its rows' z over
 /// its pairs; with fewer than `RATIO_MIN_PAIRS` pairs it is its group's (over the group's rows), else the whole
-/// index's, else 1. Needs the order state and stored vectors.
-pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> Vec<f32> {
+/// index's, else 1. A query the index cannot answer (`query_ok`: a zero row) is left out. Needs the order state and
+/// stored vectors. Returns the ratios and the number of queries used.
+pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<f32>, usize) {
     use rayon::prelude::*;
     let (k, ndl, n, nl) = (ix.k(), ix.meta.ndl(), ix.n(), ix.meta.nl());
     let st = ix.order.as_ref().expect("the level ratios rank the clusters by the order state, which this index lacks");
@@ -227,7 +228,8 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> Vec<f
     let rows_of = |c: usize| ix.cl[c].r1 - ix.cl[c].r0;
     // per cluster: its pairs, and per level the rows and the sum of z^2
     let empty = || (vec![0usize; k], vec![(0f64, 0f64); k * ndl]);
-    let (pairs, acc) = queries.par_iter().fold(empty, |(mut pairs, mut acc), (q, own)| {
+    let used: Vec<&(Vec<f32>, Option<usize>)> = queries.iter().filter(|(q, _)| query_ok(q).is_ok()).collect();
+    let (pairs, acc) = used.par_iter().map(|&x| x).fold(empty, |(mut pairs, mut acc), (q, own)| {
         let pr = prep2(ix, q);
         let qm = centres.centre_scores(ix, &pr.q32);
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
@@ -276,21 +278,22 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> Vec<f
         }
     }
     let rms = |x: (f64, f64)| (x.0 > 0.0 && x.1 > 0.0).then(|| (x.1 / x.0).sqrt());
-    (0..k).flat_map(|c| (0..ndl).map(move |l| (c, l))).map(|(c, l)| {
+    let ratios = (0..k).flat_map(|c| (0..ndl).map(move |l| (c, l))).map(|(c, l)| {
         let own = if pairs[c] >= RATIO_MIN_PAIRS { rms(acc[c * ndl + l]) } else { None };
         own.or_else(|| rms(grp[ix.cl[c].g * ndl + l])).or_else(|| rms(all[l])).unwrap_or(1.0) as f32
-    }).collect()
+    }).collect();
+    (ratios, used.len())
 }
 
 /// `level_ratios` as a build measures them: with `RATIO_QUERIES` rows of the index drawn at random (by `seed`), each
-/// its stored vector as a query. Returns the ratios and the number of queries.
+/// its stored vector as a query. Returns the ratios and the number of queries used.
 pub fn build_level_ratios(ix: &Index2, seed: u64) -> (Vec<f32>, usize) {
     use rand::SeedableRng;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed ^ 0x6c65_7665_6c73);
     let mut rows = rand::seq::index::sample(&mut rng, ix.nrows, RATIO_QUERIES.min(ix.nrows)).into_vec();
     rows.sort_unstable();
     let queries: Vec<(Vec<f32>, Option<usize>)> = rows.iter().map(|&r| (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r))).collect();
-    (level_ratios(ix, &queries), queries.len())
+    level_ratios(ix, &queries)
 }
 
 /// The timing procedure (`measure`), structural choices rather than tuned values: `T_QUERIES` pseudo-queries (corpus

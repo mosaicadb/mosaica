@@ -2373,6 +2373,22 @@ fn the_level_ratios_are_stored_and_survive_a_reopen() {
     open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
 }
 
+/// A query the index cannot answer (a zero row, which a fit accepts) is left out of the level ratios: with one added
+/// they are the ratios without it, from one query fewer.
+#[test]
+fn a_zero_row_is_left_out_of_the_level_ratios() {
+    let ix = &fixture().ix;
+    let row = |r: usize| -> (Vec<f32>, Option<usize>) { (ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect(), Some(r)) };
+    let qs: Vec<_> = (0..40).map(|i| row(i * 97 % ix.nrows)).collect();
+    let mut with_zero = qs.clone();
+    with_zero.insert(7, (vec![0f32; ix.n()], Some(5)));
+    assert!(query_ok(&with_zero[7].0).is_err());
+    let (a, na) = adaptive::level_ratios(ix, &qs);
+    let (b, nb) = adaptive::level_ratios(ix, &with_zero);
+    assert_eq!((na, nb), (qs.len(), qs.len()));
+    assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-6 * x), "{a:?} {b:?}");
+}
+
 /// A cluster read on the index path at the statistical width (each deterministic level at min(1, psi rho r) of its
 /// half-width, r the cluster's stored ratio) sends on from each level no row the certified width would drop: against
 /// the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and the items
@@ -2468,7 +2484,7 @@ fn study_level_ratios() {
         (v, Some(ix.row_of_ent(e as u32)))
     }).collect();
     let t = Timer::new();
-    let r = adaptive::level_ratios(&ix, &queries);
+    let (r, _) = adaptive::level_ratios(&ix, &queries);
     eprintln!("{dir}: level ratios from {} given queries in {:.1}s on {} threads", queries.len(), t.s(), rayon::current_num_threads());
     let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
     std::fs::write(format!("{out}.study.f32"), bytes(&r)).unwrap();
