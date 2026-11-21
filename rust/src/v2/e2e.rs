@@ -112,6 +112,127 @@ fn threshold_answers_equal_brute_force_on_every_path() {
     }
 }
 
+/// A NaN threshold is refused by every threshold query: the exact one, its scan and the approximate one.
+#[test]
+fn a_nan_threshold_is_refused() {
+    let f = fixture();
+    let ix = &f.ix;
+    let q = &f.queries[0];
+    let pr = prep2(ix, q);
+    for (pname, plan) in plans() {
+        let r = std::panic::catch_unwind(|| threshold2(ix, &pr, f64::NAN, &Opts2 { vis: None, verify: false, want_iv: false, plan }));
+        assert!(r.is_err(), "plan {pname}: a NaN threshold answered");
+    }
+    assert!(std::panic::catch_unwind(|| scan_visible(ix, &pr, f64::NAN, None, false, false)).is_err(), "the scan answered a NaN threshold");
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    assert!(std::panic::catch_unwind(|| ad.threshold(ix, q, f64::NAN, None, adaptive::PSI, Plan::default())).is_err(), "the approximate query answered a NaN threshold");
+    // infinite thresholds answer as brute force does
+    let t = truth(ix, q, None);
+    for th in [f64::INFINITY, f64::NEG_INFINITY] {
+        for (pname, plan) in plans() {
+            let r = threshold2(ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+            assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "plan {pname}, t {th}");
+        }
+    }
+}
+
+/// Queries far from unit norm (the fixture's scaled by 366, 0.01 and 0.001) answer as brute force on every plan, with
+/// scores in the caller's units: thresholds (the intervals and exact scores returned with them holding the exact
+/// scores), the scan, exact k-NN, and the approximate queries, which at psi infinite (and knn2_fast over every
+/// cluster, up to f32) are exact and at the default psi give a subset of the exact threshold answer. Every reported
+/// k-NN score is its item's exact score within the f32 error.
+#[test]
+fn queries_far_from_unit_norm_answer_exactly() {
+    let f = fixture();
+    let ix = &f.ix;
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    let exact_scores = |q: &[f32], ents: &[(f64, u32)], what: &str| {
+        let pr = prep2(ix, q);
+        let err = 2.0 * full_err2(ix, &pr);
+        for &(v, e) in ents.iter().filter(|x| x.0.is_finite()) {
+            let x = exact_value2(ix, &pr, ix.row_of_ent(e));
+            assert!((v - x).abs() <= err, "{what}: entity {e}'s reported score {v}, exact {x}");
+        }
+    };
+    for scale in [366.0f32, 0.01, 1e-3] {
+        for (qi, q0) in f.queries.iter().enumerate() {
+            let q: Vec<f32> = q0.iter().map(|&x| x * scale).collect();
+            let pr = prep2(ix, &q);
+            for (sname, bm) in &f.sets[..3] {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let t = truth(ix, &q, bm.as_ref());
+                let what = format!("scale {scale}, query {qi}, set {sname}");
+                for th in thresholds(&t) {
+                    let want = answer(&t, th);
+                    for (pname, plan) in plans() {
+                        let r = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: true, plan });
+                        assert_eq!(to_bitmap2(ix, &r.rows), want, "{what}, plan {pname}, t {th}");
+                        for &(row, lb, ub, lv) in &r.iv {
+                            let v = exact_value2(ix, &pr, row as usize);
+                            assert!(lb as f64 <= v && v <= ub as f64, "{what}, plan {pname}, t {th}: row {row} level {lv}: {v} outside [{lb}, {ub}]");
+                        }
+                        for &(row, v) in &r.exact {
+                            assert_eq!(v, exact_value2(ix, &pr, row as usize), "{what}, plan {pname}, t {th}: row {row}'s exact score");
+                        }
+                    }
+                    let r = scan_visible(ix, &pr, th, vis.as_ref(), false, false);
+                    assert_eq!(to_bitmap2(ix, &r.rows), want, "{what}, scan, t {th}");
+                    let (a, _) = ad.threshold(ix, &q, th, vis.as_ref(), f64::INFINITY, Plan::default());
+                    assert_eq!(to_bitmap2(ix, &a.rows), want, "{what}, approximate at psi infinite, t {th}");
+                    let (a, _) = ad.threshold(ix, &q, th, vis.as_ref(), adaptive::PSI, Plan::default());
+                    let got = to_bitmap2(ix, &a.rows);
+                    assert!(got.is_subset(&want), "{what}, approximate, t {th}: rows outside the exact answer");
+                }
+                for k in [1, 10, 100].into_iter().filter(|&k| k <= t.len()) {
+                    for (pname, plan) in plans() {
+                        let out = knn2(ix, &q, k, vis.as_ref(), plan);
+                        assert_eq!(sub_values(ix, &out.ents, &q), top_values(&t, k), "{what}, plan {pname}, k {k}");
+                        exact_scores(&q, &out.ents, &format!("{what}, plan {pname}, k {k}"));
+                    }
+                    let (a, _) = ad.knn(ix, &q, k, vis.as_ref(), adaptive::PSI, Plan::default());
+                    exact_scores(&q, &a.ents, &format!("{what}, approximate k-NN, k {k}"));
+                    let a = knn2_fast(ix, &f.ap, &q, k, vis.as_ref(), ix.k(), None, Plan::default());
+                    let err = 2.0 * full_err2(ix, &pr);
+                    assert!(a.ents.len() == k && sub_values(ix, &a.ents, &q).iter().all(|&v| v >= t[k - 1].0 - err), "{what}, knn2_fast over every cluster, k {k}");
+                    exact_scores(&q, &a.ents, &format!("{what}, knn2_fast, k {k}"));
+                }
+            }
+        }
+    }
+    // a zero query is refused
+    assert!(std::panic::catch_unwind(|| prep2(ix, &vec![0f32; ix.n()])).is_err(), "a zero query was taken");
+}
+
+/// Thresholds below the scores' grid (2^-48) on a query far from unit norm: row 0 scores exactly 0 against a query of
+/// two coordinates (a power of two times (x_j, -x_i) of row 0), and thresholds of the smallest subnormal either side
+/// of 0, scaled with the query, must not underflow to 0. Answers equal brute force on every plan, at |q| about 1.3
+/// (not scaled) and about 10 (scaled).
+#[test]
+fn tiny_thresholds_survive_the_query_scaling() {
+    let f = fixture();
+    let ix = &f.ix;
+    let x0: Vec<f32> = ix.full_row_f16(0).iter().map(|&h| crate::util::f16_to_f32(h)).collect();
+    let big: Vec<usize> = (0..ix.n()).filter(|&c| x0[c].abs() > 0.05).collect();
+    let (i, j) = (big[0], big[1]);
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    for c in [4.0f32, 32.0] {
+        let mut q = vec![0f32; ix.n()];
+        (q[i], q[j]) = (c * x0[j], -c * x0[i]);
+        let pr = prep2(ix, &q);
+        assert_eq!(exact_value2(ix, &pr, 0), 0.0, "row 0 does not score 0");
+        let t = truth(ix, &q, None);
+        for th in [f64::from_bits(1), 0.0, -f64::from_bits(1), 2f64.powi(-49), f64::MIN_POSITIVE] {
+            let want = answer(&t, th);
+            for (pname, plan) in plans() {
+                let r = threshold2(ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                assert_eq!(to_bitmap2(ix, &r.rows), want, "|q| {}, plan {pname}, t {th:e}", pr.qn);
+            }
+            let (a, _) = ad.threshold(ix, &q, th, None, f64::INFINITY, Plan::default());
+            assert_eq!(to_bitmap2(ix, &a.rows), want, "|q| {}, approximate at psi infinite, t {th:e}", pr.qn);
+        }
+    }
+}
+
 /// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
 /// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
 #[test]
@@ -368,7 +489,7 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let variants = [
         ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, u32::MAX, 2),
         ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ..BuildOptions::default() }, 0b10, 2),
-        ("3 levels, 4/16/40", BuildOptions { dlv: Some(vec![4, 16, 40]), ..BuildOptions::default() }, u32::MAX, 3),
+        ("3 levels, 4/16/28", BuildOptions { dlv: Some(vec![4, 16, 28]), ..BuildOptions::default() }, u32::MAX, 3),
         ("6 levels, none deciding", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0, 6),
         ("6 levels, deciding at the first and last", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0b100001, 6),
     ];
@@ -428,8 +549,9 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     }
     drop((built, opened));
     std::fs::remove_dir_all(&tmp).unwrap();
-    // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes)
-    for dlv in [vec![], vec![16, 8], vec![0, 8], vec![4, 8, 12, 16, 20, 24, 32], vec![16, 48]] {
+    // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes) or the
+    // integer kernel (at most 32 bytes)
+    for dlv in [vec![], vec![16, 8], vec![0, 8], vec![4, 8, 12, 16, 20, 24, 32], vec![16, 48], vec![4, 16, 40], vec![33]] {
         let o = BuildOptions { dlv: Some(dlv.clone()), ..BuildOptions::default() };
         assert!(prepare(dir, &o).is_err(), "accepted dlv {dlv:?}");
     }
@@ -753,10 +875,10 @@ fn the_vectors_file_is_checked_at_open() {
         let r = damage(name, &|b: &mut Vec<u8>| match what {
             "an offset near u64::MAX" => b[8..16].copy_from_slice(&(u64::MAX - 8).to_le_bytes()),
             "a record cut short" => b.truncate(b.len() - 3),
-            // the first cluster's record: 4 u64, 7 f64, an f32, bm, b2, l1m, mhat, mv32, wmr, then the table count and
+            // the first cluster's record: 4 u64, 8 f64, an f32, bm, b2, l1m, mhat, mv32, wmr, then the table count and
             // the first table's th length
             _ => {
-                let mut o = 4 * 8 + 7 * 8 + 4;
+                let mut o = 4 * 8 + 8 * 8 + 4;
                 for el in [8, 8, 4, 8, 4, 4] {
                     let len = u64::from_le_bytes(b[o..o + 8].try_into().unwrap()) as usize;
                     o += 8 + len * el;
@@ -799,7 +921,7 @@ fn same_index(a: &Index2, b: &Index2) {
     assert_eq!((a.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&a.etab.lo), f32b(&a.etab.hi)), (b.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&b.etab.lo), f32b(&b.etab.hi)));
     for (x, y) in a.cl.iter().zip(&b.cl) {
         assert_eq!((x.g, x.r0, x.r1, x.nblk, x.mn32.to_bits()), (y.g, y.r0, y.r1, y.nblk, y.mn32.to_bits()));
-        assert_eq!(f64b(&[x.mn, x.btot, x.mvn, x.rmax, x.numax, x.bmin, x.bmax]), f64b(&[y.mn, y.btot, y.mvn, y.rmax, y.numax, y.bmin, y.bmax]));
+        assert_eq!(f64b(&[x.mn, x.btot, x.mvn, x.rmax, x.kx, x.numax, x.bmin, x.bmax]), f64b(&[y.mn, y.btot, y.mvn, y.rmax, y.kx, y.numax, y.bmin, y.bmax]));
         assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
         assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
     }
@@ -1251,6 +1373,203 @@ fn support_bounds_equal_brute_force_in_f64() {
                 assert_eq!((hi[a], lo[a]), ((((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32, (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32), "n {n}, anchor {a}");
             }
         }
+    }
+}
+
+/// The fit's rows from its Xs.npy, with the rows of `rows` replaced.
+struct Planted {
+    xs: crate::index::RealSource,
+    rows: std::collections::HashMap<usize, Vec<u16>>,
+}
+impl crate::bucket::FitRows for Planted {
+    fn n(&self) -> usize {
+        self.xs.n
+    }
+    fn row(&self, r: usize) -> &[u16] {
+        self.rows.get(&r).map_or_else(|| self.xs.row(r), |v| &v[..])
+    }
+}
+
+/// synth4k's fit and its index built in memory under `o`, with the rows `plant` gives from the fit's parameters
+/// (row, f16 vector) in place of the fit's.
+fn build_planted(o: &BuildOptions, mut plant: impl FnMut(&crate::index::Params) -> Vec<(usize, Vec<u16>)>) -> (crate::index::Params, Index2) {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (mut p, prof) = prepare(dir, o).unwrap();
+    p.load_perm().unwrap();
+    let rows = plant(&p).into_iter().collect();
+    let src = Real2 { src: Planted { xs: crate::index::RealSource::open(&p.xs_path), rows } };
+    let ix = build2(&p, &prof, &src, Full2::Real { rows: Default::default() }, o, None, None, &mut |_| {});
+    (p, ix)
+}
+
+/// Cluster c's centre direction as the build computes it (`mhat`, also its anchor).
+fn mhat_of(p: &crate::index::Params, c: usize) -> Vec<f64> {
+    let n = p.meta.n;
+    let m = &p.centres[c * n..(c + 1) * n];
+    let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+    m.iter().map(|&x| x as f64 / mn).collect()
+}
+
+/// Rows longer than 1 along their cluster's centre direction have x . mhat past 1 + DA, where the key is clamped to 1.
+/// The cluster's keys then allow that excess (the sorted range, the norm sort's bounds of m.r, rmax and the levels'
+/// fixed term), so threshold answers at those rows' own scores, the intervals of the rows taken in and k-NN answers
+/// equal brute force, with the support table and with the norm sort.
+#[test]
+fn keys_clamped_past_da_are_allowed_for() {
+    use crate::util::{f16_to_f32, f32_to_f16};
+    let c = 2;
+    let lens = [1.0003, 1.0002, 1.00025];
+    for o in [BuildOptions::default(), BuildOptions { nusort: true, ..BuildOptions::default() }] {
+        let (p, ix) = build_planted(&o, |p| {
+            let mh = mhat_of(p, c);
+            lens.iter().enumerate().map(|(i, &len)| (p.cstart[c] + i, mh.iter().map(|&v| f32_to_f16((len * v) as f32)).collect())).collect()
+        });
+        let mh = mhat_of(&p, c);
+        let cl = &ix.cl[c];
+        let mut most = 0f64;
+        for i in 0..lens.len() {
+            let row = ix.row_of_ent(p.perm[p.cstart[c] + i] as u32);
+            let a: f64 = ix.full_row_f16(row).iter().zip(&mh).map(|(&h, &m)| f16_to_f32(h) as f64 * m).sum();
+            assert!(a > 1.0 + crate::index::DA + 1e-4 && ix.ahat[row] == 32767, "planted row {i}: x . mhat {a}, key {}", ix.ahat[row]);
+            most = most.max(a - 1.0);
+        }
+        assert!(cl.kx >= most && cl.kx <= most * (1.0 + 1e-12), "the cluster's clamp excess {} for a largest x . mhat - 1 of {most}", cl.kx);
+        assert!(ix.cl.iter().enumerate().all(|(ci, x)| ci == c || x.kx == 0.0), "a cluster without a clamped key pays an excess");
+        let q: Vec<f32> = mh.iter().map(|&v| v as f32).collect();
+        let pr = prep2(&ix, &q);
+        let t = truth(&ix, &q, None);
+        let mut ths: Vec<f64> = t[..lens.len() + 1].iter().map(|x| x.0).collect();
+        ths.extend(thresholds(&t));
+        for th in ths {
+            for (pname, plan) in plans() {
+                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: true, plan });
+                assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "nusort {}, plan {pname}, t {th}", o.nusort);
+                // the f32 intervals returned with the rows taken in (which exact k-NN selects by) hold their scores
+                for &(row, lb, ub, lv) in &r.iv {
+                    let v = exact_value2(&ix, &pr, row as usize);
+                    assert!(lb as f64 <= v && v <= ub as f64, "row {row} level {lv}: {v} outside [{lb}, {ub}], nusort {}, plan {pname}, t {th}", o.nusort);
+                }
+            }
+        }
+        // the bounds each row's key gives hold its score
+        let qm = pr.qm(&ix, c);
+        for row in cl.r0..cl.r1 {
+            let v = exact_value2(&ix, &pr, row);
+            let (lb, ub) = if o.nusort {
+                let nc = NuCut::new(&ix, c, &pr, get_gq2(&ix, &pr, cl.g, &mut crate::kernel::Stats::new(ix.meta.nl())), qm);
+                nc.bounds(nc.nu_of(ix.nukey[row]))
+            } else {
+                key_interval2(&ix, &cut_params2(&ix, c, &pr, qm), row)
+            };
+            assert!(lb <= v && v <= ub, "row {row}: {v} outside [{lb}, {ub}], nusort {}", o.nusort);
+        }
+        for k in [1, 2, 3, 10] {
+            for (pname, plan) in plans() {
+                assert_eq!(sub_values(&ix, &knn2(&ix, &q, k, None, plan).ents, &q), top_values(&t, k), "nusort {}, plan {pname}, k {k}", o.nusort);
+            }
+        }
+    }
+}
+
+/// A query equal to a centre's int8 vector (exact in f16) lies along that cluster's anchor to within the f32 rounding of
+/// the centre, so |q|^2 - beta^2 cancels. In each cluster a top row is planted whose p . x lies just under a grid point
+/// of the support table and whose residual leans towards q - beta p, so that at the row's own score the table's bound
+/// beta hi + rho sqrt(x2) exceeds it only through rho. The cluster is not skipped there, and threshold answers at that
+/// score equal brute force.
+#[test]
+fn a_query_along_an_anchor_keeps_a_cluster_whose_top_row_matches() {
+    use crate::util::{f16_to_f32, f32_to_f16};
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let mq8 = crate::util::try_read_npy(&format!("{dir}/mq8.npy")).unwrap().i8s();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(11);
+    let f64s = |x: &[u16]| x.iter().map(|&h| f16_to_f32(h) as f64).collect::<Vec<f64>>();
+    let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+    let mut queries = Vec::new();
+    let (p, ix) = build_planted(&BuildOptions::default(), |p| {
+        let (n, xs) = (p.meta.n, crate::index::RealSource::open(&p.xs_path));
+        (0..p.meta.k).filter_map(|c| {
+            let ph = mhat_of(p, c);
+            // the int8 vector scaled by a power of 2 to a norm in (1/2, 1]
+            let mi = &mq8[c * n..(c + 1) * n];
+            let sc = 2f64.powi(-(mi.iter().map(|&v| v as f64 * v as f64).sum::<f64>().sqrt().log2().ceil() as i32));
+            let q: Vec<f64> = mi.iter().map(|&v| v as f64 * sc).collect();
+            let beta = dot(&q, &ph);
+            let qp: Vec<f64> = q.iter().zip(&ph).map(|(a, b)| a - beta * b).collect();
+            let u: Vec<f64> = qp.iter().zip(&ph).map(|(a, b)| a - dot(&qp, &ph) * b).collect();
+            let un = dot(&u, &u).sqrt();
+            let top = (p.cstart[c]..p.cstart[c + 1]).map(|r| dot(&f64s(xs.row(r)), &ph)).fold(f64::MIN, f64::max);
+            if top > 0.98 {
+                return None;
+            }
+            let v0 = top + 0.01;
+            // the candidate whose score most exceeds beta hi, hi being p . x rounded up to the table's grid
+            let (mut best, mut row) = (f64::MIN, Vec::new());
+            for _ in 0..20_000 {
+                let y: Vec<f64> = (0..n).map(|i| v0 * ph[i] + (1.0 - v0 * v0).sqrt() * (0.9 * u[i] / un + 0.1 * (rng.gen::<f64>() - 0.5))).collect();
+                let yn = dot(&y, &y).sqrt();
+                let x: Vec<u16> = y.iter().map(|&v| f32_to_f16((v / yn) as f32)).collect();
+                let xv = f64s(&x);
+                let v = dot(&xv, &ph);
+                let hi = ((v + 1e-9) * 32768.0).ceil() / 32768.0;
+                let gain = dot(&xv, &qp) - beta * (hi - v);
+                if v > top && gain > best {
+                    (best, row) = (gain, x);
+                }
+            }
+            queries.push((c, q.iter().map(|&v| v as f32).collect::<Vec<f32>>(), best));
+            Some((p.cstart[c], row))
+        }).collect()
+    });
+    let mut tried = 0;
+    for (c, q, gain) in queries {
+        if gain <= 2e-9 {
+            continue;
+        }
+        tried += 1;
+        let row = ix.row_of_ent(p.perm[p.cstart[c]] as u32);
+        let pr = prep2(&ix, &q);
+        assert_eq!(pr.anc(&ix).a, c, "cluster {c}: the query's nearest anchor is another cluster's");
+        let th = exact_value2(&ix, &pr, row);
+        let cl = &ix.cl[c];
+        assert!((cl.r0..cl.r1).all(|r| exact_value2(&ix, &pr, r) <= th), "cluster {c}: the planted row is not its top row");
+        assert!(!matches!(support_pre(&ix, &pr, th, cl.r1 - cl.r0, c, false), Some(Pre::Skip)), "cluster {c}: skipped at its top row's score {th}");
+        let t = truth(&ix, &q, None);
+        for (pname, plan) in plans() {
+            let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+            assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "cluster {c}, plan {pname}, t {th}");
+        }
+    }
+    assert!(tried > 0, "no planted row exceeds beta hi by more than the table's margin: the test checks nothing");
+}
+
+/// The deterministic code's tables are refused when a coordinate could decode past DECODED_MAX.
+#[test]
+fn tree_tables_decoding_past_their_bound_are_refused() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let mut p = crate::index::load_params(dir).unwrap();
+    DetTab::new(&p);
+    p.tree_cent[4 * 256 + 15] = DECODED_MAX;
+    assert!(std::panic::catch_unwind(|| DetTab::new(&p)).is_err(), "tables decoding to {DECODED_MAX} accepted");
+}
+
+/// A fit whose centres reach past CENTRE_NORM_MAX, or with a zero centre, is refused when it is read, before anything
+/// is built or opened (synth4k's centres stored at 1.5 times their norm; its first centre's scale set to 0).
+#[test]
+fn centres_past_the_norm_the_key_covers_are_refused() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let o = BuildOptions::default();
+    assert!(prepare(dir, &o).is_ok());
+    let tmp = tmp_dir("centres");
+    for e in std::fs::read_dir(dir).unwrap() {
+        let e = e.unwrap();
+        std::fs::copy(e.path(), tmp.join(e.file_name())).unwrap();
+    }
+    let msc = crate::util::try_read_npy(&format!("{dir}/msc.npy")).unwrap().f64s();
+    let tdir = tmp.to_str().unwrap();
+    for (what, scaled) in [("norm above CENTRE_NORM_MAX", msc.iter().map(|&v| v * 1.5).collect::<Vec<f64>>()), ("a zero centre", msc.iter().enumerate().map(|(c, &v)| if c == 0 { 0.0 } else { v }).collect())] {
+        let b: Vec<u8> = scaled.iter().flat_map(|v| v.to_le_bytes()).collect();
+        crate::util::write_npy(tmp.join("msc.npy").to_str().unwrap(), "<f8", &[scaled.len()], &b);
+        assert!(crate::index::load_params(tdir).is_err() && prepare(tdir, &o).is_err(), "{what} accepted");
     }
 }
 

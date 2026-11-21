@@ -71,7 +71,10 @@ pub fn tick() -> u64 {
 }
 
 pub struct GQ2 {
-    pub qv: Vec<f64>,      // V_q^T q, exact up to one rounding
+    // V_q^T q (in the units of the query's Prep2) to one rounding (qv_exact); when group_q2r splits the query, its
+    // two products and their sum round, within about u (2 |q| + 2 sqrt n) of the exact value, far inside the
+    // 1e-12 |qv| the bounds allow
+    pub qv: Vec<f64>,
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
@@ -96,6 +99,9 @@ pub struct Prep2 {
     pub q32: Vec<f32>,
     pub q64: Vec<f64>,
     pub qn: f64,
+    /// q16 2^24 in 13-bit halves for qv_exact. The high half wraps from |x| = 16 on, and qv_exact's i32 sums hold
+    /// |x| < 2 only: group_q2r reads them only then and splits a larger query (the qv timing bench in run2.rs reads
+    /// them as they are).
     pub qhi: Vec<i16>,
     pub qlo: Vec<i16>,
     /// The nearest anchor, found on first use: a plan that scans never reads the anchors.
@@ -106,6 +112,16 @@ pub struct Prep2 {
     /// held while groups are rotated on first read (get_rot), so that each is rotated once
     rotating: std::sync::Mutex<()>,
     pub dial: Vec<f32>, // per level, factor on the item intervals' upper half-width (1: certified; below: approximate)
+    /// q16 is 2^sh times the query the other fields describe, so this query's scores and thresholds are 2^-sh times
+    /// the caller's (0 from prep2; `unit` scales the query).
+    pub sh: i32,
+    /// The scaled query (`unit`) of a query left unscaled, made on first use and kept with its group setups.
+    unit_of: OnceLock<Option<Box<Prep2>>>,
+}
+
+/// 2^e, exactly (|e| < 1022).
+fn pow2(e: i32) -> f64 {
+    f64::from_bits(((1023 + e) as u64) << 52)
 }
 
 /// The anchor p with the largest q.p, beta = q.p exactly, and rho the norm of the rest of q (rounded up).
@@ -117,6 +133,43 @@ pub struct Anc {
 }
 
 impl Prep2 {
+    /// A score or threshold of the caller's in this query's units, and back (exact: powers of two).
+    pub fn to_w(&self, v: f64) -> f64 {
+        v * pow2(-self.sh)
+    }
+    pub fn from_w(&self, v: f64) -> f64 {
+        v * pow2(self.sh)
+    }
+    /// A caller's threshold in this query's units. Scores on stored vectors are multiples of 2^-48 (`exact_dot`), so t
+    /// is first raised to that grid, which keeps the answer and keeps a t below it from scaling to 0.
+    pub fn thr_w(&self, ix: &Index2, t: f64) -> f64 {
+        let t = if matches!(ix.full, Full2::Real { .. }) { (t * pow2(48)).ceil() * pow2(-48) } else { t };
+        self.to_w(t)
+    }
+    /// The query scaled by a power of two to a norm in [2^-1/2, 2^1/2], the scale the bounds' absolute margins are
+    /// sized for; itself when it is there. Its answers at to_w(t) are the caller's at t, exactly.
+    pub fn unit(self) -> Prep2 {
+        self.scaled().unwrap_or(self)
+    }
+    fn scaled(&self) -> Option<Prep2> {
+        let k = self.qn.log2().round() as i32;
+        if k == 0 {
+            return None;
+        }
+        let s = pow2(-k);
+        let q32: Vec<f32> = self.q32.iter().map(|&x| (x as f64 * s) as f32).collect();
+        let q64 = q32.iter().map(|&x| x as f64).collect();
+        let gq = (0..self.gq.len()).map(|_| OnceLock::new()).collect();
+        let (q16, qhi, qlo, dial) = (self.q16.clone(), self.qhi.clone(), self.qlo.clone(), self.dial.clone());
+        Some(Prep2 { q16, q32, q64, qn: self.qn * s, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq, rotating: Default::default(), dial, sh: self.sh + k, unit_of: OnceLock::new() })
+    }
+    /// The exact scores and intervals of `out`, found for this query, in the caller's units.
+    pub fn back(&self, out: &mut ThrOut2) {
+        let s = pow2(self.sh);
+        out.exact.iter_mut().for_each(|x| x.1 *= s);
+        out.iv.iter_mut().for_each(|x| (x.1, x.2) = (x.1 * s as f32, x.2 * s as f32));
+    }
+
     /// The nearest anchor (searched over every anchor on the first call).
     pub fn anc(&self, ix: &Index2) -> Anc {
         self.anc_among(ix, None)
@@ -158,7 +211,7 @@ impl Prep2 {
                     }
                 }
             }
-            anc_of(self.qn, ba, best)
+            anc_of(self.qn, n, ba, best)
         })
     }
 
@@ -190,25 +243,59 @@ impl Prep2 {
     }
 }
 
-fn anc_of(qn: f64, a: usize, beta: f64) -> Anc {
-    Anc { a, beta, rho: (qn * qn - beta * beta).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12 }
+/// u = 2^-53, the unit roundoff of f64.
+const U64: f64 = f64::EPSILON / 2.0;
+
+/// sqrt(d) rounded up, where d is a difference of squares computed in f64 and `slack` bounds its rounding error.
+fn root_up(d: f64, slack: f64) -> f64 {
+    (d.max(0.0) + slack).sqrt() * (1.0 + 1e-12)
 }
 
-/// The query rounded to f16, as f16 and as f32, and its norm.
-pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
+/// rho >= |q - beta p| for the computed beta = q . p and qn = |q| over n dimensions: qn^2 - beta^2 carries
+/// (n + 2) u qn^2 from qn^2, 2 n u qn^2 from beta's error, 4 u qn^2 from beta^2, the difference and the slack's
+/// addition, and beta^2 (|p|^2 - 1) <= (2e-12 + (n + 2) u) beta^2 for an anchor whose norm is 1 within 1e-12.
+fn anc_of(qn: f64, n: usize, a: usize, beta: f64) -> Anc {
+    Anc { a, beta, rho: root_up(qn * qn - beta * beta, (4 * n + 16) as f64 * U64 * qn * qn + 2e-12 * beta * beta) }
+}
+
+/// Integers as the 13-bit halves qv_exact takes (high: v >> 13, low: v mod 2^13).
+fn halves(fx: impl Iterator<Item = i64>) -> (Vec<i16>, Vec<i16>) {
+    fx.map(|v| ((v >> 13) as i16, (v & 8191) as i16)).unzip()
+}
+
+fn round_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
     let q16: Vec<u16> = q.iter().map(|&x| f32_to_f16(x)).collect();
     let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
     let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
     (q16, q32, qn)
 }
 
+fn query_norm_ok(qn: f64) -> Result<(), String> {
+    if qn > 0.0 && qn.is_finite() {
+        return Ok(());
+    }
+    Err(format!("the query has norm {qn} once rounded to f16; give a nonzero vector of finite values within f16's range (|x| <= 65504; scale it, which changes no ranking)"))
+}
+
+/// Why the index cannot answer query q, if it cannot: it is zero or not finite once rounded to f16.
+pub fn query_ok(q: &[f32]) -> Result<(), String> {
+    query_norm_ok(round_f16(q).2)
+}
+
+/// The query rounded to f16, as f16 and as f32, and its norm. Refuses a query `query_ok` refuses.
+pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
+    let r = round_f16(q);
+    if let Err(e) = query_norm_ok(r.2) {
+        panic!("{e}");
+    }
+    r
+}
+
 pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
-    let fx: Vec<i64> = q16.iter().map(|&h| f16_fixed(h)).collect();
-    let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
-    let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
-    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), rotating: Default::default(), dial: vec![1.0; ix.meta.nl()] }
+    let (qhi, qlo) = halves(q16.iter().map(|&h| f16_fixed(h)));
+    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), rotating: Default::default(), dial: vec![1.0; ix.meta.nl()], sh: 0, unit_of: OnceLock::new() }
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
@@ -343,7 +430,24 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     let gp = &ix.groups[g];
     let t0 = tick();
     let mut qv = vec![0f64; n];
-    unsafe { qv_exact(&gp.v8t, &gp.vsc, n, &pr.qhi, &pr.qlo, &mut qv) };
+    // qv_exact's i32 sums hold the integers v = q16 2^24 below 2^25 in magnitude; a larger query is taken as
+    // a + b 2^-24 with a = v >> 24 and b = v mod 2^24, each part's product rounded once
+    let fx: Vec<i64> = pr.q16.iter().map(|&h| f16_fixed(h)).collect();
+    if fx.iter().all(|v| v.abs() < 1 << 25) {
+        unsafe { qv_exact(&gp.v8t, &gp.vsc, n, &pr.qhi, &pr.qlo, &mut qv) };
+    } else {
+        let mut hi = vec![0f64; n];
+        let (ah, al) = halves(fx.iter().map(|v| v >> 24));
+        let (bh, bl) = halves(fx.iter().map(|v| v & ((1 << 24) - 1)));
+        unsafe {
+            qv_exact(&gp.v8t, &gp.vsc, n, &ah, &al, &mut hi);
+            qv_exact(&gp.v8t, &gp.vsc, n, &bh, &bl, &mut qv);
+        }
+        qv.iter_mut().zip(&hi).for_each(|(v, h)| *v += h * 16777216.0);
+    }
+    if pr.sh != 0 {
+        qv.iter_mut().for_each(|v| *v *= pow2(-pr.sh));
+    }
     let t1 = tick();
     let mut wq = vec![0f32; n];
     for c in 0..n {
@@ -570,7 +674,7 @@ impl CQ2 {
         let sigma = if self.gtab {
             let ts: Vec<&GTab> = (0..ndl).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
             let (s, m) = unsafe { det_spans(&ts, &ix.ctab[ci][..ndl], &gp.levels[..ndl], self.alr) };
-            let units: usize = gp.levels[..ndl].iter().map(|l| l.units).sum();
+            let units = det_units(&gp.levels[..ndl]);
             let budget = (256 * IHMAX - 3 * units as i64) as f64;
             ((s * (1.0 + 1.0 / 512.0) / budget).max(m * (1.0 + 1.0 / 512.0) / 65533.0) as f32).max(1e-30)
         } else {
@@ -643,9 +747,9 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     if want_w {
         w.extend(gq.wq.iter().zip(c.mv32.iter()).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
     }
-    // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
+    // |v_c| < DECODED_MAX = 3.5 for a deterministic coordinate (asserted by DetTab::new)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
-    let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
+    let fixed = a.abs() * c.mn * c.da() + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
     // ewj is NaN until the randomised levels' inputs are in, so that an interval read before them is no interval
     let mut cq = CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj: [f32::NAN; J], w, rand: false, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None };
     if let Some(rot) = gq.rot.get() {
@@ -781,20 +885,24 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let c = &ix.cl[ci];
     let k = ix.k();
     let cm = qm / c.mn;
-    let s1 = (pr.qn * pr.qn - cm * cm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
+    // qn^2 carries (n + 2) u qn^2 and cm = q.m / |m| is within (1.5 n + 2) u qn of q . mhat, so cm^2 within
+    // (3 n + 4) u qn^2 of its square; 4 u qn^2 more for cm^2, the difference and the slack's addition
+    let s1 = root_up(pr.qn * pr.qn - cm * cm, (4 * n + 16) as f64 * U64 * pr.qn * pr.qn);
     let Anc { a, beta: b, rho } = pr.anc(ix);
     let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
     let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
     let pm = if ix.apm.is_empty() { dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat) } else { ix.apm[a * k + ci] };
     let rm = cm - b * pm;
-    let rp = (rho * rho - rm * rm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
-    Cut { cm, s1, bh, bl, rm, rp }
+    // rm is within (2.5 n + 4) u qn of q_perp . mhat (cm's error, n u |beta| from pm, three roundings), so the exact
+    // rm^2 is at least rm^2 - 2 |rm| (3 n + 8) u qn; 6 u (rho^2 + rm^2) covers rounding the squares and the sums
+    let rp = root_up(rho * rho - rm * rm, 2.0 * rm.abs() * (3 * n + 8) as f64 * U64 * pr.qn + 6.0 * U64 * (rho * rho + rm * rm));
+    Cut { cm, s1, bh, bl, rm, rp, da: c.da() }
 }
 
 pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize, usize, usize) {
     let c = &ix.cl[ci];
     let rr = ix.x2.sqrt();
-    let eps = 1e-9 + DA;
+    let eps = 1e-9 + cu.da;
     let uset = isect(sup_set(cu.cm, cu.s1, rr, t - 1e-9), sup_set(cu.rm, cu.rp, rr, t - cu.bh - 1e-9));
     let lset = isect(inf_set(cu.cm, cu.s1, rr, t + 1e-9), inf_set(cu.rm, cu.rp, rr, t - cu.bl + 1e-9));
     let ah = &ix.ahat[c.r0..c.r1];
@@ -824,7 +932,7 @@ pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize,
 pub fn key_interval2(ix: &Index2, cu: &Cut, row: usize) -> (f64, f64) {
     let rr = ix.x2.sqrt();
     let a = ix.ahat[row] as f64 / 32767.0;
-    let (lo, hi) = ((a - DA).max(-rr), (a + DA).min(rr));
+    let (lo, hi) = ((a - cu.da).max(-rr), (a + cu.da).min(rr));
     let f = |p: f64, r: f64, off: f64, sgn: f64| -> f64 {
         let qn = (p * p + r * r).sqrt().max(1e-300);
         let astar = sgn * p * rr / qn;
@@ -911,7 +1019,7 @@ pub fn full_err_qn(ix: &Index2, qn: f64) -> f64 {
 }
 pub fn exact_value2(ix: &Index2, pr: &Prep2, row: usize) -> f64 {
     match &ix.full {
-        Full2::Real { .. } => exact_to_f64(exact_dot(&pr.q16, ix.full_row_f16(row))),
+        Full2::Real { .. } => pr.to_w(exact_to_f64(exact_dot(&pr.q16, ix.full_row_f16(row)))),
         Full2::Synth(s) => s.exact_score(ix, pr, row),
     }
 }
@@ -928,7 +1036,7 @@ pub fn exact_ge2(ix: &Index2, pr: &Prep2, row: usize, t: f64, st: &mut Stats) ->
                 false
             } else {
                 st.exact_fallbacks += 1;
-                exact_ge(exact_dot(&pr.q16, ix.full_row_f16(row)), t)
+                exact_ge(exact_dot(&pr.q16, ix.full_row_f16(row)), pr.from_w(t))
             }
         }
         Full2::Synth(s) => s.exact_score(ix, pr, row) >= t,
@@ -1131,7 +1239,7 @@ struct RandLv<'a> {
     nd: [f32; J],
     inb: [f32; J],   // 1 / (block size - 1)
     dk: [f32; J],    // kappa rounding bound and the estimate's 16 u
-    ekw: [f32; J],   // table and weight error per unit kappa
+    ekw: [f32; J],   // table and weight error per unit decoded kappa
     csgl: f32,
     dial: f32,
     alr: f32,
@@ -1448,6 +1556,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         let tt = tick();
         st.cyc[P_LVSETUP] += tt - tl1;
+        let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
         let lut: &LevelLut = {
             if cq.luts[l].is_none() {
                 st.cyc[C_TABLES] += 1;
@@ -1455,7 +1564,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 st.cyc[C_TSURV] += live as u64;
                 st.cyc[C_TSMALL] += (live <= 8) as u64;
                 let mut lut = sv.lut();
-                let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
                     let gt = gq.gtab[l].get_or_init(|| group_tab(w, lp, &ix.etab));
                     combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
@@ -1466,6 +1574,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
             cq.luts[l].as_ref().unwrap()
         };
+        // tables are cached by level alone: the integer levels must not read ones built with another step
+        assert!(step.map_or(true, |s| lut.parts.iter().all(|p| p.scale == s)), "level {l}'s cached tables have another step than the integer levels' {step:?}; open the cluster afresh for another mode");
         st.cyc[P_TABLES] += tick() - tt;
         let tls = tick();
         for pl in &lut.parts {
@@ -1592,7 +1702,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 nd: cq.nd,
                 inb: std::array::from_fn(|j| 1.0 / (gp.nb[j] - 1) as f32),
                 dk: std::array::from_fn(|j| dmxj[j] + (16.0 * U) as f32),
-                ekw: std::array::from_fn(|j| ej[j] + cq.ewj[j]),
+                // ej and ewj bound the error per unit of the true kappa, which is at most the decoded one times 1 + dmxj
+                ekw: std::array::from_fn(|j| (ej[j] + cq.ewj[j]) * (1.0 + dmxj[j])),
                 csgl: gp.csgl[lr],
                 dial: pr.dial[l],
                 alr: cq.alr,
@@ -2560,6 +2671,7 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 /// Certified scan of the visible set (every row when vis is None): every visible row's full vector, exact near the
 /// threshold.
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
+    check_threshold(t);
     let nl = ix.meta.nl();
     let nch = scan_chunks(ix, vis);
     // every row's full vector on file: read through io_uring, each thread's chunks read while it decides the earlier
@@ -2676,12 +2788,12 @@ pub fn decide_full_from<'a>(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_
                 false
             } else {
                 acc.st.exact_fallbacks += 1;
-                exact_ge(exact_dot(&pr.q16, x), t)
+                exact_ge(exact_dot(&pr.q16, x), pr.from_w(t))
             };
             if inn {
                 acc.rows.push(pend[k + q]);
                 if want_exact {
-                    acc.exact.push((pend[k + q], exact_to_f64(exact_dot(&pr.q16, x))));
+                    acc.exact.push((pend[k + q], pr.to_w(exact_to_f64(exact_dot(&pr.q16, x)))));
                 }
             }
         }
@@ -2730,7 +2842,7 @@ pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_ex
                     false
                 } else {
                     acc.st.exact_fallbacks += 1;
-                    exact_ge(exact_dot(&pr.q16, ix.full_row_f16(row as usize)), t)
+                    exact_ge(exact_dot(&pr.q16, ix.full_row_f16(row as usize)), pr.from_w(t))
                 };
                 if inn {
                     acc.rows.push(row);
@@ -3024,11 +3136,47 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     Planned::Run { pre, use_idx, cut_cyc }
 }
 
+/// An interval [lb, ub] as f32, rounded outward.
+fn f32_outward(lb: f64, ub: f64) -> (f32, f32) {
+    use crate::query::next_up_if_below as up;
+    (-up(-lb as f32, -lb), up(ub as f32, ub))
+}
+
+/// Why a threshold cannot be answered, if it cannot: NaN, which no score reaches and which the paths' comparisons
+/// would not all treat alike.
+pub fn threshold_ok(t: f64) -> Result<(), String> {
+    if t.is_nan() {
+        return Err("the threshold is NaN; give a number (+inf for an empty answer, -inf for every visible item)".into());
+    }
+    Ok(())
+}
+
+/// Refuses a threshold `threshold_ok` refuses.
+pub fn check_threshold(t: f64) {
+    if let Err(e) = threshold_ok(t) {
+        panic!("{e}");
+    }
+}
+
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
-    match plan2(ix, pr, t, o) {
+    check_threshold(t);
+    let run = |pr: &Prep2, t: f64| match plan2(ix, pr, t, o) {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, cut_cyc),
-    }
+    };
+    // the scaled query kept with pr, unless pr's dial has changed since it was made
+    let fresh;
+    let w = match pr.unit_of.get_or_init(|| pr.scaled().map(Box::new)).as_deref() {
+        None => return run(pr, t),
+        Some(w) if w.dial == pr.dial => w,
+        Some(_) => {
+            fresh = pr.scaled().unwrap();
+            &fresh
+        }
+    };
+    let mut out = run(w, w.thr_w(ix, t));
+    w.back(&mut out);
+    out
 }
 
 /// A cluster's per-query setup for a threshold query under plan `pl`, on the integer deterministic levels when `int`.
@@ -3049,6 +3197,7 @@ pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: P
 
 /// The threshold query over the clusters as planned.
 pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], cut_cyc: u64) -> ThrOut2 {
+    check_threshold(t);
     let nl = ix.meta.nl();
     let k = ix.k();
     let rr = ix.x2.sqrt();
@@ -3088,7 +3237,8 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                 each(r0, r1, &mut |r| {
                     acc.rows.push(r as u32);
                     if let Some(x) = iv {
-                        acc.iv.push((r as u32, x.0 as f32, x.1 as f32, 255));
+                        let (lb, ub) = f32_outward(x.0, x.1);
+                        acc.iv.push((r as u32, lb, ub, 255));
                     }
                 });
             };
@@ -3104,22 +3254,22 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     if o.want_iv && !ix.nukey.is_empty() {
                         let qm = pr.qm(ix, ci);
                         let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
+                        let (lb, ub) = f32_outward(lb, ub);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
-                            x.1 = lb as f32;
-                            x.2 = ub as f32;
+                            (x.1, x.2) = (lb, ub);
                         }
                     } else if o.want_iv {
                         // interval from the table alone
                         let Anc { a, beta: b, rho } = pr.anc(ix);
                         let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
                         let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
+                        let (lb, ub) = f32_outward(bl - rho * rr, bh + rho * rr);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
-                            x.1 = (bl - rho * rr) as f32;
-                            x.2 = (bh + rho * rr) as f32;
+                            (x.1, x.2) = (lb, ub);
                         }
                     }
                 }
@@ -3149,7 +3299,8 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                                 Some(nc) => nc.bounds(nc.nu_of(ix.nukey[r])),
                                 None => key_interval2(ix, cu.as_ref().unwrap(), r),
                             };
-                            acc.iv.push((r as u32, lb as f32, ub as f32, 254));
+                            let (lb, ub) = f32_outward(lb, ub);
+                            acc.iv.push((r as u32, lb, ub, 254));
                         };
                         each(u0, d0, &mut take);
                         each(d1, u1, &mut take);
@@ -3694,7 +3845,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let tm = Timer::new();
     let nl = ix.meta.nl();
     let t0 = tick();
-    let mut pr = prep2(ix, q);
+    let mut pr = prep2(ix, q).unit();
     if let Some(d) = dial {
         pr.dial = d.to_vec();
     }
@@ -3720,6 +3871,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     }
     let (ents, mut st) = rd.finish();
     st.cyc[P_QUERY] += tick() - t0;
+    let ents = ents.into_iter().map(|(v, e)| (pr.from_w(v), e)).collect();
     KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
 }
 
@@ -3936,7 +4088,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
     if stored && (vis.is_some() || !ix.own_rows().is_some_and(|r| r.priced())) && plan.scan_first(ix, vis) {
         return scan(Stats::new(nl), 0.0);
     }
-    let pr = prep2(ix, q);
+    let pr = prep2(ix, q).unit();
     let mut st = Stats::new(nl);
     let tau1 = seed2(ix, &pr, kk, vis, &mut st);
     let t_seed = tm.ms();
@@ -3964,7 +4116,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
     }
     let mut rf = Refiner::new(ix, &pr);
     let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |req| rf.refine(req, &mut st), |r| exact_value2(ix, &pr, r as usize))
-        .into_iter().map(|(v, r)| (v, ix.row_ent[r as usize])).collect();
+        .into_iter().map(|(v, r)| (pr.from_w(v), ix.row_ent[r as usize])).collect();
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
     let t_sel = tm.ms() - t_seed - t_sweep;
@@ -4083,7 +4235,7 @@ pub struct Synth2 {
     pub vq: Vec<Vec<f64>>, // per group, row-major V_q (for item queries)
 }
 impl Synth2 {
-    pub fn gen(&self, c: usize, sid: u32, z: &mut [f64]) -> (i16, f64) {
+    pub fn gen(&self, c: usize, sid: u32, z: &mut [f64]) -> (i16, f64, f64) {
         use rand::{Rng, SeedableRng};
         use rand_distr::StandardNormal;
         let g = self.grp[c];
@@ -4108,7 +4260,8 @@ impl Synth2 {
             mz2 += mv[k] * z[k];
         }
         let a = (mn * mn + mz2) / mn;
-        ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, self.eg[g] * zz * t * t)
+        let (ah, ex) = crate::index::key_of(a);
+        (ah, ex, self.eg[g] * zz * t * t)
     }
     pub fn exact_score(&self, ix: &Index2, pr: &Prep2, row: usize) -> f64 {
         let c = self.row_cl[row] as usize;
@@ -4146,12 +4299,13 @@ impl<'a> Source2 for SynthSrc<'a> {
         let nc = self.sy.sizes[c];
         let mut z = vec![0f64; nc * n];
         let mut key: Vec<(i16, u32, usize)> = Vec::with_capacity(nc);
-        let mut x2max = 0f64;
+        let (mut x2max, mut kx) = (0f64, 0f64);
         let mut tmp = vec![0f64; n];
         for i in 0..nc {
             let sid = (self.sy.coff[c] + i) as u32;
-            let (ah, dev) = self.sy.gen(c, sid, &mut tmp);
+            let (ah, ex, dev) = self.sy.gen(c, sid, &mut tmp);
             x2max = x2max.max(dev + 1e-12);
+            kx = kx.max(ex);
             z[i * n..(i + 1) * n].copy_from_slice(&tmp);
             key.push((ah, sid, i));
         }
@@ -4160,6 +4314,6 @@ impl<'a> Source2 for SynthSrc<'a> {
         for (j, k) in key.iter().enumerate() {
             zs[j * n..(j + 1) * n].copy_from_slice(&z[k.2 * n..(k.2 + 1) * n]);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new(), x16: Vec::new() }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, kx, nu: Vec::new(), x16: Vec::new() }
     }
 }

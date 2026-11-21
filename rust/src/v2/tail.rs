@@ -138,7 +138,8 @@ pub fn convex_order(ds: &[usize], l1: f64) -> f64 {
         }
         f((lo + hi) / 2.0).min(f(ts[i]))
     };
-    let (mut lo, mut hi) = (1.0 / df.sqrt(), (2.0 * l1 / df).sqrt() * 1.2);
+    // x <= 1: U_D never exceeds 1, so P[X >= s] = 0, and every t searched stays below 1
+    let (mut lo, mut hi) = (1.0 / df.sqrt(), ((2.0 * l1 / df).sqrt() * 1.2).min(1.0));
     for _ in 0..50 {
         let mid = (lo + hi) / 2.0;
         if bound(mid) > -l1 { lo = mid } else { hi = mid }
@@ -264,6 +265,24 @@ mod tests {
             let b = chernoff(&DS, l1);
             assert!((b - ch).abs() < 1.5e-3, "Chernoff {b} against {ch}");
             assert_eq!(level_constant(&DS, l1, &[]).1, Source::ConvexOrder);
+        }
+    }
+    /// Blocks of so few dimensions that sqrt(2 l1 / D) passes 1: the bound is finite and at most theta sqrt(D) (x = 1,
+    /// which U_D never exceeds), and the level's constant no larger than the sub-Gaussian one.
+    #[test]
+    fn convex_order_of_small_blocks_is_finite() {
+        for ds in [vec![3usize, 7], vec![1, 1], vec![2, 5, 9], vec![15, 15]] {
+            let a = convex_order(&ds, ONE_1E9);
+            let d = ds.iter().sum::<usize>() as f64;
+            assert!(a.is_finite() && a > 0.0, "{ds:?}: {a}");
+            let theta2 = ds.iter().map(|&dj| {
+                let dj = dj as f64;
+                let m = (ln_gamma(dj / 2.0 + 0.5) + ln_gamma(d / 2.0) - ln_gamma(dj / 2.0) - ln_gamma(d / 2.0 + 0.5)).exp();
+                dj / (d * m * m)
+            }).fold(0.0, f64::max);
+            assert!(a <= (d * theta2).sqrt() * (1.0 + 1e-9), "{ds:?}: {a} past x = 1");
+            let (c, _) = level_constant(&ds, ONE_1E9, &[]);
+            assert!(c.is_finite() && c <= (2.0 * ONE_1E9).sqrt(), "{ds:?}: {c}");
         }
     }
     #[test]

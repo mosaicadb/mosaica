@@ -404,6 +404,9 @@ unsafe fn order16(e: __m256i, o: __m256i) -> __m256i {
 // magnitude at least 32,768, which g >> 8 (in [-2, 64]) cannot bring across zero.
 
 pub const IHMAX: i64 = 8128;
+/// The most units the deterministic levels may have together: Ls, the sum of their low bytes, must stay within
+/// 64 x 255 for the two-word compare.
+pub const DET_UNITS_MAX: usize = 64;
 pub const THETA_MAX: i64 = 256 * IHMAX + 64 * 255;
 pub const TMIN: i64 = -24000 * 256;
 pub const TMAX: i64 = 24000 * 256 + 255;
@@ -411,15 +414,21 @@ pub const RSENT: i64 = 32767 * 256;
 pub const RIN_MIN: i64 = THETA_MAX - TMAX + 1;
 pub const ROUT_MIN: i64 = TMIN;
 
+/// The units of the deterministic levels `levels`, checked against DET_UNITS_MAX.
+pub fn det_units(levels: &[LevelPlan]) -> usize {
+    let units = levels.iter().map(|l| l.units).sum();
+    assert!(units <= DET_UNITS_MAX, "{units} deterministic units overflow the 16-bit low-byte sums; at most {DET_UNITS_MAX} fit (deterministic levels ending at {} bytes)", DET_UNITS_MAX / 2);
+    units
+}
+
 /// The table step of a cluster's deterministic levels: the sum of the units' ranges (each the sum of its fields'
 /// ranges, as `build_lut` finds it) over the budget 256 IHMAX, or the widest unit range over 65,535 if that is larger,
 /// with margins for rounding.
 pub fn int_sigma(w: &[f32], levels: &[LevelPlan], et: &ExpTab) -> f32 {
+    let units = det_units(levels);
     let mut rmax = 0f64;
     let mut rsum = 0f64;
-    let mut units = 0;
     for lp in levels {
-        units += lp.units;
         for part in &lp.parts {
             for fs in &part.ufields {
                 let mut r = 0f64;
@@ -432,7 +441,6 @@ pub fn int_sigma(w: &[f32], levels: &[LevelPlan], et: &ExpTab) -> f32 {
             }
         }
     }
-    assert!(units <= 64, "{units} deterministic units overflow the 16-bit low-byte sums; at most 64 fit");
     let budget = (256 * IHMAX - 3 * units as i64) as f64;
     ((rsum * (1.0 + 1.0 / 512.0) / budget).max(rmax * (1.0 + 1.0 / 512.0) / 65535.0) as f32).max(1e-30)
 }
@@ -1104,8 +1112,8 @@ mod tests {
         if item < 16 { b & 15 } else { b >> 4 }
     }
 
-    /// The two-word compares against i64 arithmetic over the full ranges, with the extremes over-sampled; thresholds
-    /// beyond the clamp must never give a decision the true threshold would not.
+    /// The two-word compares against i64 arithmetic over the full ranges, Ls up to DET_UNITS_MAX units of 255, with the
+    /// extremes over-sampled; thresholds beyond the clamp must never give a decision the true threshold would not.
     #[test]
     fn two_word_compare_matches_i64() {
         let mut x = 0x9E3779B97F4A7C15u64;
@@ -1130,7 +1138,7 @@ mod tests {
             let mut rr = [[0i16; 16]; 4];
             let mut want = [(false, false); 16];
             for i in 0..16 {
-                let (h, l) = (rnd(0, IHMAX), rnd(0, 64 * 255));
+                let (h, l) = (rnd(0, IHMAX), rnd(0, DET_UNITS_MAX as i64 * 255));
                 hs[i] = h as i16;
                 ls[i] = l as i16;
                 let theta = 256 * h + l;

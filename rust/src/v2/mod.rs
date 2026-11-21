@@ -207,7 +207,7 @@ impl Default for OpenOptions {
 }
 
 use crate::derive;
-use crate::index::{item_scale, Params, DA, SEED};
+use crate::index::{item_scale, key_of, Params, DA, SEED};
 use crate::util::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -264,6 +264,9 @@ pub struct DetTab {
 }
 pub const TREE_DEPTHS: [usize; 3] = [1, 2, 4];
 pub const MAX_STAGES: usize = 4;
+/// The largest magnitude a deterministic coordinate decodes to (a tree centroid plus every residual stage), which the
+/// weights' rounding bound `ewdet` assumes.
+pub const DECODED_MAX: f64 = 3.5;
 
 impl DetTab {
     pub fn new(p: &Params) -> DetTab {
@@ -289,6 +292,8 @@ impl DetTab {
                 d[j][st + 1] = r.iter().map(|v| v * v).sum::<f64>() / ns as f64;
             }
         }
+        let top = TREE_DEPTHS.iter().map(|&j| cent[j].iter().map(|v| v.abs() as f64).fold(0.0, f64::max) + delta[j].iter().map(|v| v.abs() as f64).sum::<f64>()).fold(0.0, f64::max);
+        assert!(top < DECODED_MAX, "the fit's tree tables decode a coordinate to {top}, past the {DECODED_MAX} the deterministic levels' rounding bound assumes; refit them");
         DetTab { cent, edges, delta, d }
     }
     #[inline]
@@ -1139,6 +1144,7 @@ pub struct Cl2 {
     pub btot: f64,
     pub mvn: f64,
     pub rmax: f64,
+    pub kx: f64,         // the largest clamp excess of a key in the cluster (`da`)
     pub numax: f64,      // norm sort: the largest |z|, the grid of the stored codes (nu = numax code / 65535)
     pub bmin: f64,       // norm sort: bounds of m.r over the cluster
     pub bmax: f64,
@@ -1281,6 +1287,11 @@ pub fn anchor_mhat(anchors: &[f64], cl: &[Cl2], n: usize) -> Vec<f64> {
 pub const INDEX_FORMAT: u32 = 3;
 
 impl Cl2 {
+    /// The bound on |stored key - x . mhat| in this cluster: DA and the cluster's clamp excess.
+    #[inline]
+    pub fn da(&self) -> f64 {
+        DA + self.kx
+    }
     /// The centre's weights, as the query side combines them: det by coordinate mv sig (f32), rand by position.
     pub fn wm(&self, gp: &GroupPlan2) -> Vec<f32> {
         let mut w: Vec<f32> = self.mv32.iter().zip(&gp.sig).map(|(&m, &s)| m * s).collect();
@@ -1524,6 +1535,7 @@ pub struct Items2 {
     pub ent: Vec<u32>,
     pub ext: Vec<u32>,
     pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
+    pub kx: f64,    // largest clamp excess of a key (`index::key_of`)
     pub nu: Vec<f64>, // with the norm sort: |z|, the residual's norm in the metric, rounded up
     pub x16: Vec<u16>, // the f16 vectors in the same order (empty for a source without stored vectors)
 }
@@ -1540,7 +1552,7 @@ impl Items2 {
             z[i * n..(i + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
         }
         let x16 = if self.x16.is_empty() { Vec::new() } else { o.iter().flat_map(|&k| self.x16[k * n..(k + 1) * n].iter().copied()).collect() };
-        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect(), x16 }
+        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, kx: self.kx, nu: o.iter().map(|&k| nu[k]).collect(), x16 }
     }
 }
 
@@ -1564,6 +1576,7 @@ pub trait Source2: Sync {
             ent: keep.iter().map(|&i| it.ent[i]).collect(),
             ext: keep.iter().map(|&i| it.ext[i]).collect(),
             x2max: it.x2max,
+            kx: it.kx,
             nu: Vec::new(),
             x16: Vec::new(),
         }
@@ -1596,10 +1609,12 @@ impl<R: crate::bucket::FitRows> Real2<R> {
     fn rows_of(&self, c: usize, rows: impl Iterator<Item = usize>, p: &Params, gp: &GroupPlan2, mhat: &[f64], x16: bool) -> Items2 {
         let n = self.src.n();
         let m = &p.centres[c * n..(c + 1) * n];
+        let mut kx = 0f64;
         let mut key: Vec<(i16, usize)> = rows.map(|r| {
             let x = self.src.row(r);
-            let a: f64 = x.iter().zip(mhat).map(|(&h, &mh)| f16_to_f32(h) as f64 * mh).sum();
-            ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, r)
+            let (ah, ex) = key_of(x.iter().zip(mhat).map(|(&h, &mh)| f16_to_f32(h) as f64 * mh).sum());
+            kx = kx.max(ex);
+            (ah, r)
         }).collect();
         key.sort();
         let nc = key.len();
@@ -1621,7 +1636,7 @@ impl<R: crate::bucket::FitRows> Real2<R> {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
         let x16 = if x16 { key.iter().flat_map(|k| self.src.row(k.1).iter().copied()).collect() } else { Vec::new() };
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new(), x16 }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, kx, nu: Vec::new(), x16 }
     }
 }
 
@@ -1866,9 +1881,8 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 }
 
 /// Query-independent per-cluster data.
-fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f64, n: usize) -> Cl2 {
+fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], kx: f64, x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-    assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
     // mv = V_q^T m
     let mut mv = vec![0f64; n];
@@ -1899,10 +1913,6 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f
         }
     }
     let mn32 = mn as f32;
-    let rmax = ah.iter().map(|&a| {
-        let al = a as f64 / 32767.0 - DA;
-        (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
-    }).fold(0f64, f64::max);
     let nc = ah.len();
     let mut l1m = [0f32; J + 1];
     l1m[0] = (wm[..n].iter().map(|x| x.abs() as f64).sum::<f64>() * 1.001) as f32;
@@ -1911,7 +1921,12 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
+    let mut c = Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax: 0.0, kx, numax: 0.0, bmin: 0.0, bmax: 0.0 };
+    c.rmax = ah.iter().map(|&a| {
+        let al = a as f64 / 32767.0 - c.da();
+        (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
+    }).fold(0f64, f64::max);
+    c
 }
 
 /// What the build and the opening of a saved index both derive from the fit: the level metadata, the rotations, the
@@ -2178,6 +2193,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     struct Done {
         esc: Vec<(u8, u8, u32, f32)>,
         x2max: f64,
+        kx: f64,
         numax: f64,
         ord_s: f64,
     }
@@ -2230,10 +2246,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 ord_dsc.put(c * ord_r, &co.dsc);
                 ord_dirs.put(c * ord_r * n, &co.dirs8);
             }
-            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: to.s() }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: to.s() }
         } else {
             unsafe { ext.put(r0, &it.ext) };
-            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: 0.0 }
+            Done { esc: cc.esc, x2max: it.x2max, kx: it.kx, numax, ord_s: 0.0 }
         }
     }).collect();
     log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
@@ -2251,14 +2267,14 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let ah_all = ahat.get();
     let cl: Vec<Cl2> = (0..k).into_par_iter().map(|c| {
         let ah = &ah_all[row0[c]..row0[c + 1]];
-        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, ah, x2, n);
+        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, ah, done[c].kx, x2, n);
         (info.g, info.r0, info.r1) = (p.grp[c], row0[c], row0[c + 1]);
         if nusort {
-            // m.r = mn a - mn^2 from the key, within mn DA
+            // m.r = mn a - mn^2 from the key, within mn da
             info.numax = done[c].numax;
             let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
-            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
-            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
+            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * info.da() + 1e-12;
+            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * info.da() - 1e-12;
         }
         info
     }).collect();
@@ -2364,6 +2380,10 @@ fn prepare_with(dir: &str, o: &BuildOptions, anchors: Option<&Option<Vec<f64>>>)
     }
     if p.meta.dlv.is_empty() || p.meta.dlv.len() > NDL_MAX {
         return Err(format!("the fit's deterministic levels {:?} are not 1 to {NDL_MAX} levels; give others with BuildOptions::dlv (--dlv)", p.meta.dlv));
+    }
+    // 8 bits a byte, 4 a unit
+    if 2 * p.meta.dlv[p.meta.dlv.len() - 1] > kern::DET_UNITS_MAX {
+        return Err(format!("the deterministic levels {:?} end past {} bytes, the most the integer kernel's 16-bit sums hold; give levels ending at {} bytes or fewer with BuildOptions::dlv (--dlv)", p.meta.dlv, kern::DET_UNITS_MAX / 2, kern::DET_UNITS_MAX / 2));
     }
     if let Some(new) = &o.rlv {
         let top = p.meta.dlv.last().copied().unwrap_or(0);

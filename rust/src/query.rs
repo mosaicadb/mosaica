@@ -14,6 +14,7 @@ pub struct Cut {
     pub bl: f64,
     pub rm: f64,
     pub rp: f64,
+    pub da: f64, // the cluster's key error bound (Cl2::da)
 }
 
 // ---------------- visibility ----------------

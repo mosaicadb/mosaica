@@ -735,8 +735,7 @@ impl Adaptive {
             o.st.touched = o.st.touched.max(o.st.full_reads);
             return (o, info);
         }
-        let mut pr = prep2(ix, q);
-        pr.dial = self.dial(psi);
+        let pr = prep2(ix, q);
         let mut st = Stats::new(nl);
         if nvis <= kk {
             info.path = "scan";
@@ -744,6 +743,9 @@ impl Adaptive {
             st.touched += nvis as u64;
             return (out(scan_knn(ix, &pr.q16, &pr.q32, pr.qn, kk, vis), st), info);
         }
+        // scores below are the scaled query's (Prep2::unit), scaled back on the way out
+        let mut pr = pr.unit();
+        pr.dial = self.dial(psi);
         let tc = tick();
         let qm = self.centres.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - tc;
@@ -896,7 +898,7 @@ impl Adaptive {
         info.path = "probe";
         info.cost = info.direct_cost + info.index_cost + info.sigma_cost;
         let (ents, st) = rd.finish();
-        (out(ents, st), info)
+        (out(ents.into_iter().map(|(v, e)| (pr.from_w(v), e)).collect(), st), info)
     }
 
     /// The approximate threshold query at t with knob `psi` (at least 0; `PSI` by default), as the module's comment
@@ -906,6 +908,7 @@ impl Adaptive {
     /// reads' (and the exact query's on a hand-over).
     pub fn threshold(&self, ix: &Index2, q: &[f32], t: f64, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (ThrOut2, AdaptiveInfo) {
         assert!(psi >= 0.0, "psi is at least 0 (infinity reads every cluster), not {psi}");
+        check_threshold(t);
         let t0 = tick();
         let (k, nl, m) = (ix.k(), ix.meta.nl(), &self.m);
         let pr = prep2(ix, q);
@@ -934,6 +937,9 @@ impl Adaptive {
             let out = threshold2(ix, &pr, t, &opts);
             return (done(out, &st), info);
         }
+        // the scaled query (Prep2::unit) and t in its units; its answer's scores are scaled back on the way out
+        let pr = pr.unit();
+        let t = pr.thr_w(ix, t);
         let tc = tick();
         let qm = self.centres.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - tc;
@@ -1025,7 +1031,8 @@ impl Adaptive {
         st.cyc[C_INDEX] += info.index as u64;
         st.cyc[C_GROUPS] += info.groups as u64;
         st.cyc[C_VISITED] += info.read.len() as u64;
-        let out = run_planned(ix, &pr, t, &opts, &pre, &use_idx, tick() - tc);
+        let mut out = run_planned(ix, &pr, t, &opts, &pre, &use_idx, tick() - tc);
+        pr.back(&mut out);
         (done(out, &st), info)
     }
 }

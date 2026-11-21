@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
 use vexact::v2::adaptive::{measured_constants, Adaptive, AdaptiveInfo, PSI};
-use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, threshold2, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, query_ok, threshold2, threshold_ok, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -25,11 +25,12 @@ struct Index {
     adaptive: Result<Adaptive, String>,
 }
 
-/// The query's length against the index's, and k at least 1 (k-NN), as errors to raise.
+/// The query's length against the index's, the query itself (`query_ok`), and k at least 1 (k-NN), as errors to raise.
 fn check_query(ix: &Index2, q: &[f32], k: Option<usize>) -> PyResult<()> {
     if q.len() != ix.n() {
         return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), ix.n())));
     }
+    query_ok(q).map_err(PyValueError::new_err)?;
     if k == Some(0) {
         return Err(PyValueError::new_err("k must be at least 1"));
     }
@@ -188,6 +189,7 @@ impl Index {
     fn threshold_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
         let ad = self.adaptive_args(q, None, psi)?;
+        threshold_ok(t).map_err(PyValueError::new_err)?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| {
             let r = ad.threshold(ix, q, t, vis, psi, plan).0;
@@ -205,6 +207,7 @@ impl Index {
     fn explain_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let q = q.as_slice()?;
         let ad = self.adaptive_args(q, if t.is_none() { Some(k) } else { None }, psi)?;
+        t.map_or(Ok(()), threshold_ok).map_err(PyValueError::new_err)?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let tm = std::time::Instant::now();
         let (i, st) = py.detach(|| self.pool.install(|| match t {
@@ -235,6 +238,7 @@ impl Index {
     fn profile_approx(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<(Vec<u64>, f64)> {
         let q = q.as_slice()?;
         let ad = self.adaptive_args(q, if t.is_none() { Some(k) } else { None }, psi)?;
+        t.map_or(Ok(()), threshold_ok).map_err(PyValueError::new_err)?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         Ok(py.detach(|| self.pool.install(|| {
             vexact::v2::q::PROF.store(true, Relaxed);
@@ -269,6 +273,7 @@ impl Index {
     /// The exact k nearest entity ids by cosine, best first (-1 where fewer than k are visible).
     fn knn<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| knn2(ix, q, k, vis, plan).ents));
         Ok(ids(py, &ents, k))
@@ -278,6 +283,7 @@ impl Index {
     /// by nprobe (`knn2_fast`), exact search of the visible items of the first `nprobe` clusters.
     fn knn_nprobe<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, nprobe: usize) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| knn2_fast(ix, ap, q, k, vis, nprobe, None, plan).ents));
         Ok(ids(py, &ents, k))
@@ -291,9 +297,8 @@ impl Index {
     #[pyo3(signature = (q, t, verify=false))]
     fn threshold<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, verify: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
-        if q.len() != self.ix.n() {
-            return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), self.ix.n())));
-        }
+        check_query(&self.ix, q, None)?;
+        threshold_ok(t).map_err(PyValueError::new_err)?;
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let (ents, viol) = py.detach(|| {
             self.pool.install(|| {
@@ -314,6 +319,9 @@ impl Index {
         use rayon::prelude::*;
         let a = qs.as_array();
         let rows: Vec<Vec<f32>> = a.outer_iter().map(|r| r.to_vec()).collect();
+        for q in &rows {
+            check_query(&self.ix, q, Some(k))?;
+        }
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let out: Vec<Vec<(f64, u32)>> = py.detach(|| rows.par_iter().map(|q| knn2(ix, q, k, vis, plan).ents).collect());
         Ok(out.iter().map(|e| ids(py, e, k)).collect())
@@ -330,6 +338,7 @@ impl Index {
     #[pyo3(signature = (q, k, nprobe=None))]
     fn explain(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: Option<usize>) -> PyResult<(u64, u64, u64, f64)> {
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let t = std::time::Instant::now();
         let o: KnnOut2 = py.detach(|| self.pool.install(|| match nprobe {
@@ -344,6 +353,7 @@ impl Index {
     /// counter's cycles per second.
     fn profile(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: usize) -> PyResult<(Vec<u64>, f64)> {
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let (cyc, hz) = py.detach(|| self.pool.install(|| {
             vexact::v2::q::PROF.store(true, Relaxed);
