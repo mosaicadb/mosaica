@@ -1,0 +1,15 @@
+[      3s] pass 1 {'pass': 1, 'moved_fit': 0.276036872507037, 'share_at_first_choice': 0.7239497872226891, 'fit_min': 109, 'fit_max': 825}
+[      4s] pass 2 {'pass': 2, 'moved_fit': 0.2960406077827137, 'share_at_first_choice': 0.795900534944838, 'fit_min': 106, 'fit_max': 825}
+[      5s] pass 3 {'pass': 3, 'moved_fit': 0.194547831539067, 'share_at_first_choice': 0.847540721175011, 'fit_min': 106, 'fit_max': 825}
+[      6s] pass 4 {'pass': 4, 'moved_fit': 0.14083990341644323, 'share_at_first_choice': 0.8770293886154134, 'fit_min': 106, 'fit_max': 825}
+[      7s] pass 5 {'pass': 5, 'moved_fit': 0.11160470111124451, 'share_at_first_choice': 0.8945785141606969, 'fit_min': 106, 'fit_max': 825}
+[      8s] pass 6 {'pass': 6, 'moved_fit': 0.09567641840423687, 'share_at_first_choice': 0.9010485452435266, 'fit_min': 106, 'fit_max': 825}
+[      9s] pass 7 {'pass': 7, 'moved_fit': 0.08537772975280479, 'share_at_first_choice': 0.9061445284881472, 'fit_min': 106, 'fit_max': 825}
+[     10s] pass 8 {'pass': 8, 'moved_fit': 0.07892770907538586, 'share_at_first_choice': 0.9115073171382452, 'fit_min': 106, 'fit_max': 825}
+[     11s] pass 9 {'pass': 9, 'moved_fit': 0.07404517015514735, 'share_at_first_choice': 0.9146089299769213, 'fit_min': 106, 'fit_max': 825}
+[     12s] pass 10 {'pass': 10, 'moved_fit': 0.06538066461226505, 'share_at_first_choice': 0.9160229986259522, 'fit_min': 106, 'fit_max': 825}
+[     13s] pass 11 {'pass': 11, 'moved_fit': 0.058090206907591944, 'share_at_first_choice': 0.9173103347073812, 'fit_min': 106, 'fit_max': 825}
+[     14s] pass 12 {'pass': 12, 'moved_fit': 0.05428822987953736, 'share_at_first_choice': 0.9182508237616894, 'fit_min': 106, 'fit_max': 825}
+[     39s] D coding done {'Si_S1a_mean': 0.2092, 'Si_S1a_rms': 0.2234, 'Si_S1d_4': 0.1479, 'Si_S1d_8': 0.1239, 'Si_S1d_16': 0.0958, 'Si_S1d_32': 0.0665, 'Si_S1b_0.03': 81.9241, 'Si_S1b_0.06': 36.7248, 'Si_S1b_0.12': 10.4964}
+[     49s] D structure done; violations 0 0
+[     49s] done

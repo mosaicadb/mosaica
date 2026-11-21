@@ -1,0 +1,4 @@
+[     10s] sweep-sub-K100 fixed point after 35 passes; K 100 last moves [0.001, 0.001, 0.0009]
+[     19s] sweep-sub-K100 {'Si_S1a_mean': 0.2385, 'Si_S1a_rms': 0.2526, 'Si_S1d_4': 0.1759, 'Si_S1d_8': 0.1495, 'Si_S1d_16': 0.1175, 'Si_S1d_32': 0.0823, 'Si_S1b_0.03': 101.1498, 'Si_S1b_0.06': 48.9171, 'Si_S1b_0.12': 15.8947}
+[     29s] sweep-sub-K100 violations 0 0
+[     29s] done

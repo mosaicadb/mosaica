@@ -1,0 +1,166 @@
+{
+ "angle_baseline": 18.49028781919165,
+ "B0-in": {
+  "passes": [
+   {
+    "pass": 0,
+    "obj_fit_msq": 0.047701995892439786,
+    "obj_held_msq": 0.048555843920061716,
+    "insample_value_sumNgWg2_over_N": 0.04770199589243952,
+    "moved": 7,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 1,
+    "obj_fit_msq": 0.04748331304640268,
+    "obj_held_msq": 0.048339529422746705,
+    "insample_value_sumNgWg2_over_N": 0.047483313046402555,
+    "moved": 0,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   }
+  ],
+  "angle": 18.487588143142613,
+  "cells_changed_group": 7,
+  "fit_rows_changed_group": 2538
+ },
+ "B0-in-moves": {
+  "tried": 198,
+  "kept": 29,
+  "refused_floor": 2,
+  "value_before": 0.047483313046402555,
+  "value_after": 0.047024061216161754,
+  "angle": 18.820907381654575,
+  "cells_changed_group": 35
+ },
+ "B0-cf": {
+  "passes": [
+   {
+    "pass": 0,
+    "obj_fit_msq": 0.04873943576096062,
+    "obj_held_msq": 0.05059087029007416,
+    "insample_value_sumNgWg2_over_N": 0.0474268457088662,
+    "moved": 8,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 1,
+    "obj_fit_msq": 0.04852089945632443,
+    "obj_held_msq": 0.05037878893433185,
+    "insample_value_sumNgWg2_over_N": 0.04720179651298574,
+    "moved": 1,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 2,
+    "obj_fit_msq": 0.048515399836161266,
+    "obj_held_msq": 0.05037141602718601,
+    "insample_value_sumNgWg2_over_N": 0.047197931050837506,
+    "moved": 0,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   }
+  ],
+  "angle": 18.52810095194485,
+  "cells_changed_group": 9,
+  "fit_rows_changed_group": 2829
+ },
+ "B16-in": {
+  "passes": [
+   {
+    "pass": 0,
+    "obj_fit_msq": 0.010208330726310878,
+    "obj_held_msq": 0.010527122043145647,
+    "insample_value_sumNgWg2_over_N": 0.010208330726310753,
+    "moved": 7,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 1,
+    "obj_fit_msq": 0.010118663406344446,
+    "obj_held_msq": 0.010433091922582412,
+    "insample_value_sumNgWg2_over_N": 0.010118663406344377,
+    "moved": 2,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 2,
+    "obj_fit_msq": 0.010075376773296351,
+    "obj_held_msq": 0.010392373345265925,
+    "insample_value_sumNgWg2_over_N": 0.010075376773296256,
+    "moved": 3,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 3,
+    "obj_fit_msq": 0.00999232040271951,
+    "obj_held_msq": 0.010313583258122382,
+    "insample_value_sumNgWg2_over_N": 0.009992320402719412,
+    "moved": 0,
+    "refused_floor": 0,
+    "groups_nonempty": 12
+   }
+  ],
+  "angle": 18.563408181854324,
+  "cells_changed_group": 12,
+  "fit_rows_changed_group": 6450
+ },
+ "B16-in-moves": {
+  "tried": 199,
+  "kept": 31,
+  "refused_floor": 1,
+  "value_before": 0.009992320402719412,
+  "value_after": 0.009850113873243247,
+  "angle": 18.964017897566947,
+  "cells_changed_group": 42
+ },
+ "B16-cf": {
+  "passes": [
+   {
+    "pass": 0,
+    "obj_fit_msq": 0.010626571362284992,
+    "obj_held_msq": 0.011325651428410735,
+    "insample_value_sumNgWg2_over_N": 0.010074797837639832,
+    "moved": 10,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 1,
+    "obj_fit_msq": 0.010508804386163795,
+    "obj_held_msq": 0.011208426394403769,
+    "insample_value_sumNgWg2_over_N": 0.00995419727467848,
+    "moved": 2,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 2,
+    "obj_fit_msq": 0.010455572626117465,
+    "obj_held_msq": 0.011155135757277671,
+    "insample_value_sumNgWg2_over_N": 0.009900879549275392,
+    "moved": 1,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   },
+   {
+    "pass": 3,
+    "obj_fit_msq": 0.010411196171405868,
+    "obj_held_msq": 0.011115002061084468,
+    "insample_value_sumNgWg2_over_N": 0.009859333741279574,
+    "moved": 0,
+    "refused_floor": 3,
+    "groups_nonempty": 12
+   }
+  ],
+  "angle": 18.557802475363165,
+  "cells_changed_group": 13,
+  "fit_rows_changed_group": 6599
+ }
+}

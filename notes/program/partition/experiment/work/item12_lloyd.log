@@ -7,3 +7,60 @@
 [     70s] pass 3 {'pass': 3, 'moved_fit': 0.026813943250490253, 'moved_all': 0.027368684342171084, 'K': 200, 'mean_key_fit_sample': 0.918781579824665}
 [     71s] pass 4 {'pass': 4, 'moved_fit': 0.022885233654833848, 'moved_all': 0.023366683341670837, 'K': 200, 'mean_key_fit_sample': 0.9189076137990023}
 [     71s] pass 5 {'pass': 5, 'moved_fit': 0.01998372487026587, 'moved_all': 0.020475237618809403, 'K': 200, 'mean_key_fit_sample': 0.9190224484152328}
+[     92s] A1-lloyd5 coding done {'Si_S1a_mean': 0.2062, 'Si_S1a_rms': 0.2202, 'Si_S1d_4': 0.1466, 'Si_S1d_8': 0.1229, 'Si_S1d_16': 0.0952, 'Si_S1d_32': 0.0661, 'Si_S1b_0.03': 81.4955, 'Si_S1b_0.06': 36.4347, 'Si_S1b_0.12': 10.3557}
+[    103s] A1-lloyd5 structure done; violations 0 0
+[    103s] pass 6 {'pass': 6, 'moved_fit': 0.01722228892357359, 'moved_all': 0.01743871935967984, 'K': 200, 'mean_key_fit_sample': 0.9190789642302346}
+[    104s] pass 7 {'pass': 7, 'moved_fit': 0.015454703112285055, 'moved_all': 0.015652826413206603, 'K': 200, 'mean_key_fit_sample': 0.9191026055670047}
+[    104s] pass 8 {'pass': 8, 'moved_fit': 0.013467002841477569, 'moved_all': 0.013566783391695848, 'K': 200, 'mean_key_fit_sample': 0.9191262198296113}
+[    105s] pass 9 {'pass': 9, 'moved_fit': 0.011479302570670083, 'moved_all': 0.012021010505252627, 'K': 200, 'mean_key_fit_sample': 0.9191440886339761}
+[    105s] pass 10 {'pass': 10, 'moved_fit': 0.010285348381158202, 'moved_all': 0.010475237618809405, 'K': 200, 'mean_key_fit_sample': 0.9191586287154673}
+[    126s] A1-lloyd10 coding done {'Si_S1a_mean': 0.2064, 'Si_S1a_rms': 0.2203, 'Si_S1d_4': 0.1469, 'Si_S1d_8': 0.1231, 'Si_S1d_16': 0.0954, 'Si_S1d_32': 0.0663, 'Si_S1b_0.03': 81.7785, 'Si_S1b_0.06': 36.5937, 'Si_S1b_0.12': 10.4019}
+[    137s] A1-lloyd10 structure done; violations 0 0
+[    138s] pass 11 {'pass': 11, 'moved_fit': 0.009511612705273408, 'moved_all': 0.00952976488244122, 'K': 200, 'mean_key_fit_sample': 0.919170404056169}
+[    138s] pass 12 {'pass': 12, 'moved_fit': 0.008751217299662491, 'moved_all': 0.008934467233616808, 'K': 200, 'mean_key_fit_sample': 0.9191832379304198}
+[    139s] pass 13 {'pass': 13, 'moved_fit': 0.007817398380491189, 'moved_all': 0.008029014507253627, 'K': 200, 'mean_key_fit_sample': 0.9191966917681066}
+[    139s] pass 14 {'pass': 14, 'moved_fit': 0.0064633609476928006, 'moved_all': 0.006938469234617308, 'K': 200, 'mean_key_fit_sample': 0.9192067358841387}
+[    140s] pass 15 {'pass': 15, 'moved_fit': 0.00608983338002428, 'moved_all': 0.006168084042021011, 'K': 200, 'mean_key_fit_sample': 0.9192127116344483}
+[    140s] pass 16 {'pass': 16, 'moved_fit': 0.005829698109683703, 'moved_all': 0.00583791895947974, 'K': 200, 'mean_key_fit_sample': 0.9192198420742439}
+[    141s] pass 17 {'pass': 17, 'moved_fit': 0.005055962433798909, 'moved_all': 0.0051775887943971985, 'K': 200, 'mean_key_fit_sample': 0.919224694639781}
+[    141s] pass 18 {'pass': 18, 'moved_fit': 0.004915889595923213, 'moved_all': 0.005032516258129065, 'K': 200, 'mean_key_fit_sample': 0.9192292330540177}
+[    142s] pass 19 {'pass': 19, 'moved_fit': 0.004375608649831246, 'moved_all': 0.00464232116058029, 'K': 200, 'mean_key_fit_sample': 0.9192332788004598}
+[    142s] pass 20 {'pass': 20, 'moved_fit': 0.004215525406544737, 'moved_all': 0.004347173586793397, 'K': 200, 'mean_key_fit_sample': 0.9192361272542184}
+[    164s] A1-lloyd20 coding done {'Si_S1a_mean': 0.2063, 'Si_S1a_rms': 0.2203, 'Si_S1d_4': 0.1468, 'Si_S1d_8': 0.1231, 'Si_S1d_16': 0.0954, 'Si_S1d_32': 0.0662, 'Si_S1b_0.03': 81.7455, 'Si_S1b_0.06': 36.5718, 'Si_S1b_0.12': 10.3899}
+[    175s] A1-lloyd20 structure done; violations 0 0
+[    176s] pass 21 {'pass': 21, 'moved_fit': 0.003728605541548272, 'moved_all': 0.003871935967983992, 'K': 200, 'mean_key_fit_sample': 0.9192386294832631}
+[    177s] pass 22 {'pass': 22, 'moved_fit': 0.0035751924333987006, 'moved_all': 0.0037968984492246123, 'K': 200, 'mean_key_fit_sample': 0.919242250406898}
+[    177s] pass 23 {'pass': 23, 'moved_fit': 0.0032616960819626204, 'moved_all': 0.0034617308654327165, 'K': 200, 'mean_key_fit_sample': 0.9192476017957067}
+[    178s] pass 24 {'pass': 24, 'moved_fit': 0.003088272568402236, 'moved_all': 0.0031915957978989494, 'K': 200, 'mean_key_fit_sample': 0.9192533949282369}
+[    178s] pass 25 {'pass': 25, 'moved_fit': 0.0029281893251157268, 'moved_all': 0.003311655827913957, 'K': 200, 'mean_key_fit_sample': 0.9192561107665967}
+[    179s] pass 26 {'pass': 26, 'moved_fit': 0.00276143594669228, 'moved_all': 0.002836418209104552, 'K': 200, 'mean_key_fit_sample': 0.9192594030167235}
+[    179s] pass 27 {'pass': 27, 'moved_fit': 0.00254132148717333, 'moved_all': 0.002781390695347674, 'K': 200, 'mean_key_fit_sample': 0.9192621886602854}
+[    180s] pass 28 {'pass': 28, 'moved_fit': 0.002494630541214765, 'moved_all': 0.002701350675337669, 'K': 200, 'mean_key_fit_sample': 0.9192655892897399}
+[    180s] pass 29 {'pass': 29, 'moved_fit': 0.002614692973679647, 'moved_all': 0.0027263631815907952, 'K': 200, 'mean_key_fit_sample': 0.9192706258610988}
+[    181s] pass 30 {'pass': 30, 'moved_fit': 0.002828137298061659, 'moved_all': 0.002981490745372686, 'K': 200, 'mean_key_fit_sample': 0.9192759010106588}
+[    181s] pass 31 {'pass': 31, 'moved_fit': 0.0031949947305932418, 'moved_all': 0.003406703351675838, 'K': 200, 'mean_key_fit_sample': 0.9192961360434934}
+[    182s] pass 32 {'pass': 32, 'moved_fit': 0.0030082309467589813, 'moved_all': 0.003246623311655828, 'K': 200, 'mean_key_fit_sample': 0.9193227050997153}
+[    182s] pass 33 {'pass': 33, 'moved_fit': 0.0024012486492976347, 'moved_all': 0.00256128064032016, 'K': 200, 'mean_key_fit_sample': 0.9193253543169974}
+[    183s] pass 34 {'pass': 34, 'moved_fit': 0.0023545577033390695, 'moved_all': 0.002446223111555778, 'K': 200, 'mean_key_fit_sample': 0.9193262802187866}
+[    184s] pass 35 {'pass': 35, 'moved_fit': 0.0023011966222435667, 'moved_all': 0.002461230615307654, 'K': 200, 'mean_key_fit_sample': 0.9193274500622737}
+[    184s] pass 36 {'pass': 36, 'moved_fit': 0.0023545577033390695, 'moved_all': 0.0023761880940470236, 'K': 200, 'mean_key_fit_sample': 0.9193300326851283}
+[    185s] pass 37 {'pass': 37, 'moved_fit': 0.0021077627032723683, 'moved_all': 0.002381190595297649, 'K': 200, 'mean_key_fit_sample': 0.9193326969000739}
+[    185s] pass 38 {'pass': 38, 'moved_fit': 0.002087752297861555, 'moved_all': 0.0022161080540270134, 'K': 200, 'mean_key_fit_sample': 0.919335013618006}
+[    186s] pass 39 {'pass': 39, 'moved_fit': 0.0021411133789570576, 'moved_all': 0.0022761380690345173, 'K': 200, 'mean_key_fit_sample': 0.9193378040466953}
+[    186s] pass 40 {'pass': 40, 'moved_fit': 0.002174464054641747, 'moved_all': 0.0023711855927963984, 'K': 200, 'mean_key_fit_sample': 0.9193407758248335}
+[    187s] pass 41 {'pass': 41, 'moved_fit': 0.0022545056762850015, 'moved_all': 0.0023961980990495246, 'K': 200, 'mean_key_fit_sample': 0.9193440299035762}
+[    187s] pass 42 {'pass': 42, 'moved_fit': 0.0023078667573805047, 'moved_all': 0.0023911955977988994, 'K': 200, 'mean_key_fit_sample': 0.9193472508938081}
+[    188s] pass 43 {'pass': 43, 'moved_fit': 0.002194474460052561, 'moved_all': 0.0023061530765382692, 'K': 200, 'mean_key_fit_sample': 0.9193494386152814}
+[    188s] pass 44 {'pass': 44, 'moved_fit': 0.0022478355411480635, 'moved_all': 0.0023411705852926464, 'K': 200, 'mean_key_fit_sample': 0.9193497814056646}
+[    189s] pass 45 {'pass': 45, 'moved_fit': 0.0021077627032723683, 'moved_all': 0.0021960980490245124, 'K': 200, 'mean_key_fit_sample': 0.9193515740891324}
+[    190s] pass 46 {'pass': 46, 'moved_fit': 0.0019810301356705485, 'moved_all': 0.0020810405202601303, 'K': 200, 'mean_key_fit_sample': 0.9193537882085865}
+[    190s] pass 47 {'pass': 47, 'moved_fit': 0.0016875441896452821, 'moved_all': 0.0017808904452226112, 'K': 200, 'mean_key_fit_sample': 0.9193554569797112}
+[    191s] pass 48 {'pass': 48, 'moved_fit': 0.001547471351769587, 'moved_all': 0.001695847923961981, 'K': 200, 'mean_key_fit_sample': 0.9193567258569926}
+[    191s] pass 49 {'pass': 49, 'moved_fit': 0.0015274609463587733, 'moved_all': 0.0016108054027013507, 'K': 200, 'mean_key_fit_sample': 0.9193577710396068}
+[    192s] pass 50 {'pass': 50, 'moved_fit': 0.0012673256760181962, 'moved_all': 0.0013206603301650825, 'K': 200, 'mean_key_fit_sample': 0.919358061045493}
+[    192s] pass 51 {'pass': 51, 'moved_fit': 0.0011205827030055628, 'moved_all': 0.0012606303151575789, 'K': 200, 'mean_key_fit_sample': 0.9193583741811469}
+[    193s] pass 52 {'pass': 52, 'moved_fit': 0.0010005202705406812, 'moved_all': 0.001105552776388194, 'K': 200, 'mean_key_fit_sample': 0.9193586962823255}
+[    193s] pass 53 {'pass': 53, 'moved_fit': 0.0009138085137604888, 'moved_all': 0.0009504752376188094, 'K': 200, 'mean_key_fit_sample': 0.91935874794881}
+[    244s] A1-fp coding done {'Si_S1a_mean': 0.2064, 'Si_S1a_rms': 0.2204, 'Si_S1d_4': 0.1469, 'Si_S1d_8': 0.1232, 'Si_S1d_16': 0.0955, 'Si_S1d_32': 0.0663, 'Si_S1b_0.03': 81.8365, 'Si_S1b_0.06': 36.6391, 'Si_S1b_0.12': 10.4203}
+[    255s] A1-fp structure done; violations 0 0
+[    255s] done

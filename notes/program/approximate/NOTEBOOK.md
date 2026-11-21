@@ -273,3 +273,49 @@ floor for the k best; the lower bound for a flat tree beyond its last term (entr
 level at entropy position g explains A(g) for non-nested partitions; siblings' independence at the 4-way splits;
 the model's own value of the subsample exponents (A1.7 item 7 still uses the closed form there).
 
+## Entry 10. A4: a level width that holds out of distribution (the same day)
+
+The problem came from the owner through the PI: rule 1's derived ρ is about 2.3 times too narrow on iNaturalist.
+The PI sent an analysis in seven parts to prove, correct or refute. Result: section A4 of `CLAIMS.md` and
+`REPLAY-SPEC-RHO.md`. Synthetic numerics only, through `notes/program/run-limited.sh 6 1 2`:
+`scripts/a4_model.py`, `out/a4_model.txt`. No real data was read. Nothing of A4 is refereed.
+
+How it went, with the turns:
+
+1. **The organising identity came first and made the rest short.** The error over the half-width is a cosine,
+   (Δ·e)/h = Δ̂·ê, so the measured ratio squared is Δ̂ᵀC_cΔ̂ with C_c the second-moment matrix of the weighted errors'
+   directions. The derived ρ and A3 are that quadratic form with C_c replaced by the group's diagonal. Form 3 is its
+   top eigenvalue. The PI's (i) and (v) are then two lines each.
+2. **The PI's hypothesis (ii) holds in a model and is a little too narrow as worded.** In a constructed group the
+   ratio for a cluster's own queries rises from 1.00 at one cluster a group to 2.1 to 2.7 at 32, and A3 corrects
+   none of it. But the own directions on coded coordinates count too: a coded coordinate's error keeps a share of
+   the residual. So "the uncoded tail" is most of it, not all.
+3. **Form 1 surprised me twice.** It is wide by 2(b − 1)·Var(a), and with the slopes `layered.md` already reports
+   (1.04 to 1.09) that is 15 to 33% in the spread on the three fits, before any alignment. And it is a difference
+   of two numbers, so a 12% error in the 16-direction σ is 30% in the width.
+4. **Form 2's selection question has a clean answer and a caveat.** If the midpoint is a conditional mean, any
+   selection made on what is known at the level, the reader's rule with an estimated width included, leaves the
+   increments unbiased. If it is not (slope b ≠ 1), the rows that go on have a positive mean increment; the pooled
+   mean square then includes that drift, which is the safe direction.
+5. **Two corrections to the PI's (iv) on the randomised levels.** The stored scalars give sd², which bounds the
+   error variance; the exact value needs the angle to the block. And the chain through a randomised level is not
+   an orthogonal sum: E(a_R − a_ℓ)² = (s − a_ℓ)² + v_R, so summing mean squares through R over-counts by 2·v_R. The
+   identity is still the useful thing: (a_R − a_ℓ)² − v_R is a per-row unbiased estimate of the deterministic
+   level's squared error, for any data.
+6. **The cousin (vi) is unsafe where it is needed**: 0.64 to 0.82 of the truth in the model from eight clusters a
+   group, because the cross term it drops is positive for aligned queries.
+7. **An addition of mine**: a rank-16 sketch of C_c, evaluated per query with the 17th eigenvalue for the rest. It
+   is a bound, and in the model it is within 3 to 9% of the truth where the derived ρ fails. It is the cluster's σ
+   one level down.
+8. **A slip caught before it was written up**: I first wrote that A3 over the derived ρ is 1.00 for every kind of
+   query in the model. It is 1.00 for the cluster's own queries and for queries on the profile; for isotropic
+   queries A3 moves with the truth (0.62 to 0.95), as it should. Several ranges quoted from the model's table were
+   also corrected against the output before saving.
+
+Recommended: find the cause with the dump first; then form 2 as the width with the derived ρ as a small prior and
+form 3's cap as ceiling; the cap at build as a warning in any case; the sketch if form 2's first rows cost recall.
+
+Not done: the model has one covariance shape (a 1/i common spectrum, 8 own directions, 30%); the toy process for
+form 2 has one level and normal errors; no check of whether `det_alloc_tree` reconstructs uncoded coordinates as
+zero; nothing on the cost in rows of the drift term; iNaturalist's N, K and bits per level not looked up.
+

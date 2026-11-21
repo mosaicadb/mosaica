@@ -1,0 +1,7 @@
+[     36s] Cmix normalisers {4: np.float64(0.024175334275477744), 8: np.float64(0.017009887348517536), 16: np.float64(0.010208330726310753), 32: np.float64(0.004900305561040424)}
+[     66s] C16 {'fit_change_cell': 0.09957844745934552, 'fit_change_group': 0.021537866357172395, 'held_change_cell': 0.12199367721797591, 'w16_held_after': 0.09424583563802405}
+[     83s] C0 {'fit_change_cell': 0.1154933898960793, 'fit_change_group': 0.015668147436667067, 'held_change_cell': 0.1263555964624435, 'w16_held_after': 0.09458925645771935}
+[    100s] Cmix {'fit_change_cell': 0.09137418124091194, 'fit_change_group': 0.020070436627046065, 'held_change_cell': 0.11134899355716515, 'w16_held_after': 0.09425139699668209}
+[    117s] C16-in {'fit_change_cell': 0.07968143434585985, 'fit_change_group': 0.0, 'held_change_cell': 0.09678258433710833, 'w16_held_after': 0.09450966798216615}
+[    117s] cheapest differs C0 vs C16 0.14691639652619362
+[    117s] done

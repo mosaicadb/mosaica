@@ -3,7 +3,8 @@
 21 November 2026, revised the same day after referee report 1 (`referee/referee-1.md`). Every claim carries one tag
 of `notes/README.md`. Proofs are mine. Seven claims (A1.1, A1.2, A1.4, A1.5, A2.1, A2.2, A3.1) have been through one
 referee's report and are revised here; no tag is raised on that account, since the revision has not been
-re-refereed. What changed is listed in "Changes after referee 1" at the end; the text before the report is
+re-refereed. Section A4 was added afterwards and has not been refereed at all. What changed is listed in
+"Changes after referee 1" at the end; the text before the report is
 `out/CLAIMS_before_referee1.md`. Measured claims name the dataset, the size and the script; the tables are in
 `out/tables.md`. How each was reached, and what failed on the way, is in `NOTEBOOK.md`.
 
@@ -883,6 +884,400 @@ to 17% above the median.
 
 ---
 
+## A4. A level width that holds out of distribution
+
+Added 21 November 2026 for the problem the owner raised through the visit-order session: rule 1's derived ρ is
+about 2.3 times too narrow at the deterministic levels on iNaturalist (n = 2,048, 12 groups). **None of A4 has been
+refereed.** The numerics are synthetic only (`scripts/a4_model.py`, `out/a4_model.txt`); no real data was read for
+it, so every statement about iNaturalist is a hypothesis until the dump of `REPLAY-SPEC-RHO.md` is run.
+
+**Local symbols for A4.** As A3, in a group's dual coordinates. For a row of cluster c at a deterministic level:
+e its coding error, ẽ = D⁻¹e the weighted error, u = ‖ẽ‖ the stored norm, ê = ẽ/u its direction. For a query:
+Δ the offset, Δ̃ = DΔ, w = ‖Δ̃‖, Δ̂ = Δ̃/w. h = w·u. Σ_(E,c) is the mean of e·eᵀ over the rows of c, S_c = D⁻¹Σ_(E,c)D⁻¹
+the mean of ẽ·ẽᵀ, and C_c the mean of ê·êᵀ, a positive semi-definite matrix of trace 1. a_ℓ is a row's midpoint at
+level ℓ, ε_ℓ = s − a_ℓ its error, and d_j = a_(j+1) − a_j the increment from level j to the next level read, the
+stored vector being the last (a = s). b_ℓ is the slope of s on a_ℓ over the rows of a cluster. ϑ is chapter 5's
+share of the cluster's score variance that a level explains.
+
+### A4.1 What the measured ratio is, and what A3 leaves out [proved, unrefereed]
+
+**Statement.**
+
+1. For every row and query, (Δ·e)/h = Δ̂·ê: the error over the certified half-width is the cosine of the angle
+   between the weighted offset and the weighted error. This is the alignment.
+2. For a fixed query, the mean over the rows of cluster c of ((Δ·e)/h)² is Δ̂ᵀC_c·Δ̂. That is the square of what
+   `layered.md` 4.2 measures (the rms of (score − midpoint)/half-width), per (query, cluster).
+3. For a fixed query, (Σ over rows of (Δ·e)²)/(Σ over rows of h²) = Δ̂ᵀS_c·Δ̂ / tr S_c.
+4. Both are second moments about the midpoint: a mean error of the cluster's rows along the query is inside them.
+5. The derived ρ_(g,ℓ)² of (5.6) is item 3 with S_c replaced by the diagonal matrix of the a_i and Δ̂_i² by its
+   profile value a_i/‖a‖₁. A3's ρ_ℓ(q, c)² is item 3 with S_c replaced by the same diagonal matrix, at the query's own
+   Δ̂.
+
+So **A3 captures the query's weights and not its alignment with the cluster's errors.** It is the variance of Δ·e
+under an error whose covariance is κ²·diag(ν_i), the group's and diagonal. What it leaves out is
+
+    Δᵀ·Σ_(E,c)·Δ − κ²·Σ_i Δ_i²ν_i = Σ_(i≠j) Δ_iΔ_j·(Σ_(E,c))_ij + Σ_i Δ_i²·((Σ_(E,c))_ii − κ²ν_i) :
+
+the off-diagonal part of the cluster's own error covariance in the group's basis, the departure of its diagonal
+from the group's, and (item 4) its mean. A query that is on the profile and not aligned with the cluster sees none
+of this; a query aligned with the cluster's own directions sees all of it.
+
+**Proof.** (1): Δ·e = (DΔ)·(D⁻¹e) = w·u·(Δ̂·ê). (2) and (3): square and average over the rows, with Δ̂ fixed;
+Σ h² = w²·Σ u² = w²·n_c·tr S_c. (4): no mean is subtracted. (5): under e_i = κ√ν_i·ξ_i with uncorrelated ξ,
+S = κ²·diag(ν_i/D_i²) = κ²·diag(a_i), tr S = κ²‖a‖₁, and Δ̂ᵀSΔ̂/tr S = Σ_i ω_i·a_i/(‖a‖₁·Σ_i ω_i), which is A3's (A3.1);
+on the profile ω_i = a_i. ∎
+
+**Remark.** The reader's half-width is at least w·u (the stored norm is rounded up, and fixed terms are added), so
+the measured ratio is at most the cosine of item 1. Bounds below stay valid with the reader's h.
+
+### A4.2 A hypothesis for iNaturalist, in a model, and what else could give 2.3 [model; computed; a conjecture about the data]
+
+**The model.** Take S_c with trace 1 and two parts: a share 1 − β shaped as the group's diagonal, (1 − β)·diag(a)/‖a‖₁,
+and a share β spread evenly over r orthonormal directions of the cluster's own, β·V·Vᵀ/r. Take a query whose weighted
+direction is Δ̂ = √(1 − c²)·p̂ + c·ŝ, with ŝ a unit vector in the span of V and p̂ a unit vector orthogonal to it:
+c² is the share of the weighted offset that lies in the cluster's own directions.
+
+**Statement.** Averaged over the orientation of V,
+
+    ρ_true² = Δ̂ᵀS_c·Δ̂ = (1 − β)·[ (1 − c²)·ρ_p² + c²·ā_s ] + β·c²/r ,
+
+with ρ_p² = p̂ᵀdiag(a)p̂/‖a‖₁ (A3's value for the part of the query off the own directions; ρ_(g,ℓ)² on the profile) and
+ā_s = ŝᵀdiag(a)ŝ/‖a‖₁, about 1/n for a generic ŝ. To first order,
+
+    (actual over derived)² ≈ (1 − β) + β·c²·n_eff/r ,      n_eff = 1/ρ_(g,ℓ)² .
+
+*Derivation.* Expand the quadratic form. p̂ ⟂ V kills the cross term through V·Vᵀ, and the cross term through
+diag(a), 2√(c²(1 − c²))·p̂ᵀdiag(a)ŝ, has mean zero over the orientation. Checked on five settings at n = 512: the full
+formula agrees with a direct construction to two digits, the two-term form to within 8% (`out/a4_model.txt` part A).
+
+**What it takes to reach 2.3.** With the derived ρ = 0.05, n_eff = 400, and a ratio of 2.3 needs β·c²/r ≈ 0.011 to
+0.012: for example 16 own directions holding 30% of the weighted error with 60% of the query's weighted offset in
+them, or 8 holding 20% with 45%. Both are ordinary for a query whose neighbours lie in the cluster: the 16-direction
+σ_c(q) exists because a cluster's top directions hold that kind of share and such a query is aligned with them.
+
+**Why few groups for the dimension would do it** (a constructed group, `out/a4_model.txt` part B; exact second
+moments, no row sampled). K_g clusters share a group. Each has a common diagonal covariance (spectrum 1/i) for 70% of
+its variance and 8 random directions of its own for 30%. The group's basis is the eigenbasis of the pooled
+covariance, the profile is the pooled spectrum, and the level is a reverse water-filling weighted by the profile, with
+the forward test channel per coordinate (so an uncoded coordinate's error is the residual itself and a coded one's
+keeps a share ν_i/λ_i of it). Actual over derived spread, for queries distributed as the cluster's own rows:
+
+| clusters in the group | 1 | 2 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|---|
+| n 256, 64 bits | 1.00 | 1.01 | 1.11 | 1.45 | 1.86 | 2.11 |
+| n 256, 128 bits | 1.00 | 1.00 | 1.02 | 1.23 | 1.61 | 1.98 |
+| n 512, 64 bits | 1.00 | 1.01 | 1.11 | 1.60 | 2.17 | 2.68 |
+| own directions' energy on uncoded coordinates, n 512 | 0.00 | 0.00 | 0.01 | 0.14 | 0.43 | 0.65 |
+
+- For queries on the profile the ratio is 0.99 to 1.01 in every cell, and for isotropic queries 0.62 to 0.95. **For
+  queries distributed as the cluster's rows, A3 over the derived is 0.99 to 1.00 in every cell**: A3 corrects
+  nothing of the alignment. For isotropic queries A3 equals the truth (0.62 to 0.95 of the derived): it sees the
+  weights and only the weights.
+- The ratio grows with the clusters per group, grows with n at a given number of clusters per group, and falls
+  with the bits of the level. With one or two clusters a group the basis is the cluster's own and the derived ρ is
+  exact. So what matters is clusters per group times own directions per cluster against the coordinates a level
+  codes, with n_eff, which grows with n, as the lever: (ratio)² − 1 ≈ β·c²·n_eff/r.
+- The part of the own directions on coded coordinates counts too (128 bits, 32 clusters: only 22% of their energy is
+  uncoded and the ratio is 1.98), because a coded coordinate's error keeps a share of the residual and so stays
+  correlated across coordinates. "The uncoded tail" is most of the mechanism, not all of it.
+
+**As a claim about iNaturalist this is a [conjecture].** It fits what is reported: few groups for the dimension, a
+ratio near 1 on the three fits with 64 groups, the randomised levels not the cause. I have not seen iNaturalist's
+N, K, bits per level or a single row of it.
+
+**What else could give a factor 2.3, and how a per-row dump tells them apart.**
+
+| cause | what the dump shows if it is the cause |
+|---|---|
+| alignment with the cluster's own directions (above) | the ratio depends on the kind of query: largest for corpus rows of the same cluster used as queries, about 1 for rows of far groups, below 1 for random directions; it falls from the 16 B to the 32 B level and on; the slope b of score on midpoint exceeds 1; the rms ratio and the ρ that recovers recall agree |
+| a mean error (a biased midpoint) | per (query, cluster), the mean of score − midpoint is not small against its standard deviation; subtracting it restores the derived ρ |
+| a slope (the midpoint under-dispersed) | the rms over all rows is near the derived, but the rows near t̂ err by (b − 1)·(a − ā): the regression of score on midpoint within a (query, cluster) has b well above 1.1, and the rms taken over the rows with a within ψτ of t̂ is the one that is 2.3 times too large |
+| errors correlated across coded coordinates (skewed, non-negative features) | the ratio does not fall as levels code more coordinates; it is still there at the first level where every coordinate has bits |
+| heavy tails of the error | the rms ratio is near 1 and the 99.9% point of the error over ρh is far above 3.3; recall needs a wider ρ than the rms says |
+| the row's scale | the ratio differs across quintiles of the stored norm u (the referee's finding on A3.1) |
+
+The slope deserves a number of its own. By A4.3 a row near the threshold, at a − ā ≈ 3.6σ_c, has a midpoint that is
+low by (b − 1)·(a − ā): 0.14σ_c at b = 1.04 and 0.32σ_c at b = 1.09, against a statistical width ψρh of 0.25 to 0.6σ_c
+at ψ = 4 (`layered.md` 4.2). In the constructed group b is 1.06 to 1.15 where the ratio exceeds 1.1. So the alignment
+and the slope come together, and a dump must separate the rms over all rows from the error of the rows near t̂.
+
+### A4.3 Form 1, variance bookkeeping [proved, unrefereed; its size computed]
+
+**Form.** τ_ℓ² = σ_c(q)² − Var(a_ℓ), the variance of the midpoint taken over the cluster's rows.
+
+**Statement.** Over any fixed set of rows, write s = a + ε and let b = Cov(s, a)/Var(a). Then
+
+    Var(ε) = Var(s) − (2b − 1)·Var(a) ,      so      Var(s) − Var(a) = Var(ε) + 2(b − 1)·Var(a) .
+
+1. Form 1 is exact if and only if the midpoint is uncorrelated with its error, that is b = 1.
+2. It is at least the true variance if and only if b ≥ 1, and too wide by 2(b − 1)·Var(a).
+3. The least variance any linear use of the midpoint leaves is Var(s) − b²·Var(a) = Var(ε) − (b − 1)²·Var(a), reached
+   by the estimate ā + b·(a − ā).
+4. It is a variance. The rule compares a + ψτ with t̂, so the cluster's mean error must be added: the second moment
+   about the midpoint is Var(ε) + (mean of ε)².
+
+**Proof.** Var(s) = Var(a) + Var(ε) + 2Cov(a, ε) and Cov(a, ε) = Cov(a, s) − Var(a) = (b − 1)·Var(a). (3) is the
+residual variance of the regression of s on a. ∎
+
+**What a midpoint that is not a conditional mean does.** With the measured slopes of 1.04 to 1.09 the midpoint is
+under-dispersed, b > 1, and form 1 errs wide. Taking `layered.md` 4.2's "share explained" for the squared
+correlation ϑ = b²·Var(a)/Var(s) [an assumption about that table], form 1 over the true spread of ε is 1.15 on glove
+(ϑ 0.81, b 1.04), 1.33 on yahoo (0.84, 1.09) and 1.18 on LAION text (0.72, 1.09) [computed]. In the constructed group
+of A4.2, for queries distributed as the cluster's rows, it is 1.00 at one cluster a group and 1.13 to 1.93 from two
+upwards (b up to 1.15): wide by up to a factor of two exactly where the derived ρ is too narrow.
+
+**Its error with the rank-16 spread.** Form 1 is a difference of two numbers. If the spread used is σ̂ = σ·(1 + η),
+then to first order δτ/τ = η·Var(s)/(Var(s) − Var(a)) = η/(1 − v_a), v_a = Var(a)/Var(s) = ϑ/b². At the 16 B level
+v_a is 0.61 to 0.75 and the factor is 2.5 to 4; at 32 B (ϑ 0.83 to 0.94) it is 5 to 10 or more. `PLAN.md` gives the
+16-direction σ a median error of 0.11 to 0.13 on LAION and a few per cent on glove and yahoo: so about 30% in τ on
+LAION at 16 B and 10 to 20% elsewhere, and where σ̂² falls below Var(a) the form is negative and needs a floor.
+
+**Which rows.** Var(a) is over the rows whose midpoint the reader has. At the first level read those are the rows of
+the certified range, nearly the cluster. At a deeper level they are the survivors of the level above, a truncated
+upper tail, and their variance is not the cluster's. So form 1 exists at the first level only.
+
+**Under a visible set** the left term is the variance of the visible rows' scores, which the index does not hold:
+σ_c(q) is all rows'. The pooled ρ_q·σ_c stands in for it with the per-cluster scatter the region study measured (the
+scale r_c has a standard deviation of 0.14 to 0.18 across the clusters of a query), which the factor 1/(1 − v_a)
+turns into 35 to 70% in τ. Form 1 should not be used under a visible set.
+
+### A4.4 Form 2, telescoping increments [parts proved, unrefereed; one part refuted; one identity from a refereed lemma]
+
+**Form.** τ_ℓ² = Σ over j ≥ ℓ of the mean square of d_j over the rows that went on from level j, ending at the stored
+vector, pooled per query, with the derived ρ as prior.
+
+**1. Telescoping** [proved]. ε_ℓ = Σ_(j≥ℓ) d_j, so E ε_ℓ² = Σ_j E d_j² + 2Σ_(j<j′) E d_j·d_j′. The cross terms vanish when
+each increment has mean zero given everything known at its own level: E[d_j′ | 𝒞_j′] = 0, 𝒞_j the row's codes, stored
+norms and midpoints up to level j. That is the case when every midpoint is the conditional mean of the score given
+𝒞_j. Then the sum of the mean squares is the second moment of ε_ℓ.
+
+**2. Selection leaves the increments unbiased when the midpoint is a conditional mean** [proved]. Let the rows be
+handled in any order, and let row i go on from level j on an event G_i that is a function of 𝒞_j(i) and of anything
+seen before row i's level-(j+1) code is read. That covers the reader's rule: min(certified upper bound, a + ψτ̂) ≥ t̂
+uses the row's a_j and h_j, the running t̂, and a τ̂ estimated from the increments of earlier rows. Assume a row's
+increment, given its own 𝒞_j, is independent of the other rows' codes and scores. If E[d_j | 𝒞_j] = 0, then
+E[d_j(i); G_i] = 0. If also E[d_j² | 𝒞_j] = ρ_j²·h_j² (the conditional variance is proportional to the stored
+half-width squared), then
+
+    E Σ_i 1{G_i}·( d_j(i)² − ρ_j²·h_j(i)² ) = 0 ,
+
+so the pooled ratio Σ_G d_j²/Σ_G h_j² estimates ρ_j² without bias, whatever the selection and although τ̂ is itself
+being estimated. *Proof.* 1{G_i} is measurable for the σ-field generated by 𝒞_j(i) and the past; condition on it and
+use the two hypotheses; sum. ∎ What the rule cannot do is bias the estimate; what it can do is starve it (item 5).
+
+**3. Without the conditional-mean property the claim is false** [refuted, with its size]. If the slope of s on a_j
+is b ≠ 1, then E[d_j | a_j] contains (b − 1)·(a_j − ā) (exactly so when the regression is linear). The rows that go on
+are the upper tail of a_j, so their increments have a positive mean and
+
+    E[d_j² | went on] = E[Var(d_j | a_j) | went on] + (b − 1)²·E[(a_j − ā)² | went on] .
+
+For rows near a threshold at 4 cluster spreads the second term is (0.14σ_c)² at b = 1.04 and (0.32σ_c)² at b = 1.09,
+against a conditional variance of about (0.4σ_c)² on yahoo: the pooled mean square is 11% to 64% above the
+conditional variance, 5% to 28% in the spread. This is on the safe side, and it is the second moment of what the
+rows near the threshold actually do, which is what a symmetric rule should use. A tighter rule would move the
+estimate to ā + b·(a − ā) and use the conditional spread; b can be had from the same pairs (a_j, a_(j+1)) with no
+truth.
+
+**4. A randomised level in the chain: an exact identity, with the opposite sign from an orthogonal sum** [proved from
+Lemma 3.1 of chapter 3, which is refereed]. Let R be a randomised level at which every block is coded, a_R its
+estimate, and ℓ a deterministic level. For a row and a query offset fixed independently of the seed ω, given the
+stored scalars,
+
+    E_ω[ (a_R − a_ℓ)² ] = (s − a_ℓ)² + v_R ,      v_R = Σ_j A_j²·‖P_(y_j⊥)Δ_j‖²/d_j ≤ sd_R² = Σ_j A_j²·‖Δ_j‖²/d_j .
+
+*Proof.* a_R − a_ℓ = (s − a_ℓ) + (a_R − s). The first term does not depend on ω (the deterministic codes and what
+the randomised levels code are fixed). By Lemma 3.1, a_R − s = Σ_j Δ_j·E_j with E_j = A_j·u_j, u_j uniform on the unit
+sphere of y_j^⊥ and independent of A_j, the blocks independent given the A_j: mean zero and variance v_R given the
+scalars. ∎ Three consequences.
+
+- (a_R − a_ℓ)² − v_R is, per row, an unbiased estimate of that row's squared error at the deterministic level,
+  for any data, with no stored vector read. The selection of which rows reach R, being made on deterministic
+  levels, does not bias it per row (it does change which rows are averaged: item 2's ratio form still applies).
+- The PI's wording needs two corrections. The stored scalars give sd_R², which **bounds** v_R; the exact v_R needs
+  the angle between Δ_j and y_j, which the level estimates. And the chain is not an orthogonal sum: the randomised
+  estimate is unbiased given the truth, not a conditional mean, so the increment into R and the increment out of
+  it share the level's noise with opposite signs. Summing mean squares over a chain that passes through R
+  over-counts by 2·v_R; the right use is to stop the chain at R and subtract v_R, or to subtract nothing and be
+  wide by v_R.
+- Before every block is coded the level's error holds the uncoded blocks' Δ_j·y_j, which is not random over ω, and
+  the identity does not hold.
+
+**5. How many rows, and what shrinkage** [computed; a toy process]. With near-normal increments the pooled ratio
+from m rows has a relative standard deviation of √(2/m) in the variance and 1/√(2m) in the spread: 13% at 28 rows,
+10% at 50, 5% at 200 (heavier tails: √((κ₄ − 1)/m)/2). With the prior worth m₀ rows of mean half-width h̄ the
+estimate is ρ̂² = (m₀·ρ₀²·h̄² + Σ d²)/(m₀·h̄² + Σ h²), and the right m₀ is 2/s² where s is the standard
+deviation of ln ρ² about the prior across (query, cluster) pairs: about 100 rows where the prior is right to 7% in
+the spread, under one row where it can be off by 2.3. The prior's error is not known in advance, so m₀ should be
+small, 4 to 16 rows, at the price of 13 to 18% noise in the first clusters.
+
+The process (`out/a4_model.txt` part C: one level then the vector, clusters of 2,000 rows, the threshold at 3.5
+cluster spreads, a prior 2.3 times too narrow, ψ = 4.5, the first cluster's 28 best rows scored in full as the
+reader's seed does):
+
+| width | share of the rows above t̂ that pass (b = 1, 1.09, 1.3) | rows passed per cluster | ρ̂ over true after 1, 3, 10 clusters (b = 1) |
+|---|---|---|---|
+| the true rms | 1.000, 1.000, 1.000 | 174, 154, 123 | |
+| the derived prior, never updated | 0.708, 0.602, 0.317 | 5, 3, 1 | |
+| form 2, prior worth 4 rows | 1.000, 1.000, 1.000 | 181, 164, 129 | 0.91, 1.00, 1.01 |
+| form 2, prior worth 16 rows | 1.000, 1.000, 1.000 | 180, 162, 129 | 0.81, 0.95, 1.00 |
+| form 2, prior worth 64 rows | 1.000, 1.000, 1.000 | 180, 161, 128 | 0.64, 0.75, 1.00 |
+| form 2, worth 16, no seed | 1.000, 0.996, 0.992 | 180, 162, 127 | 0.48, 0.74, 1.02 |
+
+In this toy the estimate is not starved: a width 2.3 times too narrow still passes rows, their increments are
+large, and the estimate is within 5% after three clusters, at 4 to 6% more rows than the true width. With b = 1.3
+the seed rows, taken at the very top, give 1.2 to 1.5 times the true rms at first (item 3) and settle at 1.03. The
+toy has one level, one scale of rows and normal errors; it is not evidence about the reader.
+
+**6. Under a visible set** nothing changes: the increments are those of the visible rows that went on.
+
+### A4.5 Form 3, a bound the build can measure [proved, unrefereed; its looseness computed in the model]
+
+**Statement.** For every query, that is for every unit vector Δ̂:
+
+1. the mean over the rows of cluster c of ((Δ·e)/h)² is at most λ_max(C_c) =: ρ_max,c², with equality when Δ̂ is the
+   top eigenvector of C_c;
+2. (Σ over rows of (Δ·e)²)/(Σ over rows of h²) is at most λ_max(S_c)/tr S_c;
+3. 1/n ≤ ρ_max,c² ≤ 1;
+4. under the group's diagonal model ρ_max² = max_i a_i/‖a‖₁ ≥ ρ_(g,ℓ)², with equality if and only if the a_i are
+   equal on their support.
+
+**Which expectation is bounded.** A half-width is a product of two norms and differs by row, so there are two
+ratios. Item 1 bounds the mean of the per-row squared ratio, which is what the rule needs (it gives each row the
+width ψ·ρ·h) and what the dump measures. Item 2 bounds the ratio of the two second moments. Neither bounds a row:
+for one row the cosine can be 1, which is the certificate. And both are means over the rows the matrix was
+computed on: a random subset has the same mean in expectation, a visible set chosen along a direction need not.
+
+**Proof.** A4.1 items 2 and 3 and the Rayleigh quotient. (3): tr C_c = 1 over n eigenvalues. (4): C = diag(a)/‖a‖₁
+under the model, and ρ_(g,ℓ)² = Σ_i (a_i/‖a‖₁)·(a_i/‖a‖₁) is a mean of the a_i/‖a‖₁ under weights that sum to 1. ∎
+
+So **there is a bound on the alignment that the build can measure**: one number per cluster and level, the top
+eigenvalue of the second-moment matrix of the directions of the weighted coding errors. It needs no query.
+
+**When it is close to the derived ρ.** When C_c is near a multiple of the identity on its support: every coordinate
+coded alike and no direction of the cluster's own left in the error. In the constructed group of A4.2 the cap over
+the derived ρ is 1.15 to 1.38 with one cluster a group (item 4 alone: the uncoded coordinates have smaller a_i), 1.3
+to 2.7 at four to eight and 2.8 to 4.2 at sixteen to thirty-two. Over the actual spread it is 1.2 to 1.7 for queries
+distributed as the cluster's rows and equal to its ratio over the derived, up to 4.2, for queries on the profile.
+So as the width itself it is safe and costly where the derived ρ is right; as a ceiling on an estimate and as a
+warning at build (a cap far above the derived ρ says the derived ρ can fail for an aligned query) it is cheap.
+
+**Cost at build.** The rows' weighted errors exist while a cluster is encoded. λ_max by power iteration takes about
+20 products with the n_c × n matrix of error directions and its transpose: 40·n_c·n multiply-adds, 1.6·10⁸ for
+2,000 rows at n = 2,048, a few per cent of what encoding the cluster costs in basis products (n² a row). Per group,
+the same on a sample of its rows, or the largest of its clusters' caps. State: one number per cluster and level.
+
+**An extension: evaluate the alignment instead of bounding it** [proved as a bound; a proposal]. Keep the top r
+eigenpairs (λ_k, v_k) of C_c. Then for every query
+
+    Δ̂ᵀC_c·Δ̂ ≤ Σ_(k≤r) λ_k·(v_k·Δ̂)² + λ_(r+1)·(1 − Σ_(k≤r) (v_k·Δ̂)²) ,
+
+because C_c ≼ Σ_(k≤r) λ_k·v_k·v_kᵀ + λ_(r+1)·(I − Σ_(k≤r) v_k·v_kᵀ). This is the cluster's 16-direction σ_c(q) carried to a
+level: the spread of what the level leaves out, along this query, from a sketch of what it leaves out. In the
+constructed group with r = 16 it is 1.03 to 1.09 times the actual spread where the derived ρ fails (eight clusters a
+group and more) and 1.15 to 1.38 times where the derived ρ is right (one or two clusters a group); for queries on
+the profile it is 1.15 to 1.37 times. With the mean of the remaining eigenvalues in place of λ_(r+1) it
+is 0.96 to 0.99 and 0.76 to 0.92 for the cluster's own queries, no longer a bound. Cost: as the cluster's σ, 16 directions of n
+bytes and 16·n multiply-adds per cluster and level, and a truncated eigen-decomposition per cluster and level at
+build. It holds for the rows it was built on, as item 1 does.
+
+### A4.6 The cheaper cousin of form 1 from stored data [model; computed; unsafe where it is needed]
+
+**Form.** Split the group's coordinates into the set U the level leaves uncoded and the set C it codes. On U the
+error is the residual itself, e_U = r_U. So
+
+    E_c(Δ·e)² = Δ_Uᵀ·Σ_(c,UU)·Δ_U + Δ_Cᵀ·Σ_(E,c,CC)·Δ_C + 2·Δ_Uᵀ·Cov_c(r_U, e_C)·Δ_C .
+
+The cousin keeps the first term, evaluated as the cluster's stored spread at the query with its coded coordinates
+zeroed in the group basis (σ_c at q_U = V⁻ᵀ·P_U·Vᵀ(q − αm)); replaces the second by A3's diagonal term Σ_(i∈C) Δ_i²ν_i;
+and drops the third.
+
+**What it assumes.** (1) The level reconstructs an uncoded coordinate as zero, so that e_U = r_U exactly. (2) Within
+the cluster, the errors of coded coordinates are uncorrelated with the residuals of uncoded ones. (3) The errors of
+coded coordinates are uncorrelated with each other and have the group's variances. (4) The 16 directions and an
+isotropic rest describe the cluster's covariance on the uncoded subspace; the rest is isotropic in the original
+space, not after the oblique projection to q_U. (5) No mean error.
+
+**(2) fails with a definite sign for the queries that matter.** A quantiser's error is correlated with what it
+codes, and the coded and uncoded coordinates are correlated along the cluster's own directions, so for a query
+aligned with them the dropped term is positive. In the constructed group of A4.2, for queries distributed as the
+cluster's rows, the cousin over the actual spread is 0.99 to 1.00 at one or two clusters a group, 0.89 to 0.98 at
+four and 0.64 to 0.82 from eight upwards. It recovers part of the factor the derived ρ misses and is still too
+narrow by a fifth to a third.
+
+**A safe version** costs nothing more: (√T_U + √T_C)², with T_U and T_C the first two terms, bounds the sum by
+Cauchy–Schwarz when T_C is the coded block's true second moment, which A3's diagonal term is not guaranteed to be.
+
+**Cost.** q_U needs one more n × n product per (query, group, level) than the group's setup has, then one
+evaluation of the cluster's σ per cluster and level (16·n multiply-adds). No new state.
+
+### A4.7 Which form gives ψ one meaning, and which is safe [the table summarises A4.1 to A4.6; the tail part computed]
+
+ψ means the same thing across datasets and kinds of query when the width it multiplies is the true spread of
+what the estimate leaves out, for the rows near the threshold. "Safe" below is in the second-moment sense: never
+narrower than that spread.
+
+| width | ψ means one thing | safe | needs | under a visible set |
+|---|---|---|---|---|
+| derived ρ (5.6), as built | only for queries on the profile | no: 1.2 to 2.7 times narrow for a cluster's own queries in the model at eight or more clusters a group | nothing | unchanged, and as wrong |
+| A3 | no: it corrects the weights, not the alignment | no, the same | one dot product per cluster and level | unchanged |
+| form 1 | no: wide by 2(b − 1)·Var(a), 1.15 to 1.33 on the three fits, up to 1.9 in the model | yes when b ≥ 1 and σ̂ ≥ σ; not with a rank-16 σ̂ that can be low | the cluster's σ and the midpoints' variance; first level only | not usable |
+| form 2 | yes, up to its noise (13% at 28 rows) and the drift term of A4.4 item 3 | consistent, not safe at small counts; safe-sided by the drift when b > 1 | the increments the reader already computes; a prior | unchanged in form: measured on visible rows |
+| form 3, the cap | no: 1.15 to 4.2 times the truth by query and index | yes, for every query, as a mean over the rows it was built on | λ_max per cluster and level at build | holds for a random subset in expectation, not for a set cut along a direction |
+| form 3's sketch (A4.5) | nearly: 1.03 to 1.38 times the truth in the model for a cluster's own queries and queries on the profile | yes, in the same sense | 16 directions per cluster and level; an eigen-decomposition at build | as the cap |
+| the cousin (A4.6) | no | no: 0.64 to 0.82 where it is needed | one more n × n product per group and level | the stored spread is all rows' |
+
+**Second moments are not the whole story.** Three separate effects.
+
+1. *The error's own tail decides misses, and it is mild.* `layered.md` 4.2 has the 99.9% point of error/(ρh) at 3.1 to
+   3.9 (normal 3.09). Even an exponential error tail gives a chance of ½·exp(−√2·ψ) = 8.6·10⁻⁴ of exceeding ψ spreads at
+   ψ = 4.5, against 3.4·10⁻⁶ for a normal: a tenth of a per cent a level for a row at the threshold. A width 2.3 times
+   too narrow turns ψ = 4.5 into 1.96 true spreads, a chance of 2.5% (normal) for such a row. So for misses the second
+   moment is the first-order quantity, and the tail's shape the second.
+2. *The scores' tail decides cost.* A2.4 found the standardised within-cluster scores near-exponential, rate λ = 2.0
+   to 2.8 a spread. The rows a width lets through number as exp(λ·ψτ/σ_c). With ψτ = 0.4σ_c, a width that is F times
+   the truth passes exp(0.4·λ·(F − 1)) times the rows: 1.6 to 2.0 times at F = 1.6 (the cap over the truth for an
+   aligned query), 2.8 to 4.3 times at F = 2.3. So a safe and loose width is dear, and the bytes measured with a
+   width 2.3 times too narrow are low by that last factor: part of what rule 1 saved on iNaturalist was misses.
+3. *What the estimate is decides whether ψ is honest at the top.* A deterministic midpoint with slope b > 1 is low
+   near the threshold by (b − 1)·(a − ā) (A4.4 item 3). A randomised level's estimate is unbiased given the truth,
+   not a conditional mean, and with an exponential prior of rate λ/σ_c on the scores the posterior mean of the score
+   is the estimate minus λ·τ²/σ_c: there the estimate is high and passing is conservative, by an amount that would be
+   0.32 to 0.45σ_c at τ = 0.4σ_c and is small at the randomised levels, whose τ is small. The two have opposite signs
+   and sit at different levels. A rule built on a spread is blind to
+   both; form 2 folds the first into its width (the drift term), which is the safe direction.
+
+### A4.8 Recommendation [a proposal; nothing here has been measured on real data]
+
+1. **First find the cause** with the dump of `REPLAY-SPEC-RHO.md`: the table of A4.2 separates alignment, a mean
+   error, a slope, correlated coded errors, tails and the row's scale. The forms below assume the first.
+2. **Form 2 as the width**, with the derived ρ as a prior worth 4 to 16 rows, seeded by the rows the first cluster
+   scores in full, and **form 3's cap as its ceiling**. It is the only form that measures the quantity the rule
+   needs on the rows the rule decides, with no query sample, no truth and no build change; it follows a visible
+   set; in the toy it recovers within three clusters from a prior 2.3 times too narrow, at 4 to 6% more rows than
+   the true width. Its risks are noise in the first clusters and starvation, which the toy does not show and the
+   reader might.
+3. **Form 3's cap at build regardless**, as a warning: where the cap is far above the derived ρ, the derived ρ can
+   fail for an aligned query (in the model the cap is 1.9 to 4.2 times the derived ρ where that fails by more than
+   20%, and 1.4 times or less where it is right). It costs a few per cent of a build and one number
+   per cluster and level.
+4. **The sketch of A4.5** if the replay shows that form 2's first rows cost recall: it is the same rule as the
+   cluster's σ one level down, deterministic, and within 3 to 9% of the truth in the model where the derived ρ
+   fails. It costs 16·n bytes per cluster and level.
+5. **Not form 1** (wide by up to 1.9 in the model, ill-conditioned with the rank-16 σ, first level only, not under a
+   visible set) **and not the cousin** (narrow by a fifth to a third where it is needed).
+
+### A4.9 The replay [a specification, in `REPLAY-SPEC-RHO.md`]
+
+A per-row dump on iNaturalist, with yahoo and LAION as controls: score, midpoint and half-width per deterministic
+level, the cluster, the 16-direction σ, and per (cluster, level) the cap of form 3 from the rows' weighted errors.
+Four query sets (the dataset's; corpus rows against their own cluster; corpus rows against far groups; random
+directions) separate the six causes of A4.2. Per (query, cluster) it sets the actual rms of (score − midpoint)/h
+against the derived ρ, A3, form 1, form 2, the cap, its sketch and the cousin; then it replays the reader at ψ = 4
+and 5 with each width for the level's recall and bytes. Its section 3 states, claim by claim, the outcome that
+would refute it.
+
+---
+
 ## Changes after referee 1
 
 Report: `referee/referee-1.md`. The text before it: `out/CLAIMS_before_referee1.md`. No tag was raised. Every
@@ -905,6 +1300,9 @@ repair the referee prescribed was made; nothing in the report is disputed. Two q
 | A3.1 | The exact statement made the headline: ρ² = E[(Δ·e)² given κ] / E[h² given κ] for a fixed offset. The conditioning on the stored norm stated as the approximate part and sized with the referee's runs. Hypotheses added (uncorrelated given κ, independence from the query, sign symmetry, dual coordinates, near-normality for the quantile). Item 3's weighting stated. Item 4 restricted to a water-filling weighted by π_i. |
 
 **Not changed:** A1.8, A2.3 to A2.8, A3.2 to A3.4, which the referee did not review and no finding touches.
+
+**Added after this table was written:** section A4 (a level width that holds out of distribution), with
+`REPLAY-SPEC-RHO.md`. It is new and unrefereed. The text before it is `out/CLAIMS_before_A4.md`.
 
 **Numerics run for this revision** (`scripts/topk_model.py`; core 5, one thread, no real data): `check` (leaves
 sampled, 98 MB), `fits`, `scaling`, and `scripts/topk_told_diag.py`. The last three peaked at 154 MB, 124 MB and

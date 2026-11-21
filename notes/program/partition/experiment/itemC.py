@@ -130,7 +130,9 @@ if mode == "first":
         M, P, P16 = forms(cell0, alive0, rule, norm)
         nf, _ = assign(fit_rows, cell0, cand, alive0, M, P)
         nh, _ = assign(held_rows, cell0, cand, alive0, M, P)
-        w16_after = np.sqrt(pair_costs(held_rows, nh[:, None], alive0, M, P16)[:, 0])
+        tmp = cell0.copy()
+        tmp[held_rows] = nh
+        w16_after = np.sqrt(pair_costs(held_rows, tmp[:, None], alive0, M, P16)[:, 0])
         # the cheapest candidate with no tie rule, for the C0/C16 comparison
         co = pair_costs(fit_rows, cand, alive0, M, P)
         best[rule] = cand[fit_rows, co.argmin(1)]

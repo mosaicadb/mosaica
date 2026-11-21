@@ -1,0 +1,4 @@
+[     12s] sweep-sub-K50 fixed point after 52 passes; K 50 last moves [0.0014, 0.001, 0.001]
+[     18s] sweep-sub-K50 {'Si_S1a_mean': 0.251, 'Si_S1a_rms': 0.2654, 'Si_S1d_4': 0.1833, 'Si_S1d_8': 0.1551, 'Si_S1d_16': 0.1212, 'Si_S1d_32': 0.0845, 'Si_S1b_0.03': 102.9239, 'Si_S1b_0.06': 50.4265, 'Si_S1b_0.12': 16.9299}
+[     29s] sweep-sub-K50 violations 0 0
+[     29s] done

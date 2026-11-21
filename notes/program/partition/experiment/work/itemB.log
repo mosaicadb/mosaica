@@ -1,0 +1,23 @@
+[      6s] scatters done; fit/half A/half B/held rows 149922 75010 74912 49978
+[     15s] B0 in pass 0 {'pass': 0, 'obj_fit_msq': 0.047701995892439786, 'obj_held_msq': 0.048555843920061716, 'insample_value_sumNgWg2_over_N': 0.04770199589243952, 'moved': 7, 'refused_floor': 0, 'groups_nonempty': 12}
+[     23s] B0 in pass 1 {'pass': 1, 'obj_fit_msq': 0.04748331304640268, 'obj_held_msq': 0.048339529422746705, 'insample_value_sumNgWg2_over_N': 0.047483313046402555, 'moved': 0, 'refused_floor': 0, 'groups_nonempty': 12}
+[    313s] B0 single moves: tried 198, kept 29, refused 2, value 0.047483 -> 0.047024
+[    322s] B0 cross pass 0 {'pass': 0, 'obj_fit_msq': 0.04873943576096062, 'obj_held_msq': 0.05059087029007416, 'insample_value_sumNgWg2_over_N': 0.0474268457088662, 'moved': 8, 'refused_floor': 3, 'groups_nonempty': 12}
+[    331s] B0 cross pass 1 {'pass': 1, 'obj_fit_msq': 0.04852089945632443, 'obj_held_msq': 0.05037878893433185, 'insample_value_sumNgWg2_over_N': 0.04720179651298574, 'moved': 1, 'refused_floor': 3, 'groups_nonempty': 12}
+[    340s] B0 cross pass 2 {'pass': 2, 'obj_fit_msq': 0.048515399836161266, 'obj_held_msq': 0.05037141602718601, 'insample_value_sumNgWg2_over_N': 0.047197931050837506, 'moved': 0, 'refused_floor': 3, 'groups_nonempty': 12}
+[    349s] B16 in pass 0 {'pass': 0, 'obj_fit_msq': 0.010208330726310878, 'obj_held_msq': 0.010527122043145647, 'insample_value_sumNgWg2_over_N': 0.010208330726310753, 'moved': 7, 'refused_floor': 0, 'groups_nonempty': 12}
+[    357s] B16 in pass 1 {'pass': 1, 'obj_fit_msq': 0.010118663406344446, 'obj_held_msq': 0.010433091922582412, 'insample_value_sumNgWg2_over_N': 0.010118663406344377, 'moved': 2, 'refused_floor': 0, 'groups_nonempty': 12}
+[    366s] B16 in pass 2 {'pass': 2, 'obj_fit_msq': 0.010075376773296351, 'obj_held_msq': 0.010392373345265925, 'insample_value_sumNgWg2_over_N': 0.010075376773296256, 'moved': 3, 'refused_floor': 0, 'groups_nonempty': 12}
+[    374s] B16 in pass 3 {'pass': 3, 'obj_fit_msq': 0.00999232040271951, 'obj_held_msq': 0.010313583258122382, 'insample_value_sumNgWg2_over_N': 0.009992320402719412, 'moved': 0, 'refused_floor': 0, 'groups_nonempty': 12}
+[    657s] B16 single moves: tried 199, kept 31, refused 1, value 0.009992 -> 0.009850
+[    666s] B16 cross pass 0 {'pass': 0, 'obj_fit_msq': 0.010626571362284992, 'obj_held_msq': 0.011325651428410735, 'insample_value_sumNgWg2_over_N': 0.010074797837639832, 'moved': 10, 'refused_floor': 3, 'groups_nonempty': 12}
+[    674s] B16 cross pass 1 {'pass': 1, 'obj_fit_msq': 0.010508804386163795, 'obj_held_msq': 0.011208426394403769, 'insample_value_sumNgWg2_over_N': 0.00995419727467848, 'moved': 2, 'refused_floor': 3, 'groups_nonempty': 12}
+[    683s] B16 cross pass 2 {'pass': 2, 'obj_fit_msq': 0.010455572626117465, 'obj_held_msq': 0.011155135757277671, 'insample_value_sumNgWg2_over_N': 0.009900879549275392, 'moved': 1, 'refused_floor': 3, 'groups_nonempty': 12}
+[    692s] B16 cross pass 3 {'pass': 3, 'obj_fit_msq': 0.010411196171405868, 'obj_held_msq': 0.011115002061084468, 'insample_value_sumNgWg2_over_N': 0.009859333741279574, 'moved': 0, 'refused_floor': 3, 'groups_nonempty': 12}
+[    712s] B0-in coding done {'Si_S1a_mean': 0.206, 'Si_S1a_rms': 0.2199, 'Si_S1d_4': 0.1465, 'Si_S1d_8': 0.1228, 'Si_S1d_16': 0.0951, 'Si_S1d_32': 0.0661, 'Si_S1b_0.03': 81.5981, 'Si_S1b_0.06': 36.4462, 'Si_S1b_0.12': 10.3083}
+[    733s] B0-cf coding done {'Si_S1a_mean': 0.206, 'Si_S1a_rms': 0.2198, 'Si_S1d_4': 0.1465, 'Si_S1d_8': 0.1228, 'Si_S1d_16': 0.0951, 'Si_S1d_32': 0.066, 'Si_S1b_0.03': 81.582, 'Si_S1b_0.06': 36.4319, 'Si_S1b_0.12': 10.3011}
+[    754s] B16-in coding done {'Si_S1a_mean': 0.2056, 'Si_S1a_rms': 0.2194, 'Si_S1d_4': 0.146, 'Si_S1d_8': 0.1223, 'Si_S1d_16': 0.0946, 'Si_S1d_32': 0.0656, 'Si_S1b_0.03': 81.1481, 'Si_S1b_0.06': 36.1207, 'Si_S1b_0.12': 10.165}
+[    774s] B16-cf coding done {'Si_S1a_mean': 0.2056, 'Si_S1a_rms': 0.2194, 'Si_S1d_4': 0.146, 'Si_S1d_8': 0.1223, 'Si_S1d_16': 0.0946, 'Si_S1d_32': 0.0656, 'Si_S1b_0.03': 81.1528, 'Si_S1b_0.06': 36.1218, 'Si_S1b_0.12': 10.1658}
+[    795s] B0-in-moves coding done {'Si_S1a_mean': 0.205, 'Si_S1a_rms': 0.2188, 'Si_S1d_4': 0.1454, 'Si_S1d_8': 0.1217, 'Si_S1d_16': 0.0941, 'Si_S1d_32': 0.0652, 'Si_S1b_0.03': 80.5885, 'Si_S1b_0.06': 35.8264, 'Si_S1b_0.12': 10.0568}
+[    815s] B16-in-moves coding done {'Si_S1a_mean': 0.2049, 'Si_S1a_rms': 0.2187, 'Si_S1d_4': 0.1453, 'Si_S1d_8': 0.1216, 'Si_S1d_16': 0.0939, 'Si_S1d_32': 0.0651, 'Si_S1b_0.03': 80.4191, 'Si_S1b_0.06': 35.7114, 'Si_S1b_0.12': 10.0047}
+[    815s] done

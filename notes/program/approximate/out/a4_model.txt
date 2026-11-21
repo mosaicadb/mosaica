@@ -1,0 +1,109 @@
+A. rho_true^2 = (1 - beta) rho_g^2 + beta c^2 / r  (n 512, weighted coordinates, a water-filled with 30% coded)
+   derived rho_g 0.0601  (1/sqrt n 0.0442)
+   beta 0.3 r 16 c^2 0.6: actual/derived spread 1.90   two-term formula 1.95   with the cross terms 1.90
+   beta 0.3 r 16 c^2 0.2: actual/derived spread 1.29   two-term formula 1.32   with the cross terms 1.29
+   beta 0.5 r  8 c^2 0.5: actual/derived spread 3.01   two-term formula 3.02   with the cross terms 3.01
+   beta 0.1 r  4 c^2 0.9: actual/derived spread 2.60   two-term formula 2.67   with the cross terms 2.60
+   beta 0.3 r 64 c^2 0.6: actual/derived spread 1.13   two-term formula 1.22   with the cross terms 1.13
+
+B. a constructed group (beta0 0.3, r 8 own directions a cluster; exact second moments; 200 queries a kind)
+   columns: actual/derived = sqrt(mean rho_true^2)/rho_g | A3/derived | form 1 over actual (sd) and slope b | form 6 over actual | cap of form 3 over actual, over derived | a rank-16 sketch of the weighted error covariance with the mean of the rest, and with the 17th eigenvalue for the rest, over actual
+   n 256 bits 64 clusters in the group  1: coded coordinates  36, own directions' energy uncoded 0.00, derived rho 0.0800
+        query as the cluster's rows : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.27, 1.26 | sketch 0.85 (10th pct 0.81), safe sketch 1.27
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.27, 1.26 | sketch 0.85 (10th pct 0.81), safe sketch 1.27
+        query isotropic             : 0.78 | 0.78 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.61, 1.26 | sketch 1.00 (10th pct 0.96), safe sketch 1.61
+   n 256 bits 64 clusters in the group  2: coded coordinates  39, own directions' energy uncoded 0.00, derived rho 0.0826
+        query as the cluster's rows : 1.01 | 1.00 | 1.22 (10th pct 1.13), b 1.01 | 0.99 (10th pct 0.99) | 1.29, 1.30 | sketch 0.88 (10th pct 0.84), safe sketch 1.25
+        query on the profile        : 0.99 | 0.99 | 1.00 (10th pct 0.86), b 1.00 | 1.00 (10th pct 1.00) | 1.31, 1.30 | sketch 0.84 (10th pct 0.78), safe sketch 1.26
+        query isotropic             : 0.76 | 0.76 | 1.00 (10th pct 0.92), b 1.00 | 1.00 (10th pct 1.00) | 1.72, 1.30 | sketch 1.00 (10th pct 0.96), safe sketch 1.65
+   n 256 bits 64 clusters in the group  4: coded coordinates  52, own directions' energy uncoded 0.02, derived rho 0.0818
+        query as the cluster's rows : 1.11 | 0.99 | 1.56 (10th pct 1.35), b 1.06 | 0.90 (10th pct 0.86) | 1.49, 1.66 | sketch 0.93 (10th pct 0.88), safe sketch 1.17
+        query on the profile        : 0.99 | 1.00 | 0.97 (10th pct 0.77), b 1.00 | 1.00 (10th pct 0.97) | 1.67, 1.66 | sketch 0.85 (10th pct 0.81), safe sketch 1.24
+        query isotropic             : 0.76 | 0.76 | 0.98 (10th pct 0.83), b 1.00 | 1.00 (10th pct 0.98) | 2.18, 1.66 | sketch 1.00 (10th pct 0.96), safe sketch 1.59
+   n 256 bits 64 clusters in the group  8: coded coordinates  62, own directions' energy uncoded 0.18, derived rho 0.0772
+        query as the cluster's rows : 1.45 | 0.99 | 1.49 (10th pct 1.35), b 1.11 | 0.74 (10th pct 0.69) | 1.64, 2.39 | sketch 0.97 (10th pct 0.94), safe sketch 1.09
+        query on the profile        : 1.00 | 1.00 | 0.97 (10th pct 0.78), b 1.00 | 1.01 (10th pct 0.95) | 2.40, 2.39 | sketch 0.89 (10th pct 0.86), safe sketch 1.25
+        query isotropic             : 0.81 | 0.81 | 0.97 (10th pct 0.80), b 1.00 | 1.01 (10th pct 0.94) | 2.94, 2.39 | sketch 1.00 (10th pct 0.97), safe sketch 1.49
+   n 256 bits 64 clusters in the group 16: coded coordinates  70, own directions' energy uncoded 0.35, derived rho 0.0724
+        query as the cluster's rows : 1.86 | 1.00 | 1.32 (10th pct 1.20), b 1.13 | 0.71 (10th pct 0.64) | 1.64, 3.05 | sketch 0.98 (10th pct 0.97), safe sketch 1.05
+        query on the profile        : 1.00 | 1.00 | 0.98 (10th pct 0.80), b 1.00 | 1.00 (10th pct 0.92) | 3.04, 3.05 | sketch 0.93 (10th pct 0.90), safe sketch 1.26
+        query isotropic             : 0.87 | 0.86 | 1.01 (10th pct 0.83), b 1.00 | 1.00 (10th pct 0.93) | 3.52, 3.05 | sketch 1.00 (10th pct 0.98), safe sketch 1.42
+   n 256 bits 64 clusters in the group 32: coded coordinates  72, own directions' energy uncoded 0.46, derived rho 0.0689
+        query as the cluster's rows : 2.11 | 1.00 | 1.25 (10th pct 1.14), b 1.10 | 0.74 (10th pct 0.68) | 1.60, 3.38 | sketch 0.99 (10th pct 0.97), safe sketch 1.04
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 0.80), b 1.00 | 1.01 (10th pct 0.91) | 3.38, 3.38 | sketch 0.95 (10th pct 0.92), safe sketch 1.28
+        query isotropic             : 0.91 | 0.91 | 0.98 (10th pct 0.81), b 1.00 | 1.00 (10th pct 0.92) | 3.71, 3.38 | sketch 1.00 (10th pct 0.98), safe sketch 1.38
+   n 256 bits 128 clusters in the group  1: coded coordinates  74, own directions' energy uncoded 0.00, derived rho 0.0685
+        query as the cluster's rows : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.15, 1.15 | sketch 0.92 (10th pct 0.90), safe sketch 1.15
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.15, 1.15 | sketch 0.92 (10th pct 0.91), safe sketch 1.15
+        query isotropic             : 0.91 | 0.91 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.26, 1.15 | sketch 1.00 (10th pct 0.98), safe sketch 1.25
+   n 256 bits 128 clusters in the group  2: coded coordinates  71, own directions' energy uncoded 0.00, derived rho 0.0700
+        query as the cluster's rows : 1.00 | 1.00 | 1.14 (10th pct 1.07), b 1.00 | 1.00 (10th pct 1.00) | 1.17, 1.17 | sketch 0.92 (10th pct 0.90), safe sketch 1.16
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 0.90), b 1.00 | 1.00 (10th pct 1.00) | 1.18, 1.17 | sketch 0.91 (10th pct 0.89), safe sketch 1.16
+        query isotropic             : 0.90 | 0.90 | 1.01 (10th pct 0.95), b 1.00 | 1.00 (10th pct 1.00) | 1.31, 1.17 | sketch 1.00 (10th pct 0.97), safe sketch 1.30
+   n 256 bits 128 clusters in the group  4: coded coordinates  75, own directions' energy uncoded 0.00, derived rho 0.0712
+        query as the cluster's rows : 1.02 | 1.00 | 1.59 (10th pct 1.33), b 1.02 | 0.98 (10th pct 0.96) | 1.29, 1.32 | sketch 0.93 (10th pct 0.91), safe sketch 1.15
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 0.78), b 1.00 | 1.00 (10th pct 0.99) | 1.33, 1.32 | sketch 0.90 (10th pct 0.88), safe sketch 1.16
+        query isotropic             : 0.88 | 0.88 | 0.99 (10th pct 0.87), b 1.00 | 1.00 (10th pct 1.00) | 1.51, 1.32 | sketch 1.00 (10th pct 0.97), safe sketch 1.32
+   n 256 bits 128 clusters in the group  8: coded coordinates  94, own directions' energy uncoded 0.03, derived rho 0.0703
+        query as the cluster's rows : 1.23 | 1.00 | 1.93 (10th pct 1.67), b 1.07 | 0.82 (10th pct 0.76) | 1.54, 1.90 | sketch 0.97 (10th pct 0.94), safe sketch 1.09
+        query on the profile        : 1.00 | 1.00 | 0.97 (10th pct 0.71), b 1.00 | 1.00 (10th pct 0.97) | 1.89, 1.90 | sketch 0.92 (10th pct 0.90), safe sketch 1.16
+        query isotropic             : 0.89 | 0.89 | 0.97 (10th pct 0.73), b 1.00 | 1.00 (10th pct 0.97) | 2.14, 1.90 | sketch 1.00 (10th pct 0.98), safe sketch 1.30
+   n 256 bits 128 clusters in the group 16: coded coordinates 111, own directions' energy uncoded 0.13, derived rho 0.0678
+        query as the cluster's rows : 1.61 | 1.00 | 1.74 (10th pct 1.57), b 1.10 | 0.68 (10th pct 0.63) | 1.74, 2.80 | sketch 0.99 (10th pct 0.97), safe sketch 1.05
+        query on the profile        : 1.00 | 1.00 | 0.95 (10th pct 0.70), b 1.00 | 1.01 (10th pct 0.94) | 2.81, 2.80 | sketch 0.95 (10th pct 0.93), safe sketch 1.17
+        query isotropic             : 0.92 | 0.92 | 0.98 (10th pct 0.68), b 1.00 | 1.01 (10th pct 0.95) | 3.04, 2.80 | sketch 1.00 (10th pct 0.98), safe sketch 1.26
+   n 256 bits 128 clusters in the group 32: coded coordinates 124, own directions' energy uncoded 0.22, derived rho 0.0655
+        query as the cluster's rows : 1.98 | 1.00 | 1.57 (10th pct 1.43), b 1.13 | 0.64 (10th pct 0.58) | 1.58, 3.13 | sketch 0.99 (10th pct 0.98), safe sketch 1.03
+        query on the profile        : 1.00 | 1.00 | 0.97 (10th pct 0.71), b 1.00 | 1.01 (10th pct 0.93) | 3.13, 3.13 | sketch 0.97 (10th pct 0.95), safe sketch 1.18
+        query isotropic             : 0.95 | 0.95 | 0.97 (10th pct 0.70), b 1.00 | 1.02 (10th pct 0.94) | 3.29, 3.13 | sketch 1.00 (10th pct 0.98), safe sketch 1.24
+   n 512 bits 64 clusters in the group  1: coded coordinates  36, own directions' energy uncoded 0.00, derived rho 0.0674
+        query as the cluster's rows : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.38, 1.37 | sketch 0.76 (10th pct 0.72), safe sketch 1.38
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 1.37, 1.37 | sketch 0.76 (10th pct 0.72), safe sketch 1.37
+        query isotropic             : 0.66 | 0.66 | 1.00 (10th pct 1.00), b 1.00 | 1.00 (10th pct 1.00) | 2.09, 1.37 | sketch 1.00 (10th pct 0.96), safe sketch 2.09
+   n 512 bits 64 clusters in the group  2: coded coordinates  38, own directions' energy uncoded 0.00, derived rho 0.0711
+        query as the cluster's rows : 1.01 | 1.00 | 1.21 (10th pct 1.11), b 1.01 | 0.99 (10th pct 0.99) | 1.39, 1.40 | sketch 0.81 (10th pct 0.76), safe sketch 1.34
+        query on the profile        : 1.00 | 1.00 | 1.00 (10th pct 0.90), b 1.00 | 1.00 (10th pct 1.00) | 1.40, 1.40 | sketch 0.75 (10th pct 0.70), safe sketch 1.35
+        query isotropic             : 0.62 | 0.62 | 1.00 (10th pct 0.93), b 1.00 | 1.00 (10th pct 1.00) | 2.25, 1.40 | sketch 1.00 (10th pct 0.96), safe sketch 2.17
+   n 512 bits 64 clusters in the group  4: coded coordinates  53, own directions' energy uncoded 0.01, derived rho 0.0712
+        query as the cluster's rows : 1.11 | 0.99 | 1.58 (10th pct 1.40), b 1.07 | 0.89 (10th pct 0.86) | 1.52, 1.70 | sketch 0.89 (10th pct 0.83), safe sketch 1.24
+        query on the profile        : 1.00 | 1.00 | 0.99 (10th pct 0.80), b 1.00 | 1.00 (10th pct 0.98) | 1.70, 1.70 | sketch 0.75 (10th pct 0.71), safe sketch 1.31
+        query isotropic             : 0.62 | 0.62 | 0.98 (10th pct 0.88), b 1.00 | 1.00 (10th pct 0.99) | 2.74, 1.70 | sketch 1.00 (10th pct 0.96), safe sketch 2.09
+   n 512 bits 64 clusters in the group  8: coded coordinates  71, own directions' energy uncoded 0.14, derived rho 0.0662
+        query as the cluster's rows : 1.60 | 1.00 | 1.50 (10th pct 1.38), b 1.15 | 0.66 (10th pct 0.61) | 1.66, 2.65 | sketch 0.96 (10th pct 0.92), safe sketch 1.09
+        query on the profile        : 1.01 | 1.00 | 1.02 (10th pct 0.80), b 1.00 | 1.00 (10th pct 0.93) | 2.63, 2.65 | sketch 0.83 (10th pct 0.78), safe sketch 1.31
+        query isotropic             : 0.66 | 0.66 | 0.99 (10th pct 0.86), b 1.00 | 1.01 (10th pct 0.96) | 4.00, 2.65 | sketch 1.00 (10th pct 0.97), safe sketch 1.90
+   n 512 bits 64 clusters in the group 16: coded coordinates  76, own directions' energy uncoded 0.43, derived rho 0.0599
+        query as the cluster's rows : 2.17 | 1.00 | 1.28 (10th pct 1.19), b 1.12 | 0.71 (10th pct 0.66) | 1.66, 3.59 | sketch 0.98 (10th pct 0.96), safe sketch 1.05
+        query on the profile        : 1.00 | 1.00 | 0.98 (10th pct 0.82), b 1.00 | 1.02 (10th pct 0.92) | 3.59, 3.59 | sketch 0.88 (10th pct 0.84), safe sketch 1.35
+        query isotropic             : 0.73 | 0.74 | 0.99 (10th pct 0.87), b 1.00 | 1.02 (10th pct 0.94) | 4.90, 3.59 | sketch 1.00 (10th pct 0.97), safe sketch 1.74
+   n 512 bits 64 clusters in the group 32: coded coordinates  72, own directions' energy uncoded 0.65, derived rho 0.0550
+        query as the cluster's rows : 2.68 | 1.00 | 1.13 (10th pct 1.06), b 1.08 | 0.81 (10th pct 0.76) | 1.58, 4.24 | sketch 0.99 (10th pct 0.98), safe sketch 1.03
+        query on the profile        : 1.00 | 1.00 | 0.99 (10th pct 0.83), b 1.00 | 1.01 (10th pct 0.93) | 4.24, 4.24 | sketch 0.91 (10th pct 0.87), safe sketch 1.37
+        query isotropic             : 0.81 | 0.80 | 0.99 (10th pct 0.87), b 1.00 | 1.00 (10th pct 0.93) | 5.23, 4.24 | sketch 1.00 (10th pct 0.98), safe sketch 1.64
+
+C. form 2 as a process (one level then the vector; clusters of 2,000 rows; t at 3.5 cluster spreads; level explains 0.8;
+   true rho 2.3 times the prior; psi 4.5). Share of the rows above t that pass, rows passed per cluster, rhohat/true after 1, 3, 10, 40 clusters
+   slope b 1.0:
+      width at the true rms (oracle)                  : pass share 1.000 of 281, rows passed   174.2, rhohat/true 1: 0.95, 3: 1.03, 10: 1.02, 40: 1.03
+      derived prior, never updated                    : pass share 0.708 of 281, rows passed     5.3, rhohat/true 1: 0.95, 3: 0.96, 10: 1.11, 40: 1.09
+      form 2, prior weight 4 rows                     : pass share 1.000 of 281, rows passed   181.3, rhohat/true 1: 0.91, 3: 1.00, 10: 1.01, 40: 1.03
+      form 2, prior weight 16 rows                    : pass share 1.000 of 281, rows passed   180.3, rhohat/true 1: 0.81, 3: 0.95, 10: 1.00, 40: 1.03
+      form 2, prior weight 64 rows                    : pass share 1.000 of 281, rows passed   179.7, rhohat/true 1: 0.64, 3: 0.75, 10: 1.00, 40: 1.03
+      form 2, weight 16, no seed from the first cluster: pass share 1.000 of 281, rows passed   180.2, rhohat/true 1: 0.48, 3: 0.74, 10: 1.02, 40: 1.03
+      form 2, weight 16, upper margin 1/sqrt(rows)    : pass share 1.000 of 281, rows passed   185.2, rhohat/true 1: 0.81, 3: 1.00, 10: 1.02, 40: 1.03
+   slope b 1.09:
+      width at the true rms (oracle)                  : pass share 1.000 of 274, rows passed   153.7, rhohat/true 1: 1.06, 3: 1.05, 10: 1.04, 40: 1.04
+      derived prior, never updated                    : pass share 0.602 of 274, rows passed     2.8, rhohat/true 1: 1.06, 3: 1.18, 10: 1.26, 40: 1.16
+      form 2, prior weight 4 rows                     : pass share 1.000 of 274, rows passed   163.7, rhohat/true 1: 1.02, 3: 1.03, 10: 1.03, 40: 1.04
+      form 2, prior weight 16 rows                    : pass share 1.000 of 274, rows passed   162.1, rhohat/true 1: 0.90, 3: 0.99, 10: 1.01, 40: 1.03
+      form 2, prior weight 64 rows                    : pass share 1.000 of 274, rows passed   161.3, rhohat/true 1: 0.69, 3: 0.84, 10: 1.02, 40: 1.03
+      form 2, weight 16, no seed from the first cluster: pass share 0.996 of 274, rows passed   162.1, rhohat/true 1: 0.40, 3: 0.76, 10: 1.04, 40: 1.04
+      form 2, weight 16, upper margin 1/sqrt(rows)    : pass share 1.000 of 274, rows passed   167.0, rhohat/true 1: 0.90, 3: 1.03, 10: 1.04, 40: 1.03
+   slope b 1.3:
+      width at the true rms (oracle)                  : pass share 1.000 of 249, rows passed   122.6, rhohat/true 1: 1.50, 3: 1.10, 10: 1.04, 40: 1.03
+      derived prior, never updated                    : pass share 0.317 of 249, rows passed     0.7, rhohat/true 1: 1.50, 3: 1.56, 10: 1.62, 40: 1.50
+      form 2, prior weight 4 rows                     : pass share 1.000 of 249, rows passed   129.0, rhohat/true 1: 1.43, 3: 1.02, 10: 1.03, 40: 1.03
+      form 2, prior weight 16 rows                    : pass share 1.000 of 249, rows passed   128.5, rhohat/true 1: 1.24, 3: 1.03, 10: 1.03, 40: 1.03
+      form 2, prior weight 64 rows                    : pass share 1.000 of 249, rows passed   127.5, rhohat/true 1: 0.91, 3: 1.01, 10: 1.02, 40: 1.02
+      form 2, weight 16, no seed from the first cluster: pass share 0.992 of 249, rows passed   126.9, rhohat/true 1: 0.51, 3: 0.95, 10: 1.04, 40: 1.02
+      form 2, weight 16, upper margin 1/sqrt(rows)    : pass share 1.000 of 249, rows passed   130.9, rhohat/true 1: 1.24, 3: 1.01, 10: 1.02, 40: 1.02

@@ -1,0 +1,42 @@
+A1
+  group 0: fit rows 5860, cells 6, held rows 2038, mean S1d16 0.1249, S1b.06 53.56, max S1d16 0.214
+  group 1: fit rows 25011, cells 33, held rows 8287, mean S1d16 0.1273, S1b.06 53.66, max S1d16 0.274
+  group 2: fit rows 4338, cells 12, held rows 1474, mean S1d16 0.0843, S1b.06 30.58, max S1d16 0.259
+  group 3: fit rows 617, cells 2, held rows 208, mean S1d16 0.2500, S1b.06 199.95, max S1d16 0.628
+  group 4: fit rows 6006, cells 14, held rows 1978, mean S1d16 0.1010, S1b.06 40.46, max S1d16 0.214
+  group 5: fit rows 11488, cells 10, held rows 3850, mean S1d16 0.1203, S1b.06 50.33, max S1d16 0.251
+  group 6: fit rows 2177, cells 7, held rows 714, mean S1d16 0.1384, S1b.06 61.05, max S1d16 0.294
+  group 7: fit rows 12749, cells 16, held rows 4199, mean S1d16 0.1147, S1b.06 47.81, max S1d16 0.265
+  group 8: fit rows 13854, cells 18, held rows 4536, mean S1d16 0.0915, S1b.06 34.32, max S1d16 0.236
+  group 9: fit rows 7663, cells 10, held rows 2635, mean S1d16 0.1039, S1b.06 41.66, max S1d16 0.241
+  group 10: fit rows 18964, cells 30, held rows 6244, mean S1d16 0.0986, S1b.06 38.97, max S1d16 0.249
+  group 11: fit rows 41195, cells 42, held rows 13815, mean S1d16 0.0566, S1b.06 14.48, max S1d16 0.253
+  groups >= 3n only: held rows 49056, S1d16 0.09508, S1b.06 36.332; all: 0.09635 37.366
+A2
+  group 0: fit rows 1, cells 1, held rows 0, mean S1d16 nan, S1b.06 nan, max S1d16 nan
+  group 1: fit rows 6812, cells 18, held rows 2306, mean S1d16 0.1326, S1b.06 58.32, max S1d16 0.245
+  group 2: fit rows 14143, cells 15, held rows 4720, mean S1d16 0.1204, S1b.06 50.48, max S1d16 0.258
+  group 3: fit rows 36342, cells 37, held rows 12201, mean S1d16 0.0618, S1b.06 17.64, max S1d16 0.231
+  group 4: fit rows 3, cells 1, held rows 0, mean S1d16 nan, S1b.06 nan, max S1d16 nan
+  group 5: fit rows 10686, cells 19, held rows 3566, mean S1d16 0.1162, S1b.06 48.47, max S1d16 0.266
+  group 6: fit rows 19367, cells 26, held rows 6412, mean S1d16 0.0986, S1b.06 38.98, max S1d16 0.223
+  group 7: fit rows 10857, cells 13, held rows 3585, mean S1d16 0.0573, S1b.06 15.08, max S1d16 0.201
+  group 8: fit rows 24326, cells 30, held rows 7986, mean S1d16 0.1250, S1b.06 52.35, max S1d16 0.255
+  group 9: fit rows 6715, cells 10, held rows 2318, mean S1d16 0.0964, S1b.06 37.49, max S1d16 0.194
+  group 10: fit rows 14691, cells 17, held rows 4840, mean S1d16 0.0958, S1b.06 36.74, max S1d16 0.235
+  group 11: fit rows 5979, cells 13, held rows 2044, mean S1d16 0.1123, S1b.06 46.50, max S1d16 0.282
+  groups >= 3n only: held rows 49978, S1d16 0.09596, S1b.06 36.868; all: 0.09596 36.868
+A3
+  group 0: fit rows 18714, cells 17, held rows 6158, mean S1d16 0.0989, S1b.06 38.96, max S1d16 0.205
+  group 1: fit rows 7413, cells 11, held rows 2448, mean S1d16 0.1043, S1b.06 41.85, max S1d16 0.217
+  group 2: fit rows 5175, cells 7, held rows 1741, mean S1d16 0.0994, S1b.06 39.08, max S1d16 0.265
+  group 3: fit rows 6867, cells 22, held rows 2257, mean S1d16 0.1046, S1b.06 42.35, max S1d16 0.311
+  group 4: fit rows 8073, cells 14, held rows 2744, mean S1d16 0.1348, S1b.06 59.41, max S1d16 0.251
+  group 5: fit rows 13720, cells 17, held rows 4573, mean S1d16 0.0932, S1b.06 35.31, max S1d16 0.237
+  group 6: fit rows 8538, cells 16, held rows 2818, mean S1d16 0.1265, S1b.06 53.89, max S1d16 0.214
+  group 7: fit rows 6716, cells 11, held rows 2320, mean S1d16 0.0963, S1b.06 37.41, max S1d16 0.205
+  group 8: fit rows 14263, cells 10, held rows 4750, mean S1d16 0.0698, S1b.06 22.01, max S1d16 0.259
+  group 9: fit rows 23967, cells 31, held rows 7920, mean S1d16 0.1251, S1b.06 52.32, max S1d16 0.245
+  group 10: fit rows 5820, cells 9, held rows 1919, mean S1d16 0.1171, S1b.06 48.67, max S1d16 0.274
+  group 11: fit rows 30656, cells 35, held rows 10330, mean S1d16 0.0532, S1b.06 12.77, max S1d16 0.235
+  groups >= 3n only: held rows 49978, S1d16 0.09496, S1b.06 36.284; all: 0.09496 36.284

@@ -1,0 +1,4 @@
+[     51s] sweep-full-K400 fixed point after 73 passes; K 400 last moves [0.001, 0.0011, 0.0009]
+[     77s] sweep-full-K400 {'Si_S1a_mean': 0.219, 'Si_S1a_rms': 0.232, 'Si_S1d_4': 0.1635, 'Si_S1d_8': 0.1396, 'Si_S1d_16': 0.1103, 'Si_S1d_32': 0.0778, 'Si_S1b_0.03': 97.0313, 'Si_S1b_0.06': 45.6836, 'Si_S1b_0.12': 13.861}
+[     90s] sweep-full-K400 violations 0 0
+[     90s] done
