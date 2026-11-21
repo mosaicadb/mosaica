@@ -313,19 +313,21 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
     let recs: Vec<Vec<f32>> = (0..k).into_par_iter().map(|c| {
         let (cl, one) = (&ix.cl[c], &sums[c]);
         let nc = one.rows;
-        let dual = if nc > 0 { dual_of(ix, c) } else { Vec::new() };
         let mut out = Vec::with_capacity(WForms::stride(r, ndl));
-        for l in 0..ndl {
+        // a cluster with no rows: no errors, so M, N, gamma and U are 0
+        let dual = if nc > 0 { dual_of(ix, c) } else { Vec::new() };
+        if nc == 0 {
+            out.resize(ndl * WForms::rec(r), 0.0);
+        }
+        for (l, (bt, qb)) in dual.iter().enumerate() {
             let gd = &g[(cl.g * ndl + l) * n..(cl.g * ndl + l + 1) * n];
             let gq = |x: &[f64], y: &[f64]| -> f64 { (0..n).map(|t| x[t] * gd[t] * y[t]).sum() };
-            let zero = (vec![vec![0.0; n]; r], Vec::new());
-            let (bt, qb) = if nc > 0 { &dual[l] } else { &zero };
-            let m: Vec<f64> = one.yy[l].iter().map(|x| x / nc.max(1) as f64).collect();
+            let m: Vec<f64> = one.yy[l].iter().map(|x| x / nc as f64).collect();
             let nn: Vec<f64> = (0..r * r).map(|i| gq(&bt[i / r], &bt[i % r])).collect();
-            let (trs, trq) = (one.usq[l].iter().sum::<f64>() / nc.max(1) as f64, one.qq[l] / nc.max(1) as f64);
+            let (trs, trq) = (one.usq[l].iter().sum::<f64>() / nc as f64, one.qq[l] / nc as f64);
             let den = gd.iter().sum::<f64>() - qb.iter().map(|w| gq(w, w)).sum::<f64>();
             let gamma = if den > 0.0 { ((trs - trq) / den).max(0.0) } else { 0.0 };
-            let uu = if nc > 0 { (cl.r0..cl.r1).map(|row| det_norm(ix, c, l, row).powi(2)).sum::<f64>() / nc as f64 } else { 0.0 };
+            let uu = (cl.r0..cl.r1).map(|row| det_norm(ix, c, l, row).powi(2)).sum::<f64>() / nc as f64;
             out.extend(pack(&m, r));
             out.extend(pack(&nn, r));
             out.extend([gamma as f32, uu as f32]);
