@@ -5,15 +5,16 @@
 //! u = (z - s sig val_l) / d_l (z the row in the group's basis, s its scale, val_l the level's decoded value), as the
 //! encoder computes it (`encode_cluster`). The reader's estimate takes off the cluster's centre term (alr times the
 //! centre m, `CQ2::alr`), so its error on a query is D.u with D = (V_q^T q - alr mv) d_l, mv = V_q^T m (`Cl2::mv32`).
-//! S_c = mean u u' over cluster c's rows (uncentred), G the group's diagonal of it over all its rows. p_j are the cluster's r order directions (int8 rows
-//! times their scales, as the order state holds them) and b_j = (V_q^T p_j) d_l their images; B~ = B (P'P)^-1, so that
-//! B~ a is the image of a vector's part in the directions' span, a = P'x its coefficients. Stored per cluster and level:
-//! M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed, off-diagonals doubled), gamma = tr(S_c outside span B) / tr(G outside span B)
-//! (the complement orthogonal in these coordinates), and U = mean over the cluster's rows of the squared stored norm
-//! (`q::det_norm`, the code term of the row's half-width per unit of `CQ2::dwa`); per cluster, P'm. At query time
-//! a = P'q - alr P'm (the coefficients the reader holds, less the centre's), T = D'GD, tau^2 = a'Ma + gamma max(0, T -
-//! a'Na) (`WForms::tau2`), and the level reads at psi tau / (dwa sqrt U) of each row's half-width (at most the certified
-//! width).
+//! S_c = mean u u' over cluster c's rows (uncentred), G the group's diagonal of it over all its rows. p_j are the
+//! cluster's r order directions (int8 rows times their scales, as the order state holds them) and b_j = (V_q^T p_j) d_l
+//! their images; B~ = B (P'P)^-1, so that B~ a is the image of a vector's part in the directions' span, a = P'x its
+//! coefficients. Stored per cluster and level: M = B~' S_c B~ and N = B~' G B~ (r x r, symmetric, packed, the
+//! off-diagonals doubled), gamma = tr(S_c outside span B) / tr(G outside span B) (the complement orthogonal in these
+//! coordinates), and U = mean over the cluster's rows of the squared stored norm (`q::det_norm`, the code term of the
+//! row's half-width per unit of `CQ2::dwa`); per cluster, P'm; per group and level, h = d_l^2 G. At query time
+//! a = P'q - alr P'm (the coefficients the reader holds, less the centre's), T = D'GD, tau^2 = a'Ma + gamma max(0,
+//! T - a'Na) (`WForms::tau2`), and the level reads at psi tau / (dwa sqrt U) of each row's half-width (at most the
+//! certified width).
 
 use super::q::*;
 use super::*;
@@ -134,7 +135,8 @@ pub fn quad(x: &[f32], o: &[f32]) -> f64 {
     unsafe { dot32(o, x) }
 }
 
-/// X symmetric r x r packed as its upper triangle row by row, the off-diagonals doubled (each stands for X_ij and X_ji).
+/// X symmetric r x r packed as its upper triangle row by row, the off-diagonals doubled (each stands for X_ij and
+/// X_ji).
 fn pack(m: &[f64], r: usize) -> impl Iterator<Item = f32> + '_ {
     (0..r).flat_map(move |i| (i..r).map(move |j| (if i == j { m[i * r + j] } else { 2.0 * m[i * r + j] }) as f32))
 }
