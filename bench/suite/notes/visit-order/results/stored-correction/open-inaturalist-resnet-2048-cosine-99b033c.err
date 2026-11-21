@@ -1,0 +1,18 @@
+[build2] fit loaded; anon 201 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 524288 (2^19; 499000 items), L = 6, eps = 1e-9, one side per event: ln(1/delta) = 35.6848
+[build2] randomised constants 12.9s (sub-Gaussian c = 8.448): [([255, 335], 7.988, ConvexOrder), ([255, 335, 687], 8.03, Certificate), ([255, 335, 687, 767], 8.03, Certificate)]
+[build2] plans 96.7s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.04e-12; rates g0 [[0.5, 0.125, 0.0, 0.0], [1.0, 0.25, 0.125, 0.0], [2.0, 0.5, 0.25, 0.125], [3.0, 1.0, 0.5, 0.25], [4.0, 3.0, 1.0, 0.25], [6.0, 4.0, 2.0, 1.0]]
+[build2] calibration sample 93886 items from 250 clusters
+[build2] calibrated 104.7s; anon 1455 MB
+[build2] encoded 134.6s, with it the support table of 250 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 17.8 thread-seconds); anon 1514 MB
+[build2] level ratios: 400 rows as queries, 5.8s
+[build2] assembled 141.6s; anon 752 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+[build2] saved to /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/encoded; store hash 1a4a815f327d176d
+[repack] occupancy thresholds by level [0.14, 0.13, 0.07, 0.1, 0.15, 0.17, 0.22, 0.27] (timed in 0.0s)
+[approx] measured constants dir_us=0.5430921856799583 row_us_1=0.1432296374397815 row_us_4=0.19190251457288793 row_us_16=0.20653092958761005 row_us_64=0.189613367142723 cl_us=8.861511839619395 cut_row_us_1=0.01986525689445927 cut_row_us_4=0.06423339393743453 cut_row_us_16=0.10532150087584914 cut_row_us_64=0.24070789712072996 cut_us=1.6996250000000002 grp_us=698.73 sig_us=2.3826875: timed: no cache at /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/compute-constants.txt; saved in /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/compute-constants.txt, in 0.6s; the exact planner's rule from them: r_rows=81 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/encoded in 2.164s: 499000 rows, 250 clusters; when built: code hash 7bbff7bb902f8483, store hash 1a4a815f327d176d
+[repack] occupancy thresholds by level [0.13, 0.12, 0.07, 0.1, 0.13, 0.17, 0.21, 0.23] (timed in 0.0s)
+[open] 2.600s in all: fit read 0.353s, key 0.032s, index opened 2.165s, repack timed 0.050s; anon 290 MB
+[approx] measured constants dir_us=0.6165558933650294 row_us_1=0.1314791009013985 row_us_4=0.15790286305598425 row_us_16=0.1635634107118272 row_us_64=0.15743740457292998 cl_us=7.765467427174516 cut_row_us_1=0.019348210214333132 cut_row_us_4=0.060518728522651014 cut_row_us_16=0.09124517803422687 cut_row_us_64=0.1976582414654205 cut_us=1.6006562500000001 grp_us=640.9150000000001 sig_us=2.2764687500000003: timed: no cache at /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/compute-constants.txt; saved in /home/joe/code/vexact-data/corr/idx/inaturalist-resnet-2048-cosine-99b033c/compute-constants.txt, in 0.5s; the exact planner's rule from them: r_rows=78 r_kappa=0.000

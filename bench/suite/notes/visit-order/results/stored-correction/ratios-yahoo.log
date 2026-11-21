@@ -1,0 +1,11 @@
+[build2] level ratios: 400 rows as queries, 0.9s
+[build2] assembled 26.8s; anon 560 MB; x2 bound 3.052e-4; escapes: det norms 24, |y| 2597, kappa 9908, tan 16991; code hash 25d0c4be6d18a504
+[build2] saved to /home/joe/code/vexact-data/corr/val/yahoo/encoded; store hash fca735a2701d50df
+/home/joe/code/vexact-data/corr/val/yahoo: level ratios from 400 given queries in 0.8s on 8 threads
+reading the ratios as the reader does: 4.9 ns per cluster (171981.06)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 27.91s
+## yahoo: 339 clusters, 64 groups; 400 training queries; clusters with >= 3 pairs: 339; groups without a training row: 0
+  level 0: p10 / median / p90: replay 0.981 / 1.028 / 1.075, library (same queries) 0.981 / 1.028 / 1.075, build (its own rows) 0.982 / 1.026 / 1.079
+    |log(library / replay)| per cluster: median 1.74e-07, max 3.47e-07; |log(build / replay)|: median 0.014, p90 0.039
+  level 1: p10 / median / p90: replay 0.977 / 1.014 / 1.053, library (same queries) 0.977 / 1.014 / 1.053, build (its own rows) 0.974 / 1.013 / 1.055
+    |log(library / replay)| per cluster: median 2.10e-07, max 4.59e-07; |log(build / replay)|: median 0.011, p90 0.032

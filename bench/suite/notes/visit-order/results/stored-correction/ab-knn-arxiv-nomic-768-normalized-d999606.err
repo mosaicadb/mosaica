@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-d999606/encoded in 0.476s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.11, 0.17, 0.18] (timed in 0.0s)
+[open] 0.795s in all: fit read 0.256s, key 0.025s, index opened 0.478s, repack timed 0.037s; anon 242 MB
+[approx] measured constants dir_us=0.1320682151065593 row_us_1=0.08499989753484916 row_us_4=0.09697744698337464 row_us_16=0.09956843665481827 row_us_64=0.07489289558459833 cl_us=9.013397316996185 cut_row_us_1=0.0188120141899446 cut_row_us_4=0.05432620021893607 cut_row_us_16=0.09691396189307296 cut_row_us_64=0.1604506601906643 cut_us=1.4371562500000001 grp_us=150.15800000000002 sig_us=1.0274062499999999: read from /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=156 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-d999606/encoded in 0.452s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.14, 0.14, 0.06, 0.11, 0.15, 0.18] (timed in 0.0s)
+[open] 0.773s in all: fit read 0.260s, key 0.024s, index opened 0.452s, repack timed 0.037s; anon 491 MB
+[approx] measured constants dir_us=0.1320682151065593 row_us_1=0.08499989753484916 row_us_4=0.09697744698337464 row_us_16=0.09956843665481827 row_us_64=0.07489289558459833 cl_us=9.013397316996185 cut_row_us_1=0.0188120141899446 cut_row_us_4=0.05432620021893607 cut_row_us_16=0.09691396189307296 cut_row_us_64=0.1604506601906643 cut_us=1.4371562500000001 grp_us=150.15800000000002 sig_us=1.0274062499999999: read from /home/joe/code/vexact-data/corr/idx/arxiv-nomic-768-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=156 r_kappa=0.000

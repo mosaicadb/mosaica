@@ -1,0 +1,148 @@
+Stored correction: a per-cluster ratio on the approximate k-NN's deterministic level width, timed against d999606 and a351f13
+==========================================================================================================================
+
+The build (99b033c, branch research/stored-correction off a351f13)
+------------------------------------------------------------------
+- At build, `adaptive::level_ratios` measures each cluster's ratio of actual error spread to the derived width at each
+  deterministic level. It follows the sample-when-needed replay's "A data cluster ratio" (replay.py):
+  - the queries are 400 corpus rows, each left out of its own cluster;
+  - each query reads its first 20 clusters by mu + z(1, v) sigma;
+  - each row gives z = (s - m) / (rho_g,l h);
+  - a cluster's ratio is the root mean square of z over its pairs, or its group's when it has fewer than 3 pairs.
+  The ratio is saved as level_ratio.bin (store format 12, in the store hash). A missing file is refused at the open,
+  with a request to rebuild, and so is an index without ratios at Adaptive::new.
+- k-NN reads each cluster's deterministic levels on the index path at min(1, psi rho_g,l r_c,l) of the upper
+  half-width. The randomised levels, the order and the stop are as in a351f13. Exact paths and the threshold query do
+  not read the ratio.
+- The base read the deterministic levels at min(1, psi rho_l), with rho_l the median of rho over the groups. The
+  ratio is measured against each group's own rho, as in the replay, so the new width uses rho_g,l, not the median.
+- `level_psi` (Adaptive::knn_levels and the bindings) sets the deterministic levels' psi only. The randomised levels
+  stay at the stop's psi, as on research/sampled-width (0a4a00979). ab_orders.py takes --level-psi and
+  --level-psi-offset C (level psi max(0, psi - C)).
+
+How it departs from the replay. A build cannot know the benchmark queries, so:
+- the 400 rows are drawn uniformly from the index by the build's seed, not from outside the benchmark queries' 100
+  nearest;
+- the queries are the stored f16 vectors, not corpus32;
+- a cluster whose group has no training row would fall back to the whole index's ratio, then to 1 (the replay would
+  give it 0). This did not happen on any of the three indexes.
+
+The replay reproduced (ratios-*.log, check_ratios.sh, check_ratios.py)
+---------------------------------------------------------------------
+- With the replay's own 400 training queries (study_level_ratios), the library's ratios match the replay's per
+  cluster to |log| <= 3e-6 at both levels on iNaturalist, LAION and yahoo.
+- With the build's own 400 rows, they differ from the replay's by a median |log| of 0.01 to 0.03, p90 0.03 to 0.11.
+  Median ratios: iNaturalist 1.31 / 1.29 (levels 0 / 1), LAION 1.09 / 1.07, yahoo 1.03 / 1.01.
+
+Costs
+-----
+Build, on 8 threads on cores 0-7 at nice 19:
+- iNaturalist 5.8 s, of a 156 s build;
+- LAION 1.1 s, of 32 s;
+- yahoo 0.9 s, of 27 s.
+
+Query: the reader reads the ratio and computes its width per cluster opened on the index path, inside the cluster's
+setup time (P_CLSETUP). It takes 4.9 to 5.7 ns per cluster (study_level_ratios), about 60 ns for a query that opens 12
+clusters, against a query time of about 2.4 ms. The cost model's constants are timed without a width, as before.
+
+Tests (cargo test --release --no-fail-fast): 114 passed, 4 failed, 10 ignored; the second binary 4 passed.
+- The 4 failures are the known synth4k ones (synth4k_reference_hashes, knn2_fast_is_unchanged,
+  the_exact_paths_are_unchanged, the_constants_change_the_answer_only_through_a_sigma_and_the_moments).
+- Against a351f13 on the same regenerated fixture:
+  - every exact-path line (VEXACT_EXACT_LINES, 8,520 lines) is byte-identical;
+  - knn2_fast's hash is the same;
+  - the code hash is the same;
+  - only the store hash moves, because it now covers the ratios.
+- New tests:
+  - the_level_ratios_are_stored_and_survive_a_reopen;
+  - the_statistical_width_drops_only_what_the_certified_width_keeps (over every level, the integer and float levels,
+    and psi up to 50; equal to the certified read where the cap binds at every level);
+  - the_levels_psi_is_psi_unless_set;
+  - a_saved_index_opens_as_the_index_it_saves, which now refuses a missing level_ratio.bin and compares the ratios.
+
+The timed runs (run_sc.sh, run.log; table.txt, counts.txt)
+---------------------------------------------------------
+Setup:
+- each build on its own hard-linked copy of the suite's fit, opened once on cores 0-7, with its constants timed alone
+  on core 11;
+- ab_orders.py with psi 2 to 9, 3 reps, core 11, 100 queries, k 10, arms back to back per dataset;
+- nothing else ran on the machine.
+
+Arms:
+- d999606: start of day;
+- a351f13: the base;
+- 99b033c: the stored ratio, level psi = psi;
+- lo15: 99b033c with level psi = max(0, psi - 1.5).
+
+Time to recall 0.9 / 0.95 / 0.99 as a share of spread's time in the same run ("-": not reached):
+
+  dataset / filter         d999606           a351f13           99b033c           lo15
+  iNaturalist none         0.63/0.74/0.87    0.69/1.16/1.64    0.68/0.71/1.06    0.73/1.14/1.76
+              random-1     1.20/1.17/1.13    1.24/1.20/1.15    1.25/1.23/1.19    1.23/1.17/1.13
+              random-25    0.22/0.26/0.46    0.22/0.25/0.45    0.21/0.25/0.43    0.22/0.25/0.41
+              region-1     0.21/0.25/0.25    0.22/0.24/0.26    0.22/0.25/0.25    0.22/0.25/0.26
+              region-25    0.35/0.58/1.40    0.37/0.62/1.01    0.37/0.49/1.03    0.37/0.54/1.04
+  LAION       none         0.66/0.67/1.14    0.54/0.47/0.57    0.57/0.48/0.60    0.76/0.61/0.61
+              random-1     0.86/0.89/0.97    0.98/0.90/0.80    0.98/0.90/0.74    1.02/0.96/0.83
+              random-25    0.27/0.33/0.47    0.30/0.38/0.38    0.30/0.37/0.39    0.30/0.36/0.37
+              region-1     0.30/0.32/0.31    0.30/0.32/0.33    0.30/0.33/0.35    0.31/0.34/0.35
+              region-25    0.74/1.02/1.33    0.41/0.43/0.57    0.43/0.42/0.57    0.47/0.53/0.61
+  yahoo       none         0.70/0.74/0.59    0.54/0.52/0.41    0.53/0.52/0.42    0.61/0.61/0.45
+              random-1     0.95/0.87/0.76    1.03/0.94/0.81    0.99/0.88/0.77    0.99/0.89/0.73
+              random-25    0.30/0.32/0.39    0.30/0.33/0.43    0.28/0.32/0.41    0.29/0.33/0.39
+              region-1     0.27/0.27/0.31    0.28/0.29/0.38    0.37/0.39/0.51    0.35/0.38/0.47
+              region-25    0.46/0.57/-       0.42/0.42/0.43    0.41/0.36/0.46    0.48/0.47/0.46
+  arxiv       none         0.81/0.87/1.11    0.72/0.80/1.00    0.66/0.71/0.66    1.17/1.48/1.38
+              random-1     0.96/0.95/0.81    1.07/1.11/0.87    1.06/1.08/0.84    1.03/1.05/0.83
+              random-25    0.39/0.42/0.90    0.38/0.38/0.71    0.36/0.37/0.65    0.36/0.37/0.70
+              region-1     0.40/0.38/0.39    0.43/0.39/0.37    0.43/0.40/0.37    0.40/0.37/0.35
+              region-25    0.52/0.61/1.66    0.42/0.44/0.55    0.40/0.39/0.54    0.52/0.62/0.76
+
+Unfiltered, recall at psi 4 / 5 / 6 and, at psi 5, the rows past the deterministic levels / stored vectors read per
+query. The full table, every filter, is counts.txt. Stored vectors include the rows of clusters read directly;
+d999606's bindings do not report the counts.
+
+  dataset        d999606              a351f13                         99b033c                         lo15
+  iNaturalist    0.970/0.991/0.998    0.911/0.948/0.979  184 / 9381   0.942/0.978/0.996  124 / 10852  0.901/0.943/0.976   86 / 10897
+  LAION          0.834/0.958/0.987    0.808/0.947/0.979 4115 / 2263   0.820/0.949/0.980 4800 / 2194   0.713/0.884/0.967 2497 / 2245
+  yahoo          0.781/0.901/0.970    0.770/0.899/0.963 1947 / 1018   0.774/0.899/0.963 1952 / 1018   0.733/0.855/0.937 1674 / 1016
+  arxiv          0.855/0.962/0.984    0.800/0.902/0.971 1544 / 1791   0.807/0.925/0.975 1516 / 2213   0.726/0.828/0.924 1218 / 2302
+
+What the runs say
+-----------------
+- **iNaturalist unfiltered is mostly repaired.** Recall at psi 5 rises from 0.948 to 0.978. Time to recall 0.95 / 0.99
+  falls from 1.16 / 1.64 of spread to 0.71 / 1.06. That is level with d999606 at 0.9 and 0.95, but not yet at 0.99
+  (1.06 against 0.87).
+  - Rows past the deterministic levels at psi 5 fall (184 to 124) even though the width is wider. This is likely
+    because the k-th best is higher once the true neighbours are found sooner. Not checked.
+- **arxiv unfiltered gains too.** Recall at psi 5 rises from 0.902 to 0.925, and time to recall 0.99 falls from 1.00
+  to 0.66 of spread.
+- **LAION and yahoo unfiltered stay level with a351f13**, within 0 to 6%, as their ratios (median 1.03 to 1.09)
+  predict.
+- **The filtered sets are level with a351f13 except in three places.**
+  - iNaturalist region-25 at 0.95 is better (0.62 to 0.49).
+  - arxiv random-25 at 0.99 is better (0.71 to 0.65).
+  - yahoo region-1 is about 1.3 times slower (0.29 to 0.39 at 0.95). The cause is not the width but the path choice.
+    The constants timed at this arm's open differ from a351f13's (row_us_16 0.063 against 0.034), so 1.8 clusters
+    per query go to the index path where a351f13 read every cluster directly.
+  - On random-1 and random-25 nearly every cluster is read directly (0 to 7 rows past the deterministic levels), so
+    the width has nothing to act on there.
+- **Level psi offset 1.5 is worse everywhere unfiltered.** It lowers recall at every psi (iNaturalist 0.943, arxiv
+  0.828 at psi 5). In the spread-normalised columns it takes 1.0 to 2.1 times the default dial's time at a given
+  recall. With the stored ratio, the levels want the stop's psi.
+- **psi for 0.95 unfiltered** with the stored ratio, interpolated from the recalls above: about 4.3 on iNaturalist,
+  5.0 on LAION, 5.4 on arxiv and 5.7 on yahoo. a351f13 needs 5.1 on iNaturalist and 5.7 on arxiv.
+- **a351f13 against d999606** compares everything merged since the start of the day, not the soundness fixes alone:
+  the pooled stop, the derived width, rotations on first read, the group cost and the soundness fixes. So these runs
+  cannot price the soundness fixes on their own. Overall:
+  - unfiltered, a351f13 is faster on LAION, yahoo and arxiv, and slower on iNaturalist at high recall (the derived
+    width this build corrects);
+  - region-25 is much faster everywhere.
+
+Files
+-----
+- summary.txt, table.txt (builds_table.py; ignore its right-hand "/build" ratios), counts.txt (counts.py);
+- ab-knn-*.txt and .err, open-*.err, run.log, run_sc.sh;
+- ratios-*.log, check_ratios.sh, check_ratios.py.
+- Code: rust/src/v2/adaptive.rs (level_ratios, build_level_ratios, knn_levels), q.rs (CQ2::ddial, set_width,
+  KnnReader::with_width), mod.rs and store.rs (Index2::lratio, level_ratio.bin), e2e.rs (tests, study_level_ratios).
