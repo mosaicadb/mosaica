@@ -79,15 +79,28 @@ impl WForms {
     }
 
     /// Whether the forms fit an index of `ng` groups and `k` clusters at `ndl` levels of `n` dimensions, every value
-    /// finite: what a build must make and an open must find.
+    /// finite and h, gamma and U at least 0 (each a mean of squares or a ratio of them; a negative one would narrow
+    /// the width): what a build must make and an open must find.
     pub fn check(&self, ng: usize, k: usize, ndl: usize, n: usize) -> Result<(), String> {
-        if self.h.len() != ng * ndl * n || self.c.len() != k * Self::stride(self.r, ndl) {
+        let (r, rp) = (self.r, self.r * (self.r + 1) / 2);
+        if self.h.len() != ng * ndl * n || self.c.len() != k * Self::stride(r, ndl) {
             return Err(format!("{} and {} do not hold the W2 forms of {ng} groups and {k} clusters at {ndl} levels", FILES[0], FILES[1]));
         }
-        match self.h.iter().chain(&self.c).position(|x| !x.is_finite()) {
-            Some(i) => Err(format!("the W2 forms hold a value that is not a number (at {i})")),
-            None => Ok(()),
+        if let Some(i) = self.h.iter().chain(&self.c).position(|x| !x.is_finite()) {
+            return Err(format!("the W2 forms hold a value that is not a number (at {i})"));
         }
+        if let Some(i) = self.h.iter().position(|&x| x < 0.0) {
+            return Err(format!("the W2 forms hold a negative h (at {i})"));
+        }
+        for ci in 0..k {
+            for l in 0..ndl {
+                let rec = self.of(ndl, ci, l);
+                if rec[2 * rp] < 0.0 || rec[2 * rp + 1] < 0.0 {
+                    return Err(format!("the W2 forms hold a negative gamma or U (cluster {ci}, level {l})"));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
