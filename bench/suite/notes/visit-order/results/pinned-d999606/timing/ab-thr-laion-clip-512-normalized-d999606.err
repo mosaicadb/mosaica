@@ -1,0 +1,5 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/encoded in 0.270s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.452s in all: fit read 0.133s, key 0.011s, index opened 0.271s, repack timed 0.037s; anon 125 MB
+[approx] measured constants dir_us=0.3508519076103106 row_us_1=0.06146471419769605 row_us_4=0.0771672815564758 row_us_16=0.07945153056090304 row_us_64=0.049025652441223345 cl_us=7.150628821798676 cut_row_us_1=0.015387669156255395 cut_row_us_4=0.05792707197688973 cut_row_us_16=0.12215668139286207 cut_row_us_64=0.2732582292418007 cut_us=1.18515625 grp_us=66.082 sig_us=0.9359375: read from /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=173 r_kappa=0.000

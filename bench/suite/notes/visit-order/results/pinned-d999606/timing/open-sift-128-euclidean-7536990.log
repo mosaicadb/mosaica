@@ -1,0 +1,12 @@
+[build2] fit loaded; anon 15 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 1000000 items), L = 2, eps = 1e-9, one side per event: ln(1/delta) = 35.2794
+[build2] randomised constants 5.5s (sub-Gaussian c = 8.400): [([15, 15, 47], 6.803, ConvexOrder), ([15, 15, 47, 47], 7.172, Certificate)]
+[build2] plans 5.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[4.0, 3.0, 1.0, 0.5], [6.0, 5.0, 4.0, 3.0]]
+[build2] calibration sample 488078 items from 500 clusters
+[build2] calibrated 12.9s; anon 207 MB
+[build2] encoded 14.4s, with it the support table of 500 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 2.5 thread-seconds); anon 365 MB
+[build2] assembled 14.7s; anon 378 MB; x2 bound 7.932e-4; escapes: det norms 111659, |y| 3462, kappa 27273, tan 16375; code hash 07320026f5b8203e
+[build2] saved to /home/joe/code/vexact-data/suite/idx/sift-128-euclidean-7536990/encoded; store hash c000079ec109079c
+[repack] occupancy thresholds by level [0.13, 0.13, 0.09, 0.12] (timed in 0.0s)
+[approx] measured constants i8_us=0.007992 row_us=0.007825228769334678 dir_us=0.4138846343965968 cl_us=5.671694398571189 size_us=0.0005240422270055784 vis_us=0.009186469562209419 grp_us=4.4605625 anc_us=0.01306075: timed: no cache at /home/joe/code/vexact-data/suite/idx/sift-128-euclidean-7536990/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx/sift-128-euclidean-7536990/compute-constants.txt, in 0.2s; the exact planner's rule from them: every cluster scored directly

@@ -1,0 +1,12 @@
+[build2] fit loaded; anon 201 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 524288 (2^19; 499000 items), L = 6, eps = 1e-9, one side per event: ln(1/delta) = 35.6848
+[build2] randomised constants 12.7s (sub-Gaussian c = 8.448): [([255, 335], 7.988, ConvexOrder), ([255, 335, 687], 8.03, Certificate), ([255, 335, 687, 767], 8.03, Certificate)]
+[build2] plans 97.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.04e-12; rates g0 [[0.5, 0.125, 0.0, 0.0], [1.0, 0.25, 0.125, 0.0], [2.0, 0.5, 0.25, 0.125], [3.0, 1.0, 0.5, 0.25], [4.0, 3.0, 1.0, 0.25], [6.0, 4.0, 2.0, 1.0]]
+[build2] calibration sample 93886 items from 250 clusters
+[build2] calibrated 104.2s; anon 1665 MB
+[build2] encoded 126.6s, with it the support table of 250 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 18.9 thread-seconds); anon 1747 MB
+[build2] assembled 128.1s; anon 1001 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+[build2] saved to /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-f528836/encoded; store hash d29aa13e994dca88
+[repack] occupancy thresholds by level [0.12, 0.12, 0.08, 0.1, 0.13, 0.18, 0.22, 0.25] (timed in 0.0s)
+[approx] measured constants dir_us=0.7467055952561946 row_us_1=0.1278802072944195 row_us_4=0.15745513556358862 row_us_16=0.17170528438200708 row_us_64=0.16094905113378452 cl_us=8.645732301800226 cut_row_us_1=0.01872120543348494 cut_row_us_4=0.06302463612066557 cut_row_us_16=0.09797683155716824 cut_row_us_64=0.20533290076273392 cut_us=1.43303125 grp_us=984.7180000000001 sig_us=2.29021875: timed: no cache at /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-f528836/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-f528836/compute-constants.txt, in 0.5s; the exact planner's rule from them: r_rows=85 r_kappa=0.000

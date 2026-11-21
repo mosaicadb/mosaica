@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-d999606/encoded in 1.891s: 499000 rows, 250 clusters; when built: code hash 7bbff7bb902f8483, store hash d29aa13e994dca88
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.1, 0.15, 0.16, 0.22, 0.26] (timed in 0.0s)
+[open] 2.338s in all: fit read 0.365s, key 0.031s, index opened 1.893s, repack timed 0.050s; anon 300 MB
+[approx] measured constants dir_us=0.7752519662907891 row_us_1=0.12482898984483534 row_us_4=0.1645224229881603 row_us_16=0.1773082809079942 row_us_64=0.17059032777701102 cl_us=8.792571586173098 cut_row_us_1=0.017678477478551197 cut_row_us_4=0.06177921557493104 cut_row_us_16=0.09826356364479755 cut_row_us_64=0.22284045631527863 cut_us=1.47478125 grp_us=1005.625 sig_us=2.3114375000000003: read from /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=89 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-d999606/encoded in 1.977s: 499000 rows, 250 clusters; when built: code hash 7bbff7bb902f8483, store hash d29aa13e994dca88
+[repack] occupancy thresholds by level [0.14, 0.13, 0.07, 0.1, 0.14, 0.16, 0.22, 0.27] (timed in 0.0s)
+[open] 2.381s in all: fit read 0.324s, key 0.031s, index opened 1.977s, repack timed 0.050s; anon 608 MB
+[approx] measured constants dir_us=0.7752519662907891 row_us_1=0.12482898984483534 row_us_4=0.1645224229881603 row_us_16=0.1773082809079942 row_us_64=0.17059032777701102 cl_us=8.792571586173098 cut_row_us_1=0.017678477478551197 cut_row_us_4=0.06177921557493104 cut_row_us_16=0.09826356364479755 cut_row_us_64=0.22284045631527863 cut_us=1.47478125 grp_us=1005.625 sig_us=2.3114375000000003: read from /home/joe/code/vexact-data/suite/idx/inaturalist-resnet-2048-cosine-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=89 r_kappa=0.000

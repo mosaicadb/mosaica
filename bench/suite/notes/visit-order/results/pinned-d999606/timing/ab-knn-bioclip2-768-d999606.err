@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/encoded in 0.416s: 999950 rows, 500 clusters; when built: code hash a8fb46f0643ae38f, store hash df8c808e2a03b41b
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.15, 0.18] (timed in 0.0s)
+[open] 0.731s in all: fit read 0.252s, key 0.023s, index opened 0.418s, repack timed 0.038s; anon 231 MB
+[approx] measured constants dir_us=0.5749061580227119 row_us_1=0.08176573876561798 row_us_4=0.09391727220286367 row_us_16=0.0995978748401532 row_us_64=0.059162187732957255 cl_us=6.554643593746853 cut_row_us_1=0.014028320005132391 cut_row_us_4=0.04502672069665321 cut_row_us_16=0.0697063140943563 cut_row_us_64=0.09863586369802732 cut_us=1.19121875 grp_us=160.058 sig_us=1.02240625: read from /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=106 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/encoded in 0.535s: 999950 rows, 500 clusters; when built: code hash a8fb46f0643ae38f, store hash df8c808e2a03b41b
+[repack] occupancy thresholds by level [0.14, 0.13, 0.07, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.960s in all: fit read 0.365s, key 0.023s, index opened 0.535s, repack timed 0.038s; anon 464 MB
+[approx] measured constants dir_us=0.5749061580227119 row_us_1=0.08176573876561798 row_us_4=0.09391727220286367 row_us_16=0.0995978748401532 row_us_64=0.059162187732957255 cl_us=6.554643593746853 cut_row_us_1=0.014028320005132391 cut_row_us_4=0.04502672069665321 cut_row_us_16=0.0697063140943563 cut_row_us_64=0.09863586369802732 cut_us=1.19121875 grp_us=160.058 sig_us=1.02240625: read from /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=106 r_kappa=0.000

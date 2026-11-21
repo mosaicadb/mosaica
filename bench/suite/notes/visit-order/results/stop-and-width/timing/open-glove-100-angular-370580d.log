@@ -1,0 +1,12 @@
+[build2] fit loaded; anon 16 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 2097152 (2^21; 1183514 items), L = 2, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 6.5s (sub-Gaussian c = 8.482): [([15, 15, 47], 6.846, ConvexOrder), ([15, 15, 47, 47], 7.23, Certificate), ([15, 47], 6.545, ConvexOrder)]
+[build2] plans 6.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[4.0, 2.0, 2.0, 0.0], [5.0, 4.0, 3.0, 2.0]]
+[build2] calibration sample 456897 items from 592 clusters
+[build2] calibrated 11.6s; anon 177 MB
+[build2] encoded 13.3s, with it the support table of 592 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 3.0 thread-seconds); anon 362 MB
+[build2] assembled 13.7s; anon 372 MB; x2 bound 4.958e-4; escapes: det norms 2145, |y| 4515, kappa 12341, tan 12946; code hash 332e61e91eb80f8e
+[build2] saved to /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/encoded; store hash 37f2deec113e926f
+[repack] occupancy thresholds by level [0.13, 0.13, 0.08, 0.07] (timed in 0.0s)
+[approx] measured constants dir_us=0.28107892083126584 row_us_1=0.01135120276354635 row_us_4=0.016848844661268444 row_us_16=0.01631295013322188 row_us_64=0.0180158043976145 cl_us=4.628952686315354 cut_row_us_1=0.01522761644290556 cut_row_us_4=0.051182939540073365 cut_row_us_16=0.06722987087194462 cut_row_us_64=0.11689887185127153 cut_us=0.86003125 grp_us=6.811 sig_us=0.39303125: timed: no cache at /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/compute-constants.txt, in 0.1s; the exact planner's rule from them: every cluster scored directly

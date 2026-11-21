@@ -1,0 +1,5 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-d999606/encoded in 0.191s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.12, 0.14, 0.18] (timed in 0.0s)
+[open] 0.303s in all: fit read 0.068s, key 0.006s, index opened 0.192s, repack timed 0.037s; anon 81 MB
+[approx] measured constants dir_us=0.3064087025755022 row_us_1=0.049233954907965824 row_us_4=0.05890607457192476 row_us_16=0.04411672815168459 row_us_64=0.034860985198807065 cl_us=2.133950507984759 cut_row_us_1=0.017878230989737988 cut_row_us_4=0.07053305906856622 cut_row_us_16=0.1581728799517481 cut_row_us_64=0.3720139731692623 cut_us=0.9575937499999999 grp_us=35.797000000000004 sig_us=0.67375: read from /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=89 r_kappa=0.000

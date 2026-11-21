@@ -1,0 +1,12 @@
+[build2] fit loaded; anon 45 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 677305 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 6.6s (sub-Gaussian c = 8.482): [([47], 5.994, ExactTail), ([47, 63, 127, 143], 7.805, Certificate), ([47, 127], 7.551, ConvexOrder)]
+[build2] plans 7.0s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[4.0, 0.0, 0.0, 0.0], [5.0, 1.0, 1.0, 0.5], [5.0, 4.0, 3.0, 1.0], [7.0, 6.0, 5.0, 3.0]]
+[build2] calibration sample 437769 items from 339 clusters
+[build2] calibrated 18.8s; anon 485 MB
+[build2] encoded 22.1s, with it the support table of 339 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 4.6 thread-seconds); anon 664 MB
+[build2] assembled 22.6s; anon 668 MB; x2 bound 3.052e-4; escapes: det norms 24, |y| 2597, kappa 9908, tan 16991; code hash 25d0c4be6d18a504
+[build2] saved to /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-f528836/encoded; store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.15, 0.12, 0.06, 0.12, 0.14, 0.17] (timed in 0.0s)
+[approx] measured constants dir_us=0.33464722394484625 row_us_1=0.0490889052033574 row_us_4=0.056882012373097424 row_us_16=0.03907273170868254 row_us_64=0.030700409136786226 cl_us=2.488113982711692 cut_row_us_1=0.0179315454926078 cut_row_us_4=0.07058853716349611 cut_row_us_16=0.14623492853006098 cut_row_us_64=0.32824002444809774 cut_us=1.01578125 grp_us=37.44 sig_us=0.701625: timed: no cache at /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-f528836/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-f528836/compute-constants.txt, in 0.2s; the exact planner's rule from them: r_rows=102 r_kappa=0.000

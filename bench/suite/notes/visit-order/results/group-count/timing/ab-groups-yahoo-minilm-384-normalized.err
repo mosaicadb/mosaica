@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-d999606/encoded in 0.190s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.14, 0.13, 0.07, 0.12, 0.14, 0.18] (timed in 0.0s)
+[open] 0.321s in all: fit read 0.088s, key 0.006s, index opened 0.190s, repack timed 0.037s; anon 81 MB
+[approx] measured constants dir_us=0.4325776226419938 row_us_1=0.05009864783059157 row_us_4=0.056065825546244896 row_us_16=0.03868315783606706 row_us_64=0.027813762015509873 cl_us=1.7599208150982888 cut_row_us_1=0.019846048037978046 cut_row_us_4=0.06965813453659676 cut_row_us_16=0.15275354162190963 cut_row_us_64=0.35171874229216377 cut_us=1.1047500000000001 grp_us=36.034 sig_us=0.6913125: read from /home/joe/code/vexact-data/suite/idx/yahoo-minilm-384-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=80 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-g/yahoo-minilm-384-normalized-d999606/encoded in 0.107s: 677305 rows, 339 clusters; when built: code hash 9de2bfd2592a3efb, store hash ff6bc7f6e4868b68
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.12, 0.14, 0.19] (timed in 0.0s)
+[open] 0.153s in all: fit read 0.009s, key 0.001s, index opened 0.107s, repack timed 0.037s; anon 107 MB
+[approx] measured constants dir_us=0.3792482111951845 row_us_1=0.05266674683110732 row_us_4=0.060834064204121165 row_us_16=0.03797008071059918 row_us_64=0.028925587569386423 cl_us=6.541548257167795 cut_row_us_1=0.01794861102904875 cut_row_us_4=0.06431741060225056 cut_row_us_16=0.132553231172197 cut_row_us_64=0.17581567082476549 cut_us=1.233625 grp_us=36.543 sig_us=0.7378750000000001: read from /home/joe/code/vexact-data/suite/idx-g/yahoo-minilm-384-normalized-d999606/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=213 r_kappa=0.000

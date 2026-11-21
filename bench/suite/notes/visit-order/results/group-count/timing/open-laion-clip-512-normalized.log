@@ -1,0 +1,19 @@
+[open] WARNING: /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/Xs.npy: same length and modification time as when this index was built, but another status-change time (ctime) (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index (the index holds its own vectors)
+[open] WARNING: /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/perm.npy: same length and modification time as when this index was built, but another status-change time (ctime) (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index (the index holds its own row-to-entity map)
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/encoded in 0.206s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.12, 0.13, 0.07, 0.11, 0.13, 0.18] (timed in 0.0s)
+[open] 0.377s in all: fit read 0.122s, key 0.011s, index opened 0.207s, repack timed 0.037s; anon 115 MB
+[approx] measured constants dir_us=0.2657083138556749 row_us_1=0.06663929291326937 row_us_4=0.08110116108531262 row_us_16=0.08466471592576391 row_us_64=0.05776403316615661 cl_us=7.06399021388589 cut_row_us_1=0.018421512142256027 cut_row_us_4=0.05981760066102312 cut_row_us_16=0.12578452594070233 cut_row_us_64=0.26991338553739036 cut_us=1.584125 grp_us=73.579 sig_us=1.0555625: timed: no cache at /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx/laion-clip-512-normalized-d999606/compute-constants.txt, in 0.3s; the exact planner's rule from them: r_rows=174 r_kappa=0.000
+[build2] fit loaded; anon 64 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 1000448 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 7.0s (sub-Gaussian c = 8.482): [([63], 6.435, ExactTail), ([63, 79, 175, 191], 7.883, Certificate), ([175], 7.436, ExactTail)]
+[build2] plans 7.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[0.0, 0.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.5], [3.0, 3.0, 2.0, 1.0], [5.0, 4.0, 3.0, 3.0]]
+[build2] calibration sample 65826 items from 500 clusters
+[build2] calibrated 9.0s; anon 199 MB
+[build2] encoded 16.1s, with it the support table of 500 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 9.5 thread-seconds); anon 590 MB
+[build2] assembled 16.8s; anon 590 MB; x2 bound 6.328e-4; escapes: det norms 2, |y| 3796, kappa 11764, tan 24487; code hash 122bdb09c2a95cf5
+[build2] saved to /home/joe/code/vexact-data/suite/idx-g/laion-clip-512-normalized-d999606/encoded; store hash e8d51cbf33a7f3ac
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.1, 0.14, 0.18] (timed in 0.0s)
+[approx] measured constants dir_us=0.41527615595682593 row_us_1=0.0636342189571852 row_us_4=0.08011807492424429 row_us_16=0.05693633842201028 row_us_64=0.03920010597348938 cl_us=5.671951345683743 cut_row_us_1=0.014325097796822414 cut_row_us_4=0.05099523510652505 cut_row_us_16=0.08581264523283882 cut_row_us_64=0.19713268221217325 cut_us=1.3409375000000001 grp_us=71.753 sig_us=0.85596875: timed: no cache at /home/joe/code/vexact-data/suite/idx-g/laion-clip-512-normalized-d999606/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx-g/laion-clip-512-normalized-d999606/compute-constants.txt, in 0.3s; the exact planner's rule from them: r_rows=134 r_kappa=0.000

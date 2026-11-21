@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/laion-clip-512-normalized-370580d/encoded in 0.272s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.13, 0.18] (timed in 0.0s)
+[open] 0.431s in all: fit read 0.109s, key 0.011s, index opened 0.273s, repack timed 0.037s; anon 125 MB
+[approx] measured constants dir_us=0.1941215252414327 row_us_1=0.05593401514039122 row_us_4=0.0646761531244733 row_us_16=0.06019006529915413 row_us_64=0.04326426177515577 cl_us=6.415700916812839 cut_row_us_1=0.015772270182781465 cut_row_us_4=0.057575469751826536 cut_row_us_16=0.11268643748750687 cut_row_us_64=0.2221613998887298 cut_us=1.11315625 grp_us=61.531000000000006 sig_us=0.78253125: read from /home/joe/code/vexact-data/suite/idx-stack/laion-clip-512-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=183 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/laion-clip-512-normalized-370580d/encoded in 0.259s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash f8c93c51d2011204
+[repack] occupancy thresholds by level [0.12, 0.12, 0.06, 0.11, 0.13, 0.18] (timed in 0.0s)
+[open] 0.410s in all: fit read 0.103s, key 0.011s, index opened 0.260s, repack timed 0.037s; anon 249 MB
+[approx] measured constants dir_us=0.1941215252414327 row_us_1=0.05593401514039122 row_us_4=0.0646761531244733 row_us_16=0.06019006529915413 row_us_64=0.04326426177515577 cl_us=6.415700916812839 cut_row_us_1=0.015772270182781465 cut_row_us_4=0.057575469751826536 cut_row_us_16=0.11268643748750687 cut_row_us_64=0.2221613998887298 cut_us=1.11315625 grp_us=61.531000000000006 sig_us=0.78253125: read from /home/joe/code/vexact-data/suite/idx-stack/laion-clip-512-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=183 r_kappa=0.000

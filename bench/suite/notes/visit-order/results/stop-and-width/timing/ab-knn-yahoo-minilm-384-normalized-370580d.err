@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/yahoo-minilm-384-normalized-370580d/encoded in 0.194s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.12, 0.14, 0.17] (timed in 0.0s)
+[open] 0.315s in all: fit read 0.077s, key 0.006s, index opened 0.195s, repack timed 0.037s; anon 81 MB
+[approx] measured constants dir_us=0.5975725270210197 row_us_1=0.050658695527472604 row_us_4=0.059749982227244654 row_us_16=0.04779257074105563 row_us_64=0.03153386615263194 cl_us=3.836066524748384 cut_row_us_1=0.017509831348488814 cut_row_us_4=0.06918920865403985 cut_row_us_16=0.1496681852517064 cut_row_us_64=0.3491580360743663 cut_us=1.0730625 grp_us=37.849000000000004 sig_us=0.69878125: read from /home/joe/code/vexact-data/suite/idx-stack/yahoo-minilm-384-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=130 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/yahoo-minilm-384-normalized-370580d/encoded in 0.189s: 677305 rows, 339 clusters; when built: code hash 25d0c4be6d18a504, store hash 721901a2c6c84be9
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.12, 0.14, 0.17] (timed in 0.0s)
+[open] 0.297s in all: fit read 0.065s, key 0.006s, index opened 0.189s, repack timed 0.037s; anon 152 MB
+[approx] measured constants dir_us=0.5975725270210197 row_us_1=0.050658695527472604 row_us_4=0.059749982227244654 row_us_16=0.04779257074105563 row_us_64=0.03153386615263194 cl_us=3.836066524748384 cut_row_us_1=0.017509831348488814 cut_row_us_4=0.06918920865403985 cut_row_us_16=0.1496681852517064 cut_row_us_64=0.3491580360743663 cut_us=1.0730625 grp_us=37.849000000000004 sig_us=0.69878125: read from /home/joe/code/vexact-data/suite/idx-stack/yahoo-minilm-384-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=130 r_kappa=0.000

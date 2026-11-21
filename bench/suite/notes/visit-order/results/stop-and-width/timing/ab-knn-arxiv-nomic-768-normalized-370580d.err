@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/arxiv-nomic-768-normalized-370580d/encoded in 0.495s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.1, 0.15, 0.17] (timed in 0.0s)
+[open] 0.816s in all: fit read 0.257s, key 0.025s, index opened 0.497s, repack timed 0.037s; anon 242 MB
+[approx] measured constants dir_us=0.1793061303953997 row_us_1=0.08257087782733925 row_us_4=0.08858972058438758 row_us_16=0.09158119226336126 row_us_64=0.06774455619489345 cl_us=9.164185178143292 cut_row_us_1=0.014838045103995326 cut_row_us_4=0.05343157379071086 cut_row_us_16=0.09517789203781483 cut_row_us_64=0.13937606526853547 cut_us=1.2913125 grp_us=142.593 sig_us=1.0383125: read from /home/joe/code/vexact-data/suite/idx-stack/arxiv-nomic-768-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=152 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/arxiv-nomic-768-normalized-370580d/encoded in 0.470s: 1344643 rows, 672 clusters; when built: code hash 54cb35f7407f53f5, store hash 30207d0981192a16
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.1, 0.14, 0.17] (timed in 0.0s)
+[open] 0.779s in all: fit read 0.247s, key 0.025s, index opened 0.470s, repack timed 0.037s; anon 491 MB
+[approx] measured constants dir_us=0.1793061303953997 row_us_1=0.08257087782733925 row_us_4=0.08858972058438758 row_us_16=0.09158119226336126 row_us_64=0.06774455619489345 cl_us=9.164185178143292 cut_row_us_1=0.014838045103995326 cut_row_us_4=0.05343157379071086 cut_row_us_16=0.09517789203781483 cut_row_us_64=0.13937606526853547 cut_us=1.2913125 grp_us=142.593 sig_us=1.0383125: read from /home/joe/code/vexact-data/suite/idx-stack/arxiv-nomic-768-normalized-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=152 r_kappa=0.000

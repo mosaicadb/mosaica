@@ -1,0 +1,56 @@
+## arxiv-nomic-768-normalized: 672 clusters: B over A
+none       approximate 0.81/0.79/0.64 | exact-knn 0.86 exact-thr@0.0001 0.87 exact-thr@0.01 0.92 exact-thr@0.1 0.97
+random-1   approximate 0.98/0.99/1.03 | exact-knn 1.04 exact-thr@0.01 1.03
+random-25  approximate 1.10/1.17/0.97 | exact-knn 0.86 exact-thr@0.01 0.90
+region-1   approximate 1.06/1.07/1.04 | exact-knn 1.13 exact-thr@0.01 1.13
+region-25  approximate 0.98/0.88/0.69 | exact-knn 0.86 exact-thr@0.01 0.87
+## bioclip2-768: 500 clusters: B over A
+none       approximate 0.85/0.79/0.68 | exact-knn 0.84 exact-thr@0.0001 0.82 exact-thr@0.01 0.92 exact-thr@0.1 0.95
+random-1   approximate 1.01/0.94/1.05 | exact-knn 0.96 exact-thr@0.01 0.96
+random-25  approximate 0.90/0.92/0.93 | exact-knn 0.82 exact-thr@0.01 0.87
+region-1   approximate 0.97/0.97/0.97 | exact-knn 0.94 exact-thr@0.01 0.95
+region-25  approximate 0.94/0.91/0.83 | exact-knn 0.76 exact-thr@0.01 0.81
+## glove-100-angular: 592 clusters: B over A
+none       approximate 1.31/1.10/1.10 | exact-knn 1.16 exact-thr@0.0001 1.11 exact-thr@0.01 1.10 exact-thr@0.1 1.09
+random-1   approximate 0.98/1.01/1.05 | exact-knn 1.18 exact-thr@0.01 1.16
+random-25  approximate 1.11/1.11/1.14 | exact-knn 1.14 exact-thr@0.01 1.11
+region-1   approximate 1.05/1.03/1.02 | exact-knn 1.03 exact-thr@0.01 1.05
+region-25  approximate 1.19/1.12/1.12 | exact-knn 1.15 exact-thr@0.01 1.13
+## inaturalist-resnet-2048-cosine: 250 clusters: B over A
+none       approximate 1.11/1.11/0.92 | exact-knn 0.67 exact-thr@0.0001 0.68 exact-thr@0.01 0.86 exact-thr@0.1 0.93
+random-1   approximate 1.04/1.07/1.05 | exact-knn 1.00 exact-thr@0.01 0.98
+random-25  approximate 1.15/1.05/1.01 | exact-knn 0.66 exact-thr@0.01 0.86
+region-1   approximate 1.12/1.07/1.12 | exact-knn 1.16 exact-thr@0.01 1.17
+region-25  approximate 1.03/1.12/0.68 | exact-knn 0.74 exact-thr@0.01 0.83
+## laion-clip-512-normalized: 500 clusters: B over A
+none       approximate 0.83/0.81/0.72 | exact-knn 0.96 exact-thr@0.0001 0.93 exact-thr@0.01 0.98 exact-thr@0.1 1.00
+random-1   approximate 0.90/1.05/0.93 | exact-knn 0.95 exact-thr@0.01 0.95
+random-25  approximate 1.08/1.14/1.11 | exact-knn 0.94 exact-thr@0.01 0.97
+region-1   approximate 1.00/0.98/0.98 | exact-knn 1.06 exact-thr@0.01 1.01
+region-25  approximate 0.99/0.95/0.86 | exact-knn 0.91 exact-thr@0.01 0.92
+## landmark-dino-768-cosine: 380 clusters: B over A
+none       approximate 0.85/0.87/0.69 | exact-knn 0.84 exact-thr@0.0001 0.83 exact-thr@0.01 0.90 exact-thr@0.1 0.98
+random-1   approximate 1.04/1.04/1.06 | exact-knn 1.04 exact-thr@0.01 1.04
+random-25  approximate 1.22/1.27/1.09 | exact-knn 0.86 exact-thr@0.01 0.90
+region-1   approximate 1.05/1.06/1.07 | exact-knn 1.06 exact-thr@0.01 1.07
+region-25  approximate 0.96/0.93/0.75 | exact-knn 0.88 exact-thr@0.01 0.87
+## sift-128-euclidean: 500 clusters: B over A
+none       approximate 1.03/1.05/1.05 | exact-knn 1.12 exact-thr@0.0001 1.13 exact-thr@0.01 1.07 exact-thr@0.1 1.06
+random-1   approximate 1.03/1.04/1.05 | exact-knn 1.00 exact-thr@0.01 1.00
+random-25  approximate 1.08/1.10/1.11 | exact-knn 1.11 exact-thr@0.01 1.08
+region-1   approximate 1.04/1.04/1.03 | exact-knn 1.02 exact-thr@0.01 1.05
+region-25  approximate 1.09/1.08/1.06 | exact-knn 1.11 exact-thr@0.01 1.09
+## yahoo-minilm-384-normalized: 339 clusters: B over A
+none       approximate 0.95/0.93/0.90 | exact-knn 0.97 exact-thr@0.0001 0.96 exact-thr@0.01 0.96 exact-thr@0.1 0.98
+random-1   approximate 0.98/1.00/1.19 | exact-knn 1.06 exact-thr@0.01 1.06
+random-25  approximate 1.11/1.07/1.12 | exact-knn 0.93 exact-thr@0.01 0.94
+region-1   approximate 1.06/1.08/1.09 | exact-knn 1.11 exact-thr@0.01 1.08
+region-25  approximate 1.04/1.01/- | exact-knn 0.95 exact-thr@0.01 0.96
+arxiv-nomic-768-normalized: groups 5 against 64
+bioclip2-768: groups 3 against 64
+glove-100-angular: groups 237 against 64
+inaturalist-resnet-2048-cosine: groups 1 against 12
+laion-clip-512-normalized: groups 8 against 64
+landmark-dino-768-cosine: groups 3 against 49
+sift-128-euclidean: groups 122 against 64
+yahoo-minilm-384-normalized: groups 9 against 64

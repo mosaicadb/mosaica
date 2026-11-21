@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/encoded in 0.113s: 1183514 rows, 592 clusters; when built: code hash 332e61e91eb80f8e, store hash 37f2deec113e926f
+[repack] occupancy thresholds by level [0.13, 0.13, 0.08, 0.07] (timed in 0.0s)
+[open] 0.148s in all: fit read 0.009s, key 0.001s, index opened 0.113s, repack timed 0.025s; anon 35 MB
+[approx] measured constants dir_us=0.28107892083126584 row_us_1=0.01135120276354635 row_us_4=0.016848844661268444 row_us_16=0.01631295013322188 row_us_64=0.0180158043976145 cl_us=4.628952686315354 cut_row_us_1=0.01522761644290556 cut_row_us_4=0.051182939540073365 cut_row_us_16=0.06722987087194462 cut_row_us_64=0.11689887185127153 cut_us=0.86003125 grp_us=6.811 sig_us=0.39303125: read from /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: every cluster scored directly
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/encoded in 0.110s: 1183514 rows, 592 clusters; when built: code hash 332e61e91eb80f8e, store hash 37f2deec113e926f
+[repack] occupancy thresholds by level [0.13, 0.13, 0.09, 0.08] (timed in 0.0s)
+[open] 0.142s in all: fit read 0.006s, key 0.001s, index opened 0.110s, repack timed 0.024s; anon 57 MB
+[approx] measured constants dir_us=0.28107892083126584 row_us_1=0.01135120276354635 row_us_4=0.016848844661268444 row_us_16=0.01631295013322188 row_us_64=0.0180158043976145 cl_us=4.628952686315354 cut_row_us_1=0.01522761644290556 cut_row_us_4=0.051182939540073365 cut_row_us_16=0.06722987087194462 cut_row_us_64=0.11689887185127153 cut_us=0.86003125 grp_us=6.811 sig_us=0.39303125: read from /home/joe/code/vexact-data/suite/idx-stack/glove-100-angular-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: every cluster scored directly

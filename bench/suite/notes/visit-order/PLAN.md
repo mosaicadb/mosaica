@@ -849,9 +849,148 @@ to K, kappa 0.5, with no 64 cap. The earlier default capped G at 64; by-k8 keeps
 - Not timed. The suite's indexes would have to be fitted again (tools/fit.py: the k-means, each group's basis and the
   certification) for the rule to take effect, which is not a quick check.
 
+## Round of 2026-11-21: the pinned build benchmarked, the group count, rule 1
+
+Run on the owner's machine: an AMD Ryzen 9 5900X under WSL2, AVX2 only (no AVX-512), timing pinned to core 11 with
+its SMT sibling idle. The datasets are the six representative sets of 384 dimensions and up (yahoo 384, LAION 512,
+arxiv-nomic and landmark-dino 768, BioCLIP-2 768, iNaturalist 2,048) and two guardrails (glove 100, and SIFT 128,
+added to the suite and normalised like every set, so its truth is cosine). There are 100 queries, k 10, and five
+visible sets. Builds are compared back to back with `ab_orders.py --index` (each build opens its own hard-linked copy of
+the fit), and summarised by `scripts/builds_table.py`. Absolute times drifted by 10 to 50% between runs of one session
+(another session's jobs ran on other cores for parts of it; the runs they overlapped were repeated), so every
+comparison below is a ratio to the same run's own reference: spread for k-NN, the exact query for thresholds.
+
+**The pinned build d999606 against 7536990 and f528836** (`results/pinned-d999606/`, `summary.txt`). Every index
+was refitted with d999606's own fit.py, at the earlier group rule.
+- **Unfiltered, high recall: fixed.** At recall 0.99, d999606 takes 0.48 to 1.17 of spread's time on the six sets
+  (LAION 0.91, against 7536990's 3.09). It is level with or ahead of f528836 everywhere at 0.95 and above. That
+  includes iNaturalist, which the previous round found 1.1 to 1.6 times slower with f528836: it is now 0.91 of spread
+  at 0.99, against f528836's 1.16.
+- **The 1% sets: better or level.** region-1 is the best of the three builds nearly everywhere (0.72 to 0.97 of
+  f528836's time). On glove, random-1 is 0.58 to 0.65 of spread, so the previous round's guardrail gap is gone.
+- **region-25: a regression on every set but BioCLIP.** It takes 1.2 to 2.5 times f528836's time at recall 0.95 to
+  0.99 (arxiv 1.54 of spread at 0.99, against 0.64). random-25 is 5 to 30% slower.
+- **Thresholds: unchanged.** Within about 5% of f528836 relative to the exact query, as expected (d999606 did not
+  change the threshold query).
+
+**Why region-25 regressed** (a study on branch `study/region25-order`, 9c759e5, in worktree `vexact-sc`:
+`results/region25-order/README.md`).
+- **It is the stop, not the order.** On its own the order is within 5% of mu + 3 sigma in rows.
+- **The cause is the frozen estimate.** delta and rho were frozen after the clusters read while fewer than k items are
+  held: one cluster at k 10, and none for a fifth to a third of queries. Under a region set the shift belongs to the
+  cluster, not the query: 88 to 93% of its variance is between the clusters of one query. One cluster's shift is a
+  worse guess for the next than 0, so the stop's multiplier varied from query to query.
+- **The fix:** pool delta and rho over every cluster read directly, for the whole query, re-keying the stream only when
+  the rows behind the estimate double.
+
+**The pooled stop (b87f151)**, timed back to back with d999606 (`results/stop-and-width/`).
+- **region-25 (time to recall 0.95 / 0.99 over spread):**
+
+  | dataset | d999606 | pooled | f528836 |
+  |---|---|---|---|
+  | LAION | 1.03 / 1.36 | 0.45 / 0.58 | 0.61 / 0.98 |
+  | arxiv | 0.55 / 1.54 | 0.41 / 0.56 | 0.47 / 0.64 |
+  | landmark | 0.70 / 1.41 | 0.53 / 0.96 | 0.72 / 1.03 |
+  | yahoo | 0.59 / – | 0.42 / 0.47 | 0.42 / 0.58 |
+
+  Glove goes from 1.33 to 0.48 at 0.95. iNaturalist improves only at 0.99 (1.43 to 1.12, against f528836's 1.05).
+- **Elsewhere:** unfiltered is unchanged. The 1% sets cost 0 to 20%, mostly under 10%, because a pooled estimate from a
+  few small clusters is noisy where d999606 ran on the prior.
+- **A fixed cluster count** (the same number of clusters for every query, from the theory program's replay) does not
+  beat the pooled stop in general. On arxiv, iNaturalist, glove and SIFT unfiltered it reads 0.71 to 0.98 of the
+  stop's rows; elsewhere it reads up to 1.9 times as many, and more under the 1% sets. On LAION it beat f528836's stop
+  but not the pooled one.
+
+**The group count (item 2).** The rule round(N / (0.5 n0^2)) (037653e) against the pinned rule's count was timed
+under one build, paired in one process (`scripts/ab_indexes.py`; `results/group-count/`). Time with the rule's count
+over the pinned count's:
+
+| dataset | groups | exact k-NN / threshold | approximate k-NN |
+|---|---|---|---|
+| landmark | 3 vs 49 | 0.83 to 0.90 (1% sets up to 1.07) | 0.69 to 0.87 unfiltered and region-25 |
+| arxiv | 5 vs 64 | 0.86 to 0.97 (region-1 1.13) | 0.64 to 0.81 unfiltered and region-25 |
+| BioCLIP | 3 vs 64 | 0.76 to 0.95 | 0.68 to 0.85 unfiltered and region-25 |
+| LAION | 8 vs 64 | 0.91 to 1.06 | 0.72 to 0.86 unfiltered and region-25 |
+| yahoo | 9 vs 64 | 0.93 to 1.11 | 0.90 to 0.95 unfiltered |
+| iNaturalist | 1 vs 12 | 0.66 to 0.93 (region-1 1.16) | 1.03 to 1.15 mostly |
+| glove | 237 vs 64 | 1.03 to 1.18 | 1.02 to 1.31 |
+| SIFT | 122 vs 64 | 1.00 to 1.13 | 1.03 to 1.11 |
+
+- **Fewer groups pay at 512 dimensions and up.** More groups cost at 100 to 128.
+- **Glove is past the 10% guardrail**, so the rule cannot go in as written.
+- **Two costs of fewer groups:**
+  - approximate k-NN under random-25 is 7 to 27% slower everywhere but BioCLIP (not understood);
+  - the 1% region sets lose up to 16% on exact queries.
+- **Why the rule fails at low n.** A group's setup measured 7 µs at n 128 against 36 (384), 66 (512), 158 to 176
+  (768) and about 1,000 (2,048, as the planner timed it; see below). At n 128 that is about the cost of opening one
+  cluster, so the per-group costs the rule does not count (tables, cache, rows per group) dominate there.
+- **Not decided.** A rule capped at the pinned count fits every result but random-25. Fewer groups also break rule 1's
+  derived rho at 2,048 dimensions (below), so the group count and the levels' width are not independent.
+
+**Rule 1, the levels at a statistical width (item 3)** (370580d, then b986075: the approximate k-NN reads a
+deterministic level at min(1, psi rho_l), rho_l the median over groups of the participation ratio of layered.md
+4.2; the randomised levels at psi / c, psi spreads).
+- **Timed on the pooled stop** (`results/stop-and-width/`). Time to recall 0.9 / 0.95 / 0.99 over the pooled stop
+  alone:
+  - yahoo 0.71 / 0.67 / 0.66, LAION 0.78 / 0.68 / 0.61, BioCLIP 0.90 / 0.83 / 0.79;
+  - arxiv and landmark level, the filtered sets about level;
+  - iNaturalist 1.18 / 1.34 / 1.75.
+- **On iNaturalist recall at a given psi falls** (0.985 to 0.958 at psi 4.5) while the clusters read do not change.
+- **The cause: the derived rho is wrong where a group's basis fits its clusters poorly.** A reader study
+  (`study_layered_kernel`) restores iNaturalist's recall only at about 2.3 times the derived rho. Replays of the dumped
+  levels (`hierarchy/layered/rho_check.py`), as actual error spread over the derived width at the 16 B level (median,
+  clusters holding a true neighbour):
+  - yahoo 1.03, LAION 0.94;
+  - iNaturalist 1.29 at 12 groups and 2.04 at 1 group;
+  - LAION 1.04 at 8 groups.
+- **The rules tried** (the theory program's write-up is section A4 of its `CLAIMS.md`, unrefereed):
+  - sigma_c^2 less the levels' estimate variance: too noisy from 16 directions.
+  - Pooled per query: fails when clusters differ.
+  - **A per-cluster sample works.** It is the error's sd over 64 rows scored exactly: median ratio 1.01 to 1.03 on every
+    index and group count (`psi_eff.py`).
+- **The neighbours' errors need a term for height.** A true neighbour's error, in level spreads, is about its height
+  in its cluster in cluster spreads (slope 0.92 to 1.24, correlation about 0.7; `pair_check.py`). So the width is
+  (zeta + psi sqrt(f)) tau:
+  - zeta = (t − mu_c) / sigma_c, the threshold's height, taken at least 0;
+  - f the share of the cluster's score variance the level explains;
+  - tau the sampled error sd, plus the sample's mean error.
+- **zeta and f against the whole cluster.** Taken against the whole cluster's mu_c and sigma_c(q), not the visible
+  rows', this width falls back to the plain one by itself under in-cluster bottom-quarter sets. It needs no guard and
+  no calibrated constant (`width_checks.py --whole --shift`).
+- **What it keeps.** In the replay at psi 2 it keeps 0.93 to 0.99 of the true neighbours over 18 dataset and set cases,
+  at rows within 0 to 5% of the best rule for each (LAION at 8 groups to 0.95 is the exception, at 17%).
+- **Where psi's tail is heavier.** The neighbours' scatter is heavier-tailed than Laplace at the top (99.9% point 4.6
+  to 7.5), so psi for very high keep rates must be measured.
+- **Cheaper samples.** The sample can be read at the first randomised level that codes every block (96 to 256 B a row
+  against 768 to 4,096 B a stored vector). That gives the same spreads within 2 to 6% and modest extra noise
+  (`rand_sample.py`), but only where the group's rotations are set up.
+- **Being built** on branch `research/sampled-width`: the per-cluster sampled width, with stored-vector samples
+  first.
+
+**A group's setup** (the merge of `research/rotations-once-grpus`, reviewed independently; `results/rotations-once/`).
+- **The setup split.** At n 2,048 a group set up alone costs 425 to 441 µs: rotations about 220, basis 175 to 205,
+  post-processing 17.
+- **The planner's grp_us was 840 to 1,066 µs.** It timed `setup_groups` on one group, whose one-column dgemm packs
+  every rotation.
+- **Rotations now wait until a randomised level reads them.** Then every waiting group is rotated in one pass, each
+  rotation row read once. The values are unchanged bit for bit.
+- **It gains little for approximate k-NN.** 94% of its groups reach a randomised level at once, and it buys groups one
+  at a time.
+- **grp_us now times what k-NN's index path pays.** On the pooled stop alone, with this grp_us iNaturalist's recall at
+  psi 5 is unchanged (0.993 against 0.992). The recall it lost on top of rule 1 came from more clusters meeting the
+  derived rho's narrow width. Time is mixed (`results/grp-us/`):
+  - better at high recall unfiltered on arxiv and iNaturalist;
+  - LAION random-1 0.63 to 0.77;
+  - iNaturalist's region sets 1.09 to 1.34, where the index path is not yet cheaper per row than a direct read.
+- **Rotations, cheaper.** Structured rotations (random signs and Hadamard transforms) cannot carry the randomised
+  levels' certified constant. The theory program showed failures far above the budget at two to four rounds
+  (`notes/program/rotations/CLAIMS.md` in the theory worktree, unrefereed). An f32 or int16 copy of each rotation on
+  the query side keeps the guarantee, with a computable allowance (under 0.003% for f32) that fits a slot the kernel
+  already has. It halves or quarters the rotation bytes: about 4 to 5% of an iNaturalist query. Parked by the owner.
+
 **Next.**
-- The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
-  mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's
-  race did). Held this round: no library change.
+- The sampled width built, timed against 1fc22a5 on the eight datasets; then the group count decided with it, since
+  fewer groups were what broke the derived rho.
+- random-25 under fewer groups (7 to 27% slower), and the 1% sets' small cost under the pooled stop.
 - The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.

@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/landmark-dino-768-cosine-370580d/encoded in 0.366s: 760757 rows, 380 clusters; when built: code hash 6de77d6b409d1cf5, store hash 345efc8bd567a458
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.11, 0.13, 0.18] (timed in 0.0s)
+[open] 0.629s in all: fit read 0.206s, key 0.019s, index opened 0.367s, repack timed 0.037s; anon 179 MB
+[approx] measured constants dir_us=0.274629028568264 row_us_1=0.07824599728205923 row_us_4=0.08921419497736814 row_us_16=0.09854364427801254 row_us_64=0.08612825099346703 cl_us=9.58930752643347 cut_row_us_1=0.018527248313932425 cut_row_us_4=0.06679234785419956 cut_row_us_16=0.1260370228846542 cut_row_us_64=0.267157500956392 cut_us=1.2114687499999999 grp_us=159.87900000000002 sig_us=1.0499375: read from /home/joe/code/vexact-data/suite/idx-stack/landmark-dino-768-cosine-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=176 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/landmark-dino-768-cosine-370580d/encoded in 0.358s: 760757 rows, 380 clusters; when built: code hash 6de77d6b409d1cf5, store hash 345efc8bd567a458
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.1, 0.13, 0.18] (timed in 0.0s)
+[open] 0.611s in all: fit read 0.197s, key 0.019s, index opened 0.358s, repack timed 0.037s; anon 357 MB
+[approx] measured constants dir_us=0.274629028568264 row_us_1=0.07824599728205923 row_us_4=0.08921419497736814 row_us_16=0.09854364427801254 row_us_64=0.08612825099346703 cl_us=9.58930752643347 cut_row_us_1=0.018527248313932425 cut_row_us_4=0.06679234785419956 cut_row_us_16=0.1260370228846542 cut_row_us_64=0.267157500956392 cut_us=1.2114687499999999 grp_us=159.87900000000002 sig_us=1.0499375: read from /home/joe/code/vexact-data/suite/idx-stack/landmark-dino-768-cosine-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=176 r_kappa=0.000

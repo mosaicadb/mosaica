@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-grp/inaturalist-resnet-2048-cosine-d3be2ef/encoded in 2.174s: 499000 rows, 250 clusters; when built: code hash 7bbff7bb902f8483, store hash d29aa13e994dca88
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.1, 0.15, 0.18, 0.24, 0.27] (timed in 0.0s)
+[open] 2.641s in all: fit read 0.382s, key 0.034s, index opened 2.175s, repack timed 0.049s; anon 300 MB
+[approx] measured constants dir_us=0.6591410589447575 row_us_1=0.13849686920037596 row_us_4=0.16823708218588415 row_us_16=0.17162726507135054 row_us_64=0.1477379848887806 cl_us=8.152997740674081 cut_row_us_1=0.01849959229236412 cut_row_us_4=0.061040801935577 cut_row_us_16=0.09287008596212346 cut_row_us_64=0.197453191598735 cut_us=1.42725 grp_us=510.666 sig_us=2.16946875: read from /home/joe/code/vexact-data/suite/idx-grp/inaturalist-resnet-2048-cosine-d3be2ef/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=74 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-grp/inaturalist-resnet-2048-cosine-d3be2ef/encoded in 1.979s: 499000 rows, 250 clusters; when built: code hash 7bbff7bb902f8483, store hash d29aa13e994dca88
+[repack] occupancy thresholds by level [0.13, 0.13, 0.07, 0.1, 0.15, 0.17, 0.22, 0.27] (timed in 0.0s)
+[open] 2.392s in all: fit read 0.332s, key 0.032s, index opened 1.979s, repack timed 0.049s; anon 608 MB
+[approx] measured constants dir_us=0.6591410589447575 row_us_1=0.13849686920037596 row_us_4=0.16823708218588415 row_us_16=0.17162726507135054 row_us_64=0.1477379848887806 cl_us=8.152997740674081 cut_row_us_1=0.01849959229236412 cut_row_us_4=0.061040801935577 cut_row_us_16=0.09287008596212346 cut_row_us_64=0.197453191598735 cut_us=1.42725 grp_us=510.666 sig_us=2.16946875: read from /home/joe/code/vexact-data/suite/idx-grp/inaturalist-resnet-2048-cosine-d3be2ef/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=74 r_kappa=0.000

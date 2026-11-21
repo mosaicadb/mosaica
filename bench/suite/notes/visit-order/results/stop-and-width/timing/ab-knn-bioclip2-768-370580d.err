@@ -1,0 +1,10 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/bioclip2-768-370580d/encoded in 0.448s: 999950 rows, 500 clusters; when built: code hash a8fb46f0643ae38f, store hash df8c808e2a03b41b
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.1, 0.16, 0.18] (timed in 0.0s)
+[open] 0.778s in all: fit read 0.267s, key 0.025s, index opened 0.449s, repack timed 0.038s; anon 231 MB
+[approx] measured constants dir_us=0.3532638470377535 row_us_1=0.08648259363143151 row_us_4=0.09531203523473593 row_us_16=0.09861751458854809 row_us_64=0.05161461943597939 cl_us=6.264660242552658 cut_row_us_1=0.014465860522039135 cut_row_us_4=0.04735060815204067 cut_row_us_16=0.07333666885152396 cut_row_us_64=0.09195375179621058 cut_us=1.24440625 grp_us=159.923 sig_us=1.0481875: read from /home/joe/code/vexact-data/suite/idx-stack/bioclip2-768-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=99 r_kappa=0.000
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/suite/idx-stack/bioclip2-768-370580d/encoded in 0.435s: 999950 rows, 500 clusters; when built: code hash a8fb46f0643ae38f, store hash df8c808e2a03b41b
+[repack] occupancy thresholds by level [0.13, 0.12, 0.06, 0.11, 0.14, 0.18] (timed in 0.0s)
+[open] 0.749s in all: fit read 0.251s, key 0.025s, index opened 0.435s, repack timed 0.038s; anon 464 MB
+[approx] measured constants dir_us=0.3532638470377535 row_us_1=0.08648259363143151 row_us_4=0.09531203523473593 row_us_16=0.09861751458854809 row_us_64=0.05161461943597939 cl_us=6.264660242552658 cut_row_us_1=0.014465860522039135 cut_row_us_4=0.04735060815204067 cut_row_us_16=0.07333666885152396 cut_row_us_64=0.09195375179621058 cut_us=1.24440625 grp_us=159.923 sig_us=1.0481875: read from /home/joe/code/vexact-data/suite/idx-stack/bioclip2-768-370580d/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=99 r_kappa=0.000

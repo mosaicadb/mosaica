@@ -1,0 +1,12 @@
+[build2] fit loaded; anon 157 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 999950 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 8.8s (sub-Gaussian c = 8.482): [([95], 6.931, ExactTail), ([95, 127, 255], 7.963, Certificate), ([95, 127, 255, 287], 7.963, Certificate)]
+[build2] plans 14.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [2.0, 1.0, 0.5, 0.125], [4.0, 2.0, 1.0, 0.25], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibration sample 429060 items from 500 clusters
+[build2] calibrated 28.3s; anon 1428 MB
+[build2] encoded 41.8s, with it the support table of 500 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 17.6 thread-seconds); anon 1538 MB
+[build2] assembled 43.0s; anon 1286 MB; x2 bound 4.872e-4; escapes: det norms 3497, |y| 3330, kappa 10960, tan 24538; code hash a8fb46f0643ae38f
+[build2] saved to /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/encoded; store hash df8c808e2a03b41b
+[repack] occupancy thresholds by level [0.13, 0.12, 0.06, 0.1, 0.15, 0.18] (timed in 0.0s)
+[approx] measured constants dir_us=0.5749061580227119 row_us_1=0.08176573876561798 row_us_4=0.09391727220286367 row_us_16=0.0995978748401532 row_us_64=0.059162187732957255 cl_us=6.554643593746853 cut_row_us_1=0.014028320005132391 cut_row_us_4=0.04502672069665321 cut_row_us_16=0.0697063140943563 cut_row_us_64=0.09863586369802732 cut_us=1.19121875 grp_us=160.058 sig_us=1.02240625: timed: no cache at /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/compute-constants.txt; saved in /home/joe/code/vexact-data/suite/idx/bioclip2-768-d999606/compute-constants.txt, in 0.3s; the exact planner's rule from them: r_rows=106 r_kappa=0.000
