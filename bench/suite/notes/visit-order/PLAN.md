@@ -992,5 +992,13 @@ deterministic level at min(1, psi rho_l), rho_l the median over groups of the pa
 - The sampled width built, timed against 1fc22a5 on the eight datasets; then the group count decided with it, since
   fewer groups were what broke the derived rho.
 - random-25 under fewer groups (7 to 27% slower), and the 1% sets' small cost under the pooled stop.
+- The query sample's weight in the dual basis's Sigma_Q is now `fit.py --query-weight` (0 to 0.5, default 0.5, the
+  mix used so far; recorded in the fit's metadata). Owed before any benchmark is republished at another weight: fits
+  at 0, 0.2 and 0.5 on LAION and BioCLIP against both query sets (the theory program's formula has 0.2 keeping about
+  80% of 0.5's text gain at 2 to 7% item cost, against 5 to 18%; its test prompts share templates with the training
+  ones, so the gain may be flattered).
+- The sort key's clamp (the theory program's referee, findings A and K3): no row of the eight indexes has
+  |x . m^| beyond 1 + DA (largest 0.996, BioCLIP; largest row norm 1 + 4.0e-4, SIFT;
+  `results/key-clamp-count.txt`), so the repair on `fix/soundness-corners` is preventive.
 - The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.

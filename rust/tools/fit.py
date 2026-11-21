@@ -2,7 +2,7 @@
 # clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
 # build (`vexact --v2 --index OUTDIR --rebuild`, v2::rebuild) encodes every item from these and saves the index in
 # OUTDIR/encoded; `vexact --v2 --index OUTDIR MODE` opens it.
-# usage: python3 fit.py VECTORS.npy OUTDIR [--basis dual|pca] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
+# usage: python3 fit.py VECTORS.npy OUTDIR [--basis dual|pca] [--query-sample QUERIES.npy [--query-weight W]] [--metric angular] [--seed S]
 #   [--per-cluster by-n|M] [--groups by-n|by-k8|G] [--rows ROWS.npy]
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i. The vectors are read from it as needed (no float32 copy).
 #   --per-cluster: by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x N (4,000 up to 8M, 8,000
@@ -12,8 +12,9 @@
 #   --basis pca: each group's PCA basis of the residuals and the data-only profile H25.
 #   --basis dual (default): the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
 #     covariance of query offsets q - (q.m^) m^ from clusters drawn by size, 40 per pseudo-query, with a ridge of 0.1
-#     of its mean eigenvalue; the pseudo-queries are 3,000 corpus items, or with --query-sample the normalised mean of
-#     that and the same covariance of the given queries. V is the query-side transform V_Q (q.r = (V_Q^T q).(V_Q^-1 r));
+#     of its mean eigenvalue; the pseudo-queries are 3,000 corpus items, or with --query-sample the mix
+#     (1 - W) S / tr S + W St / tr St of that and the same covariance of the given queries (W from --query-weight,
+#     0 to 0.5, 0.5 by default; a dial on the trace-normalised covariances, not a share of traffic). V is the query-side transform V_Q (q.r = (V_Q^T q).(V_Q^-1 r));
 #     lam is the mean square of the item-side coordinates V_Q8^-1 r under the int8 V_Q8 the Rust build uses; the
 #     profile is the mean square of V_Q8^T (q - m) for corpus items against their 4 nearest centres.
 # Writes to OUTDIR: Xs.npy (unit vectors in cluster order, f16, zero-padded to a multiple of 32 dimensions), perm.npy
@@ -148,9 +149,9 @@ def offset_cov(Q, Mh, p, rng):
     return S / c
 
 
-def sigma_q(Xu, Mh, cnt, n, sample):
-    """Sigma_Q of the dual basis: offsets of 3,000 corpus items (and, with a query sample, the normalised mean of that
-    and the queries' offsets), with a ridge of RIDGE times the mean eigenvalue."""
+def sigma_q(Xu, Mh, cnt, n, sample, weight):
+    """Sigma_Q of the dual basis: offsets of 3,000 corpus items (and, with a query sample, the trace-normalised mix of
+    that and the queries' offsets, the queries weighted `weight`), with a ridge of RIDGE times the mean eigenvalue."""
     rng = np.random.default_rng(3)
     p = cnt / cnt.sum()
     S = offset_cov(Xu[np.sort(rng.choice(len(Xu), min(len(Xu), 3000), replace=False))], Mh, p, rng)
@@ -159,8 +160,8 @@ def sigma_q(Xu, Mh, cnt, n, sample):
         T = np.pad(T, ((0, 0), (0, n - T.shape[1])))
         T /= np.linalg.norm(T, axis=1, keepdims=True)
         St = offset_cov(T, Mh, p, rng)
-        S = 0.5 * (S / np.trace(S) + St / np.trace(St))
-        log(f"Sigma_Q: {min(len(Xu), 3000)} corpus items and {len(T)} queries from {sample}")
+        S = (1.0 - weight) * (S / np.trace(S)) + weight * (St / np.trace(St))
+        log(f"Sigma_Q: {min(len(Xu), 3000)} corpus items and {len(T)} queries from {sample}, query weight {weight:g}")
     return S + RIDGE * np.trace(S) / n * np.eye(n)
 
 
@@ -172,6 +173,8 @@ def main():
     ap.add_argument("--seed", type=int, default=20261112)
     ap.add_argument("--basis", default="dual", choices=["dual", "pca"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
+    ap.add_argument("--query-weight", type=float, default=0.5,
+                    help="with --query-sample: the queries' weight W in Sigma_Q = (1 - W) S / tr S + W St / tr St, 0 to 0.5 (default 0.5)")
     ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
     ap.add_argument("--per-cluster", default="by-n",
                     help="by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x; or items per cluster on average (1000 before)")
@@ -180,6 +183,8 @@ def main():
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
+    if not 0.0 <= a.query_weight <= 0.5:
+        sys.exit(f"--query-weight is {a.query_weight:g}; give a weight from 0 to 0.5")
     if not (a.per_cluster == "by-n" or (a.per_cluster.isdigit() and int(a.per_cluster) > 0)):
         sys.exit(f"--per-cluster is a positive number or by-n, not {a.per_cluster}")
     if not (a.groups in ("by-k8", "by-n") or (a.groups.isdigit() and int(a.groups) > 0)):
@@ -257,7 +262,7 @@ def main():
     gstart = np.searchsorted(grp[assign], np.arange(G + 1))
     resid = lambda i, j: (Xu[i:j] - Mq[assign[i:j]]).astype(np.float64)
     if a.basis == "dual":
-        SQ = sigma_q(Xu, Mh, cnt, n, a.query_sample)
+        SQ = sigma_q(Xu, Mh, cnt, n, a.query_sample, a.query_weight)
         lq, uq = np.linalg.eigh(SQ)
         A, Ai = (uq * np.sqrt(lq)) @ uq.T, (uq / np.sqrt(lq)) @ uq.T
         cond = np.zeros(G)
@@ -313,6 +318,7 @@ def main():
             rows, cols = np.where(grp[pk2] == g)
             prof[g] = (((pq2[rows] - Mq[pk2[rows, cols]]) @ int8_basis(V[g])) ** 2).mean(0) if len(rows) > 50 else lam[g]
         fit = dict(basis="dual", profile="qi", ridge=RIDGE, sigma_q="corpus items" + (" + queries " + os.path.abspath(a.query_sample) if a.query_sample else ""),
+                   **(dict(query_weight=a.query_weight) if a.query_sample else {}),
                    cond_max=float(cond.max()))
 
     rlv, bounds = schedule(n0, n)
