@@ -112,7 +112,7 @@ impl WForms {
 /// k-th best's height in the cluster. With the level's error e and a row's deviation d = s - mu jointly Gaussian and e
 /// uncorrelated with the estimate (a linear least-squares predictor), e given d has mean (1 - f) d and spread sqrt(f)
 /// tau, so w keeps a row scoring t with probability Phi(psi). The certified width (1) where w / (dwa sqrt U) is not a
-/// number below 1, and wherever an input is not finite or is negative (zeta may be negative; sigma must be above 0).
+/// number in [0, 1), and wherever an input is not finite or is negative (zeta may be negative; sigma must be above 0).
 pub fn factor(psi: f64, tau2: f64, zeta: f64, sigma: f64, dwa: f64, u: f64) -> f32 {
     let finite = [psi, tau2, zeta, sigma, dwa, u].iter().all(|x| x.is_finite());
     if !finite || psi < 0.0 || tau2 < 0.0 || sigma <= 0.0 || dwa < 0.0 || u < 0.0 {
@@ -120,7 +120,7 @@ pub fn factor(psi: f64, tau2: f64, zeta: f64, sigma: f64, dwa: f64, u: f64) -> f
     }
     let f = (1.0 - tau2 / (sigma * sigma)).max(0.0);
     let x = ((1.0 - f).sqrt() * zeta.max(0.0) + psi * f.sqrt()) * tau2.sqrt() / (dwa * u.sqrt());
-    if x < 1.0 { x as f32 } else { 1.0 }
+    if (0.0..1.0).contains(&x) { x as f32 } else { 1.0 }
 }
 
 /// The most values a packed r x r symmetric matrix holds (r at most `order::R_MAX`).
@@ -410,7 +410,7 @@ mod tests {
                 assert_eq!(factor(x[0], x[1], x[2], x[3], x[4], x[5]), 1.0, "input {i} at {b}");
             }
         }
-        for (d, uu) in [(0.0, u), (dwa, 0.0), (0.0, 0.0)] {
+        for (d, uu) in [(0.0, u), (dwa, 0.0), (0.0, 0.0), (-0.0, u), (dwa, -0.0), (-0.0, -0.0)] {
             assert_eq!(factor(psi, tau2, 1.0, 0.2, d, uu), 1.0, "dwa {d}, U {uu}");
         }
         assert_eq!(factor(psi, tau2, 1.0, 0.0, dwa, u), 1.0);
