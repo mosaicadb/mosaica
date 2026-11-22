@@ -180,6 +180,12 @@ nprobe 1 to 4,096; IVF-PQ fast scan nprobe 1 to 128 by k_factor 4, 16, 64 and 25
 fastest other system, and `approx_panels.png` (recall@10 against ms per query, one panel per dataset and filter, log
 time axis).
 
+Three summary charts average over datasets, one panel per filter: each system's speed-up over faiss flat with the same
+filter, as a geometric mean over the datasets with a bar for their range.
+`plot_avg_approx.py <results dir> <png>` draws approximate k-NN at each recall target (a hollow dot: the system reached
+that recall on only some datasets); `plot_avg_exact_threshold.py <results dir> <png> exact|threshold` the other two.
+In `results/compare/` they are `avg_approx.png`, `avg_exact.png` and `avg_threshold.png`.
+
 ```bash
 export SUITE_DATA=... ACORN_BENCH=.../acorn_bench
 python3 -I bench/suite/run.py compare --datasets inaturalist-resnet-2048-cosine --stages run,check,report \
