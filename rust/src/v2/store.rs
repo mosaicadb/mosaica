@@ -6,8 +6,8 @@
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
 //! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
-//! state, `order::OrderState`), `wrule_h.bin` and `wrule_c.bin` (the approximate k-NN's W2 width's stored
-//! forms, `wrule::WForms`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
+//! state, `order::OrderState`), `wrule_h.bin` and `wrule_c.bin` (the W2 forms, the approximate k-NN's level width's
+//! stored tau, `wrule::WForms`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
 //! number of directions the order state holds per cluster, the build options that decide the encoding, and the key
 //! of the fit and those options it was built from).
 //!

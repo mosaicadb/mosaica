@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
 use vexact::v2::adaptive::{measured_constants, Adaptive, AdaptiveInfo, PSI};
-use vexact::v2::q::{disk_constants, LevelWidth, knn2, knn2_fast, prep2, query_ok, threshold2, threshold_ok, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, query_ok, threshold2, threshold_ok, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -255,27 +255,6 @@ impl Index {
             st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
             (st.cyc.to_vec(), (c1 - c0) as f64 / tm.elapsed().as_secs_f64())
         })))
-    }
-
-    /// The rule of approximate k-NN's deterministic-level width (study knob): "w2" (psi tau, the default) or "height"
-    /// (the spread of the error of a row at the running k-th best, `v2::wrule::height_factor`).
-    #[getter]
-    fn get_level_width(&self) -> PyResult<&'static str> {
-        Ok(match self.adaptive()?.level {
-            LevelWidth::W2 => "w2",
-            LevelWidth::Height => "height",
-        })
-    }
-
-    #[setter]
-    fn set_level_width(&mut self, rule: &str) -> PyResult<()> {
-        let level = match rule {
-            "w2" => LevelWidth::W2,
-            "height" => LevelWidth::Height,
-            _ => return Err(PyValueError::new_err(format!("the level width is w2 or height, not {rule:?}"))),
-        };
-        self.adaptive.as_mut().map_err(|e| PyValueError::new_err(e.clone()))?.level = level;
-        Ok(())
     }
 
     /// The approximate queries' measured constants (`adaptive::Measured`, microseconds), with the exact planner's rule

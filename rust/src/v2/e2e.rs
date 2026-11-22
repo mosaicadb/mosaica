@@ -2324,7 +2324,7 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
     [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
 }
 
-/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at the W2 width) and
+/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at their level width) and
 /// reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi is infinite.
 #[test]
 fn the_query_dial_leaves_the_deterministic_levels_to_the_reader() {
@@ -2469,8 +2469,8 @@ fn the_w2_spread_takes_the_centre_term_off() {
     assert!(checked > 0 && moved > 0, "{checked} spreads checked, {moved} moved by the centre's term");
 }
 
-/// A cluster read on the index path at the W2 width (each deterministic level at min(1, psi tau / (dwa sqrt U)) of its
-/// half-width, tau from the cluster's stored forms), or at the height width (`LevelWidth::Height`), sends on from each level no row the certified width would drop:
+/// A cluster read on the index path at its level width (each deterministic level at `wrule::factor` of its half-width,
+/// tau from the cluster's stored forms) sends on from each level no row the certified width would drop:
 /// against the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and
 /// the items it finds above t are among those the certified read finds, each with its own score. Over synth4k's
 /// clusters of at least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels,
@@ -2496,12 +2496,12 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
             sc.sort_by(f64::total_cmp);
             for t in [t10, (sc[sc.len() / 2] + sc[sc.len() / 2 + 1]) / 2.0] {
                 for plan in [Plan::default(), Plan { int_det: false, gtab: false, repack: false, ..Plan::default() }] {
-                    for (psi, level) in [0.5, 2.0, adaptive::PSI, 50.0, f64::INFINITY].into_iter().flat_map(|p| [(p, LevelWidth::W2), (p, LevelWidth::Height)]) {
-                        let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}, {level:?}", plan.int_det);
+                    for psi in [0.5, 2.0, adaptive::PSI, 50.0, f64::INFINITY] {
+                        let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}", plan.int_det);
                         let read = |width: Option<f64>| {
                             let mut rd = KnnReader::new(ix, &pr, None, ix.nrows, plan, crate::kernel::Stats::new(nl));
                             if let Some(p) = width {
-                                rd = rd.with_width(p).with_level(level);
+                                rd = rd.with_width(p);
                             }
                             rd.prime(t);
                             rd.visit(ci, KnnPath::Index);
@@ -4884,8 +4884,8 @@ fn study_layered_group_timing() {
 }
 
 /// The study rules for the approximate k-NN's deterministic-level width (`study_w_principled`), each a width w in score
-/// units per level, read as min(1, w / (dwa sqrt U)) of each row's upper half-width as W2 reads psi tau:
-/// - `corr`: W2 as the reader has it, w = psi tau (the centre's term taken off);
+/// units per level, read as min(1, w / (dwa sqrt U)) of each row's upper half-width, as `wrule::factor` reads its w:
+/// - `corr`: W2's psi tau (the centre's term taken off), the reader's width before the height width;
 /// - `built`: W2 as first built, tau from D = qv d_l and a = P'q (the centre's term left in);
 /// - `height`: the conditional width, w = sqrt(1 - f) max(0, zeta) tau + psi sqrt(f) tau, f = max(0, 1 - tau^2 /
 ///   sigma^2) and zeta = (t - mu) / sigma at the running k-th best t (mu, sigma the cluster's centre score and spread);
@@ -4894,6 +4894,7 @@ fn study_layered_group_timing() {
 /// - `cross`: e = c d + noise with c the error's regression on the row's deviation (an oracle from every row of the
 ///   cluster), w = (cs max(0, zeta) + psi sqrt(1 - cs^2)) tau, cs = min(1, c sigma / tau); MMSE's c gives `height`;
 /// - `x<c>` after a rule's name (e.g. `corrx1.2`): its w times c.
+///
 /// Each call adds a record of the cluster to `STUDY_REC`.
 fn study_width_rule(mode: &str) -> Box<WidthHook> {
     let (base, mul) = match mode.split_once('x') {
@@ -4928,7 +4929,7 @@ fn study_width_rule(mode: &str) -> Box<WidthHook> {
                 _ => panic!("no width rule {base}"),
             };
             let x = w[l] / (c.cq.dwa[l] as f64 * wf.u(ndl, c.ci, l).sqrt());
-            d[l] = if x >= 0.0 && x < 1.0 { x as f32 } else { 1.0 };
+            d[l] = if (0.0..1.0).contains(&x) { x as f32 } else { 1.0 };
         }
         STUDY_REC.with(|r| r.borrow_mut().push(StudyRec { ci: c.ci, t: c.t, mu, sigma, alr: c.cq.alr as f64, tau: c.tau2.map(|x| x.max(0.0).sqrt()), built: built.map(|x| x.max(0.0).sqrt()), w, dial: d }));
         d
@@ -4987,7 +4988,7 @@ thread_local! {
 /// h = (s - mu) / sigma, the threshold's zeta = (t - mu) / sigma, and its error over tau at each deterministic level
 /// (the interval's midpoint). Writes DIAG_OUT (the summary lines), DIAG_OUT.nb (one line per true neighbour in an
 /// index-path cluster) and DIAG_OUT.cl (one line per index-path cluster). DIAG_DIR, DIAG_PREP, DIAG_SETS (none,...),
-/// DIAG_MODES (study rules, or lib:w2 / lib:height for the library's own), DIAG_PSIS, DIAG_THREADS (4), DIAG_NQ (all).
+/// DIAG_MODES (study rules, or lib for the library's own width, `height`), DIAG_PSIS, DIAG_THREADS (4), DIAG_NQ (all).
 #[test]
 #[ignore]
 fn study_w_principled() {
@@ -5016,7 +5017,7 @@ fn study_w_principled() {
             rebuild(&dir, &BuildOptions::default(), &mut log).unwrap()
         }
     };
-    let mut ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
     let (n, nl, ndl) = (ix.n(), ix.meta.nl(), ix.meta.ndl());
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
     let (qs, d) = qn.rows_f32("queries").unwrap();
@@ -5049,16 +5050,10 @@ fn study_w_principled() {
         let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
         let (ow, ord) = (on.shape[1], on.i32s());
         for mode in &modes {
-            // "lib:<rule>": the library's own rule (`Adaptive::level`), no hook and no records
-            let lib = mode.strip_prefix("lib:");
-            ad.level = match lib {
-                None | Some("w2") => LevelWidth::W2,
-                Some("height") => LevelWidth::Height,
-                Some(x) => panic!("no library rule {x}"),
-            };
-            *WIDTH_HOOK.write().unwrap() = lib.is_none().then(|| study_width_rule(mode));
-            WIDTH_HOOK_ON.store(lib.is_none(), Ordering::Relaxed);
-            let ad = &ad;
+            // "lib": the library's own width, no hook and no records
+            let lib = mode == "lib";
+            *WIDTH_HOOK.write().unwrap() = (!lib).then(|| study_width_rule(mode));
+            WIDTH_HOOK_ON.store(!lib, Ordering::Relaxed);
             for &psi in &psis {
                 // per query: the counts, then the lines for .nb and .cl
                 let next = AtomicUsize::new(0);
@@ -5119,13 +5114,13 @@ fn study_w_principled() {
                                         cls[if kept { 3 + nl } else { 2 + lv.unwrap_or(nl) }] += 1.0;
                                     }
                                     let mut z = [0f64; 2];
-                                    for l in 0..ndl.min(2) {
+                                    for (l, zl) in z.iter_mut().enumerate().take(ndl.min(2)) {
                                         let mut iv = Vec::new();
                                         let mut cq = open_cluster(&ix, ci, gq, &pr, qm, plan, false);
                                         cq.ddial = [1.0; NDL_MAX];
                                         let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
                                         unsafe { run_cluster(&ix, ci, &pr, gq, &mut cq, &[idx], f64::NAN, Mode2::Interval(l), false, &mut sv, &mut st, &mut ro) };
-                                        z[l] = iv.first().map_or(f64::NAN, |x| (sc - (x.1 as f64 + x.2 as f64) / 2.0) / r.tau[l]);
+                                        *zl = iv.first().map_or(f64::NAN, |x| (sc - (x.1 as f64 + x.2 as f64) / 2.0) / r.tau[l]);
                                     }
                                     let l1 = 1.min(ndl - 1);
                                     nbl += &format!("{set} {mode} {psi} {qi} {e} {ci} {fate} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}\n", (sc - r.mu) / r.sigma, (r.t - r.mu) / r.sigma, z[0], z[1], r.tau[0] / r.sigma, r.tau[l1] / r.sigma, r.built[0] / r.tau[0], r.built[l1] / r.tau[l1], r.dial[0], r.dial[l1], r.w[0] / r.tau[0]);
@@ -5148,14 +5143,14 @@ fn study_w_principled() {
                                     let cands: Vec<u32> = (0..nr as u32).collect();
                                     let sc: Vec<f64> = (c.r0..c.r1).map(score).collect();
                                     let mut est = vec![vec![f64::NAN; nr]; 2];
-                                    for l in 0..ndl.min(2) {
+                                    for (l, el) in est.iter_mut().enumerate().take(ndl.min(2)) {
                                         let (mut sv, mut rin, mut pend, mut iv) = (State::default(), Vec::new(), Vec::new(), Vec::new());
                                         let mut cq = open_cluster(&ix, ci, gq, &pr, qm, plan, false);
                                         cq.ddial = [1.0; NDL_MAX];
                                         let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
                                         unsafe { run_cluster(&ix, ci, &pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(l), false, &mut sv, &mut st, &mut ro) };
                                         for x in &iv {
-                                            est[l][x.0 as usize - c.r0] = (x.1 as f64 + x.2 as f64) / 2.0;
+                                            el[x.0 as usize - c.r0] = (x.1 as f64 + x.2 as f64) / 2.0;
                                         }
                                     }
                                     let nf = nr as f64;

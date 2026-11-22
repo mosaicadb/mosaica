@@ -558,11 +558,9 @@ pub struct Adaptive {
     /// per randomised level, the spread of a row's error as a share of its certified half-width, the median over the
     /// groups of 1 / c (its half-width is c times the spread, c the certified constant `GroupPlan2::csgl`); k-NN at psi
     /// reads each randomised level at psi / c of its half-width (at most the certified width), and each deterministic
-    /// one at its cluster's W2 width (`KnnReader::with_width`): psi spreads of the row's error at every level
+    /// one at its cluster's level width (`KnnReader::with_width`)
     inv_c: Vec<f64>,
     ndl: usize,
-    /// the rule of k-NN's deterministic-level width (`KnnReader::with_level`; W2 unless set)
-    pub level: LevelWidth,
 }
 
 /// Per cluster, the path a threshold query reads it on and its cost, as k-NN prices it: the index path at the rows
@@ -628,7 +626,7 @@ impl Adaptive {
             r.sort_by(f64::total_cmp);
             r.get(r.len() / 2).copied().unwrap_or(1.0)
         }).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, inv_c, ndl, level: LevelWidth::W2 })
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, inv_c, ndl })
     }
 
     /// Each level's factor on its half-width for a query at psi (`Prep2::dial`): 1 at a deterministic level (k-NN sets
@@ -772,7 +770,7 @@ impl Adaptive {
         // given its clusters read directly are summed (`lost`), and the cluster whose saving takes the sum to the
         // setup's cost sets it up (at most twice the best purchase)
         let mut lost = vec![0f64; ix.groups.len()];
-        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(psi).with_level(self.level);
+        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(psi);
         // each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
         let mut wcoef: Vec<Option<[f32; order::R_MAX]>> = Vec::with_capacity(LOOKAHEAD);
         loop {

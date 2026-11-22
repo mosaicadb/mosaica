@@ -246,3 +246,22 @@ Files
 - *.txt (summary lines), *.txt.nb (true neighbours on the index path), *.txt.cl (index-path clusters), *.txt.post
   (iNaturalist's and LAION's error moments per cluster); the per-row file inat-post.txt.rows is not committed (52 MB).
 - build_wheel_03.sh is build_wheel_nice.sh on cores 0-3.
+
+Adopted (after the study): the height width is the reader's only level width
+--------------------------------------------------------------------------
+- `wrule::factor(psi, tau2, zeta, sigma, dwa, u)` is the height width.
+  - It returns the certified width (1) wherever an input is not finite, psi, tau^2, dwa or U is negative, sigma is not
+    above 0, or w / (dwa sqrt U) is not a number below 1. A zeta below 0 is valid.
+  - `CQ2::set_width` and `KnnReader::width` call it for every index-path cluster k-NN opens.
+- Deleted: the W2-only width (the old `factor` and `CQ2::set_w2`), `q::LevelWidth`, `KnnReader::with_level`,
+  `Adaptive::level`, the bindings' `level_width` and ab_orders.py's `--level-width`. Section 8's knob no longer exists.
+- Kept: W2's forms (tau comes from them).
+- Kept, now compiled only under test (`#[cfg(test)]`): `q::WIDTH_HOOK`, `WIDTH_HOOK_ON` and `WidthCall`. The ignored
+  study `study_w_principled` uses them; its mode `lib` reads the library's width.
+- Tests: cargo test --release --no-fail-fast gave 117 passed, 4 failed (the known synth4k four), 15 ignored; the second
+  binary 4 passed.
+  - The exact-path hash is f1f482ad11b64d9e and knn2_fast's 90d7892d504ef425, both unchanged.
+  - wrule's `the_factor_is_the_certified_width_where_it_cannot_be_less` covers the height width and every bad input.
+  - `the_statistical_width_drops_only_what_the_certified_width_keeps` covers the reader's width.
+- clippy --all-targets: the same 172 findings as 92afad9b7, including its 2 errors (approximate LN_2 and SQRT_2
+  constants), none in the changed code. cargo check on the bindings: clean.
