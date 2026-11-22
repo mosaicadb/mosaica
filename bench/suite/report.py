@@ -148,8 +148,11 @@ def report(suite):
         out.append("")
     keys = [k for k in cells if k[1] == "approx"]
     if keys:
-        out += ["## Approximate k-NN" + ("" if scale else " under a visible set"), "",
+        unf = scale or S.SUITES.get(suite, {}).get("approx_unfiltered")
+        out += at_recall(cells, keys)
+        out += ["## Approximate k-NN" + ("" if unf else " under a visible set"), "",
                 ("At these sizes this runner runs approximate k-NN unfiltered too. " if scale else
+                 "This runner runs approximate k-NN unfiltered and under the visible sets. " if unf else
                  "Unfiltered approximate k-NN is measured by VIBE and ANN-Benchmarks (`public.py`); this runner runs it "
                  "under the visible sets. ") + "Recall is the mean over queries of |answer and true k nearest visible| / k.",
                 "", "| dataset | filter | system | setting | median ms | p90 ms | recall |", "|---|---|---|---|---|---|---|"]
@@ -204,6 +207,129 @@ def report(suite):
         f.write("\n".join(out))
     print(f"wrote {os.path.join(root, 'REPORT.md')}")
     plots(cells, root)
+
+
+RECALL_TARGETS = (0.8, 0.9, 0.95, 0.99)
+OURS = "vexact"
+
+
+def curves(cells, keys):
+    """Per (dataset, filter, system): every grid point (recall, median ms), all of the system's settings together."""
+    c = defaultdict(list)
+    for k in keys:
+        if cells[k]["recall"]:
+            c[(k[0], k[2], k[4])].append((float(np.mean(cells[k]["recall"])), summarise(cells[k]["ms"])[0]))
+    return c
+
+
+def cost_at(points, target):
+    """The fastest grid point whose mean recall reaches the target (no interpolation), or None."""
+    ok = [ms for r, ms in points if r >= target]
+    return min(ok) if ok else None
+
+
+def at_recall(cells, keys):
+    """A table per dataset: each system's time at recall 0.8 / 0.9 / 0.95 / 0.99 under each filter, and its ratio to
+    vexact's (above 1: vexact is that many times faster)."""
+    cv = curves(cells, keys)
+    systems = sorted({s for _, _, s in cv}, key=lambda s: (s != OURS, s))
+    out = ["## Approximate k-NN at fixed recall", "",
+           "Each cell is the median ms per query of the fastest grid point whose mean recall@10 reaches the target (no "
+           "interpolation between grid points), then in brackets that time over vexact's: above 1, vexact is that many "
+           "times faster; below 1, the other system is faster. `max r` when the system's grid never reaches the "
+           "target: r is the best recall it reached. Empty: not run under that filter.", ""]
+    out += summary_at_recall(cv)
+    for ds in sorted({d for d, _, _ in cv}, key=ds_key):
+        out += [f"### {ds}", "", "| filter | recall | " + " | ".join(systems) + " |", "|---" * (2 + len(systems)) + "|"]
+        for f in sorted({f for d, f, _ in cv if d == ds}, key=lambda f: FILTER_ORDER.get(f, 99)):
+            for t in RECALL_TARGETS:
+                ours = cost_at(cv.get((ds, f, OURS), []), t)
+                line = [f, f"{t:g}"]
+                for sname in systems:
+                    pts = cv.get((ds, f, sname))
+                    if not pts:
+                        line.append("")
+                        continue
+                    ms = cost_at(pts, t)
+                    if ms is None:
+                        line.append(f"max {max(r for r, _ in pts):.3f}")
+                    elif sname == OURS or ours is None:
+                        line.append(f"{ms:.3g}")
+                    else:
+                        line.append(f"{ms:.3g} ({ms / ours:.2g}x)")
+                out.append("| " + " | ".join(line) + " |")
+        out.append("")
+    return out
+
+
+def summary_at_recall(cv, standard="faiss-hnsw"):
+    """At a glance: per dataset and filter, at each recall target, faiss HNSW's time over vexact's and the fastest
+    other system's (named), as ratios (above 1: vexact is that many times faster)."""
+    out = ["### At a glance: vexact against faiss HNSW and against the fastest other system", "",
+           "Each cell: `HNSW ratio / fastest other ratio (system)`, each the other system's time over vexact's at that "
+           "recall (above 1: vexact is faster). `-` when the system never reaches the recall; `vexact -` when vexact "
+           "does not.", "",
+           "| dataset | filter | " + " | ".join(f"recall {t:g}" for t in RECALL_TARGETS) + " |",
+           "|---" * (2 + len(RECALL_TARGETS)) + "|"]
+    for ds in sorted({d for d, _, _ in cv}, key=ds_key):
+        for f in sorted({f for d, f, _ in cv if d == ds}, key=lambda f: FILTER_ORDER.get(f, 99)):
+            line = [ds, f]
+            for t in RECALL_TARGETS:
+                ours = cost_at(cv.get((ds, f, OURS), []), t)
+                if ours is None:
+                    line.append("vexact -")
+                    continue
+                h = cost_at(cv.get((ds, f, standard), []), t)
+                others = [(cost_at(pts, t), s) for (d2, f2, s), pts in cv.items()
+                          if d2 == ds and f2 == f and s != OURS and cost_at(pts, t) is not None]
+                best = min(others) if others else None
+                line.append(("-" if h is None else f"{h / ours:.2g}") + " / " +
+                            ("-" if best is None else f"{best[0] / ours:.2g} ({best[1]})"))
+            out.append("| " + " | ".join(line) + " |")
+    return out + [""]
+
+
+def approx_panels(cells, root):
+    """recall@10 against median ms per query, one panel per dataset and filter, every system (the points of all its
+    settings, joined along its lower envelope), log time axis."""
+    import matplotlib.pyplot as plt
+    keys = [k for k in cells if k[1] == "approx"]
+    cv = curves(cells, keys)
+    dss = sorted({d for d, _, _ in cv}, key=ds_key)
+    fl = sorted({f for _, f, _ in cv}, key=lambda f: FILTER_ORDER.get(f, 99))
+    systems = sorted({s for _, _, s in cv}, key=lambda s: (s != OURS, s))
+    colour = {s: f"C{i}" for i, s in enumerate(systems)}
+    fig, axes = plt.subplots(len(dss), len(fl), figsize=(4.2 * len(fl), 3.4 * len(dss)), squeeze=False)
+    for i, ds in enumerate(dss):
+        for j, f in enumerate(fl):
+            ax = axes[i, j]
+            for sname in systems:
+                pts = sorted(cv.get((ds, f, sname), []))
+                if not pts:
+                    continue
+                env, best = [], float("inf")
+                for r, ms in sorted(pts, key=lambda p: -p[0]):
+                    if ms < best:
+                        env.append((r, ms))
+                        best = ms
+                env.sort()
+                ax.scatter([p[0] for p in pts], [p[1] for p in pts], s=8, color=colour[sname], alpha=0.35)
+                ax.plot([p[0] for p in env], [p[1] for p in env], marker="o", ms=3, color=colour[sname],
+                        lw=2.2 if sname == OURS else 1.2, label=sname)
+            for t in RECALL_TARGETS:
+                ax.axvline(t, color="grey", lw=0.5, ls=":")
+            ax.set_xlim(0.75, 1.002)
+            ax.set_yscale("log")
+            ax.grid(alpha=0.3, which="both")
+            ax.set_title(f"{ds}\n{f}", fontsize=9)
+            if i == len(dss) - 1:
+                ax.set_xlabel("recall@10")
+            if j == 0:
+                ax.set_ylabel("median ms / query")
+            ax.legend(fontsize=6, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(os.path.join(root, "approx_panels.png"), dpi=100)
+    plt.close(fig)
 
 
 def machine_record(root):
@@ -408,6 +534,8 @@ def plots(cells, root):
         fig.tight_layout()
         fig.savefig(os.path.join(root, f"{qt}.png"), dpi=110)
         plt.close(fig)
+    if any(k[1] == "approx" for k in cells):
+        approx_panels(cells, root)
 
 
 if __name__ == "__main__":

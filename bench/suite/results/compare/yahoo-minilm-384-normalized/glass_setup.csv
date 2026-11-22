@@ -1,0 +1,2 @@
+type,filter,setting,set_visible_ms,setting_ms
+approx,none,"R=32,L=400,quant=SQ8U,search_quant=SQ8U,refine_quant=FP16",0.01,0.00

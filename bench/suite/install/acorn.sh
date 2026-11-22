@@ -4,7 +4,8 @@
 # ACORN_BENCH=DIR/acorn_bench.
 # usage: bash bench/suite/install/acorn.sh DIR
 #   Needs cmake, a C++17 compiler with OpenMP, and BLAS/LAPACK (the system's reference libraries do: only their .so.3
-#   files are needed). About 2 minutes on 4 cores.
+#   files are needed) and CMake 3 (CMake 4 refuses the nlohmann_json it fetches; pip install 'cmake<4'). About 2 minutes
+#   on 4 cores.
 set -euo pipefail
 DIR=$1
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -13,8 +14,8 @@ TDB=$HERE/../../threshold-db
 cd "$DIR"
 git checkout -q c259f11cdbec880671658eaa0d8747e2cc9de79d
 git apply --check "$TDB/acorn.patch" 2>/dev/null && git apply "$TDB/acorn.patch"
-BLAS=${BLAS:-$(ls /usr/lib/x86_64-linux-gnu/libblas.so* /usr/lib/x86_64-linux-gnu/libopenblas.so* 2>/dev/null | head -1)}
-LAPACK=${LAPACK:-$(ls /usr/lib/x86_64-linux-gnu/liblapack.so* 2>/dev/null | head -1)}
+BLAS=${BLAS:-$(ls /usr/lib/x86_64-linux-gnu/libblas.so* /usr/lib/x86_64-linux-gnu/libopenblas.so* 2>/dev/null | head -1 || true)}
+LAPACK=${LAPACK:-$(ls /usr/lib/x86_64-linux-gnu/liblapack.so* 2>/dev/null | head -1 || true)}
 mkdir -p build
 cmake -S . -B build -DFAISS_ENABLE_GPU=OFF -DFAISS_ENABLE_PYTHON=OFF -DBUILD_TESTING=OFF -DFAISS_OPT_LEVEL=avx2 \
   -DCMAKE_SKIP_INSTALL_RULES=ON -DCMAKE_BUILD_TYPE=Release -DBLA_VENDOR=Generic \

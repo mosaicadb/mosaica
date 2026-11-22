@@ -215,8 +215,54 @@ ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-3
 ORDER_DEFAULT = dict(ORDER, name="order-default",
                      params=dict(ORDER["params"], vexact={k: v for k, v in ORDER["params"]["vexact"].items() if k != "orders"}))
 
+# The comparison: every query type under every filter, with approximate k-NN unfiltered on this runner too (the public
+# suites' quick algorithms as adapters here, so every system is timed the same way), and each approximate grid reaching
+# from about recall 0.8 to as high as the system goes. vexact's index is built from the fits made beforehand under
+# DATA/fit/<dataset> (not refitted).
+COMPARE_EF = [10, 16, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+COMPARE = dict(
+    QUICK, name="compare",
+    datasets=["inaturalist-resnet-2048-cosine", "laion-clip-512-normalized", "yahoo-minilm-384-normalized",
+              "glove-100-angular", "arxiv-nomic-768-normalized", "bioclip2-768", "landmark-dino-768-cosine",
+              "sift-128-euclidean"],
+    filters=["none", "random-1", "random-25", "region-1", "region-25"],
+    types=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-4, 1e-2, 1e-1]), approx=dict(k=[10])),
+    approx_unfiltered=True,
+    systems=dict(
+        exact=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["pdx-bond", "faiss-panorama"]),
+        threshold=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["faiss-panorama"]),
+        approx=dict(ours=["vexact"], standard=["faiss-hnsw"], frontier=["acorn", "faiss-ivf-panorama"],
+                    unfiltered=["hnswlib", "faiss-ivfpqfs", "glass", "pynndescent"]),
+    ),
+    params=dict(
+        SYSTEM_PARAMS,
+        vexact=dict(SYSTEM_PARAMS["vexact"], fit_from="fit",
+                    approx=[dict(psi=x) for x in (1.5, 1.75, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8, 9)]),
+        **{"faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], approx=[dict(ef=e) for e in COMPARE_EF]),
+           "acorn": dict(SYSTEM_PARAMS["acorn"], approx=[dict(ef=e) for e in COMPARE_EF]),
+           "faiss-ivf-panorama": dict(levels=8, approx=[dict(nprobe=p) for p in
+                                                        (1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 512, 1024,
+                                                         2048, 4096)]),
+           # the public suites' quick grids (VIBE_QUICK, ANNB_QUICK), widened at both ends
+           "hnswlib": dict(builds=[dict(M=m, efConstruction=500, query=[dict(ef=e) for e in
+                                                                        (10, 20, 30, 50, 100, 200, 300, 1000)])
+                                   for m in (16, 36)]),
+           "faiss-ivfpqfs": dict(nlist=1024, approx=[dict(nprobe=p, k_factor=kf) for kf in (4, 16, 64, 256)
+                                                     for p in (1, 2, 4, 8, 16, 32, 64, 128)]),
+           "glass": dict(builds=[dict(R=32, L=400, quant="SQ8U", search_quant="SQ8U", refine_quant="FP16",
+                                      query=[dict(ef=e) for e in
+                                                                   (10, 20, 30, 50, 80, 120, 200, 400, 600, 1000)])]),
+           # ANN-Benchmarks' angular groups NN-40 and NN-80-accurate
+           "pynndescent": dict(builds=[
+               dict(n_neighbors=40, leaf_size=25, pruning_degree_multiplier=1.5, diversify_prob=1.0,
+                    query=[dict(epsilon=e) for e in (0.0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16)]),
+               dict(n_neighbors=80, leaf_size=30, pruning_degree_multiplier=2.0, diversify_prob=0.25,
+                    query=[dict(epsilon=e) for e in (0.08, 0.12, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36)])])}),
+    public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}),
+)
+
 SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST, "order": ORDER,
-          "order-default": ORDER_DEFAULT}
+          "order-default": ORDER_DEFAULT, "compare": COMPARE}
 
 
 def types_for(suite, dataset):

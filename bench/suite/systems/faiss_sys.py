@@ -23,6 +23,25 @@ def _add(ix, X, transform=None):
         ix.add(np.ascontiguousarray(B @ transform) if transform is not None else B)
 
 
+def _train_sample(X):
+    rng = np.random.default_rng(1)
+    return np.ascontiguousarray(X[np.sort(rng.choice(X.shape[0], min(X.shape[0], 200_000), replace=False))],
+                                dtype=np.float32)
+
+
+def _pca_rotation(X):
+    """An orthogonal rotation onto the principal axes of a sample of X, largest variance first (Panorama prunes on the
+    leading dimensions; faiss's PCAMatrix centres the data, which changes inner products)."""
+    S = _train_sample(X).astype(np.float64)
+    _, V = np.linalg.eigh(np.cov(S, rowvar=False))
+    return np.ascontiguousarray(V[:, ::-1]).astype(np.float32)
+
+
+def _nlist(N):
+    """IVF lists: 4096 at a million vectors and more, else the power of two nearest 4 sqrt(N)."""
+    return 4096 if N >= 1_000_000 else int(2 ** round(np.log2(4 * np.sqrt(N))))
+
+
 class FaissBase(System):
     def build(self, threads):
         self.faiss = _faiss()
@@ -95,11 +114,7 @@ class FaissPanorama(FaissBase):
             raise Unavailable(f"faiss {self.faiss.__version__} has no IndexFlatIPPanorama (it came in 1.13)")
         X = self.prep.corpus()
         N, d = X.shape
-        rng = np.random.default_rng(1)
-        S = np.asarray(X[np.sort(rng.choice(N, min(N, 200_000), replace=False))], dtype=np.float64)
-        _, V = np.linalg.eigh(np.cov(S, rowvar=False))
-        self.rot = np.ascontiguousarray(V[:, ::-1]).astype(np.float32)
-        del S
+        self.rot = _pca_rotation(X)
         self.ix = self.faiss.IndexFlatIPPanorama(d, self.params.get("levels", 8))
         _add(self.ix, X, self.rot)
         return {}
@@ -143,6 +158,69 @@ class FaissHNSW(FaissBase):
         sp = self.faiss.SearchParametersHNSW(efSearch=max(p["ef"], k))
         if self.sel is not None:
             sp.sel = self.sel
+        _, I = self.ix.search(self._q(q), k, params=sp)
+        return I[0][I[0] >= 0]
+
+
+class FaissIVFPanorama(FaissBase):
+    """IndexIVFFlatPanorama (faiss 1.14 and later): IVF-Flat whose lists keep Panorama's level layout and prune on
+    partial products, after the same orthogonal PCA rotation as faiss-panorama (inside the timed call for each query).
+    Inner product; nlist as faiss-ivf-disk, trained on 200,000 rows. Approximate k-NN at the grid's nprobe; a visible
+    set through IDSelectorBitmap."""
+    name = "faiss-ivf-panorama"
+    types = ("approx",)
+
+    def _build(self):
+        f = self.faiss
+        if not hasattr(f, "IndexIVFFlatPanorama"):
+            raise Unavailable(f"faiss {f.__version__} has no IndexIVFFlatPanorama")
+        X = self.prep.corpus()
+        N, d = X.shape
+        self.rot = _pca_rotation(X)
+        nlist = self.params.get("nlist") or _nlist(N)
+        levels = self.params.get("levels", 8)
+        self.quantizer = f.IndexFlatIP(d)
+        self.ix = f.IndexIVFFlatPanorama(self.quantizer, d, nlist, levels, f.METRIC_INNER_PRODUCT)
+        self.ix.train(_train_sample(X) @ self.rot)
+        _add(self.ix, X, self.rot)
+        return dict(nlist=nlist, levels=levels)
+
+    def index_bytes(self):
+        return self.prep.N * self.prep.d * 4
+
+    def approx(self, q, k, p):
+        sp = self.faiss.SearchParametersIVF(nprobe=p["nprobe"])
+        if self.sel is not None:
+            sp.sel = self.sel
+        _, I = self.ix.search(self._q(q) @ self.rot, k, params=sp)
+        return I[0][I[0] >= 0]
+
+
+class FaissIVFPQfs(FaissBase):
+    """faiss IVF-PQ fast scan with a flat refine, as ANN-Benchmarks' faiss-ivfpqfs and VIBE's ivfpqfs(faiss):
+    index_factory "IVF{nlist},PQ{d/2}x4fs" (inner product) under IndexRefineFlat; the grid's nprobe and k_factor (the
+    refine reranks k x k_factor candidates on the f32 vectors). Unfiltered only, as in the public suites."""
+    name = "faiss-ivfpqfs"
+    types = ("approx",)
+    filters = False
+
+    def _build(self):
+        f = self.faiss
+        X = self.prep.corpus()
+        N, d = X.shape
+        nlist = self.params.get("nlist", 1024)
+        self.base = f.index_factory(d, f"IVF{nlist},PQ{d // 2}x4fs", f.METRIC_INNER_PRODUCT)
+        self.base.train(_train_sample(X))
+        self.ix = f.IndexRefineFlat(self.base)
+        _add(self.ix, X)
+        return dict(nlist=nlist, pq=f"PQ{d // 2}x4fs")
+
+    def index_bytes(self):
+        return self.prep.N * (self.prep.d * 4 + self.prep.d // 4)
+
+    def approx(self, q, k, p):
+        sp = self.faiss.IndexRefineSearchParameters(
+            k_factor=float(p["k_factor"]), base_index_params=self.faiss.SearchParametersIVF(nprobe=p["nprobe"]))
         _, I = self.ix.search(self._q(q), k, params=sp)
         return I[0][I[0] >= 0]
 
@@ -209,14 +287,13 @@ class FaissIVFDisk(FaissBase):
         f = self.faiss
         X = self.prep.corpus()
         N, d = X.shape
-        nlist = self.params.get("nlist") or (4096 if N >= 1_000_000 else int(2 ** round(np.log2(4 * np.sqrt(N)))))
+        nlist = self.params.get("nlist") or _nlist(N)
         q = f.IndexFlatIP(d)
         if self.params.get("storage", "f16") == "f16":
             ix = f.IndexIVFScalarQuantizer(q, d, nlist, f.ScalarQuantizer.QT_fp16, f.METRIC_INNER_PRODUCT)
         else:
             ix = f.IndexIVFFlat(q, d, nlist, f.METRIC_INNER_PRODUCT)
-        rng = np.random.default_rng(1)
-        ix.train(np.ascontiguousarray(X[np.sort(rng.choice(N, min(N, 200_000), replace=False))], dtype=np.float32))
+        ix.train(_train_sample(X))
         _add(ix, X)
         od = f.OnDiskInvertedLists(ix.nlist, ix.code_size, os.path.join(self.work, "ivf_ondisk.ivfdata"))
         v = f.InvertedListsPtrVector()

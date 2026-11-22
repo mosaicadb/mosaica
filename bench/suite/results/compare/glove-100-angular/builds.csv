@@ -1,0 +1,12 @@
+system,status,build_s,threads,index_gib,peak_rss_gib,detail
+vexact,ok,13.9,8,0.702,1.00,"{""fit_from"": ""/home/joe/code/vexact-data/suite/fit/glove-100-angular"", ""encode_s"": 13.8}"
+faiss-flat,ok,0.8,8,0.441,0.97,{}
+pdx-bond,ok,1.4,8,0.569,1.07,"{""blocks"": 116}"
+faiss-panorama,ok,1.2,8,0.441,1.20,{}
+faiss-hnsw,ok,101.4,8,0.582,1.11,"{""M"": 16, ""efConstruction"": 200, ""storage"": ""f32""}"
+acorn,ok,538.1,8,0.862,1.53,"{""M"": 32, ""gamma"": 12, ""M_beta"": 32}"
+faiss-ivf-panorama,ok,9.0,8,0.441,2.28,"{""nlist"": 4096, ""levels"": 8}"
+hnswlib,ok,755.7,8,0.000,2.10,"{""M=16,efConstruction=500"": ""built"", ""M=36,efConstruction=500"": ""built""}"
+faiss-ivfpqfs,ok,3.2,8,0.468,1.19,"{""nlist"": 1024, ""pq"": ""PQ50x4fs""}"
+glass,ok,62.7,8,0.000,1.04,"{""R=32,L=400,quant=SQ8U,search_quant=SQ8U,refine_quant=FP16"": ""built""}"
+pynndescent,ok,171.3,8,0.000,5.02,"{""n_neighbors=40,leaf_size=25,pruning_degree_multiplier=1.5,diversify_prob=1.0"": ""built"", ""n_neighbors=80,leaf_size=30,pruning_degree_multiplier=2.0,diversify_prob=0.25"": ""built""}"

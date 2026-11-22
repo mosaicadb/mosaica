@@ -1,0 +1,6 @@
+type,filter,setting,set_visible_ms,setting_ms
+exact,none,default,0.00,0.00
+exact,random-1,selection,3.05,0.00
+exact,random-25,selection,3.81,0.00
+exact,region-1,selection,3.07,0.00
+exact,region-25,selection,4.10,0.00

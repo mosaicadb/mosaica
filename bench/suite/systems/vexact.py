@@ -34,6 +34,8 @@ class Vexact(System):
             src = self._padded("train.npy", self.prep.corpus())
             tmp.append(src)
         out = os.path.join(self.work, "index")
+        if self.params.get("fit_from"):
+            return self._from_fit(out)
         args = [sys.executable, os.path.join(REPO, "rust", "tools", "fit.py"), src, out, "--metric", "angular",
                 "--basis", self.params.get("basis", "dual")]
         learn = self.prep.learn()
@@ -60,6 +62,31 @@ class Vexact(System):
             self.qbuf = np.zeros(-(-self.dp // 32) * 32, np.float32)
         self.ids = None
         return dict(fit_s=round(self.fit_s, 1), encode_s=round(self.encode_s, 1), sample=learn is not None)
+
+    def _from_fit(self, out):
+        """The index from a fit made beforehand, not refitted: params["fit_from"] names a directory beside prep/ in the
+        data directory that holds one fit per dataset (as fit/<dataset>). Its large arrays are hard-linked, the rest
+        copied, and the index is encoded here."""
+        import shutil
+        import vexact_py
+        src = os.path.join(os.path.dirname(os.path.dirname(self.prep.path)), self.params["fit_from"],
+                           os.path.basename(self.prep.path))
+        if not os.path.exists(os.path.join(src, "meta.json")):
+            raise Unavailable(f"no fit at {src}")
+        shutil.rmtree(out, ignore_errors=True)
+        os.makedirs(out)
+        for f in os.listdir(src):
+            p = os.path.join(src, f)
+            if os.path.isfile(p) and f.endswith(".npy") and os.path.getsize(p) >= 1 << 26:
+                os.link(p, os.path.join(out, f))
+            elif os.path.isfile(p):
+                shutil.copy2(p, os.path.join(out, f))
+        t = time.time()
+        self.ix = vexact_py.Index(out, core=self.core, **self.index_opts())
+        self.encode_s = time.time() - t
+        self.qbuf = np.zeros(self.ix.dim, np.float32)
+        self.ids = None
+        return dict(fit_from=src, encode_s=round(self.encode_s, 1))
 
     disk = True
 

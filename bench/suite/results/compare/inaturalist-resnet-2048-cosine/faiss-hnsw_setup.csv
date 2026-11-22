@@ -1,0 +1,6 @@
+type,filter,setting,set_visible_ms,setting_ms
+approx,none,default,0.01,0.00
+approx,random-1,default,0.67,0.00
+approx,random-25,default,1.37,0.00
+approx,region-25,default,0.81,0.00
+approx,region-1,default,0.29,0.00

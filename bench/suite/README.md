@@ -134,8 +134,9 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
   `bench/annb/vexact/module.py` does: `rust/tools/fit.py --basis dual` (with `--query-sample` from the learn sample on
   out-of-distribution sets), then `vexact_py.Index` (planner `auto`) with the library's default build: clusters and
   groups by N, two deterministic levels at 16 and 32 bytes (the parameter `dlv`; `dlv=[]` builds the fit's six). Exact k-NN is `knn`, the threshold query the
-  bindings' `threshold` (`threshold2` through the planner, entity ids), approximate `knn_approx` (nprobe 16, 64, 256 in
-  the quick suite), all under `set_visible`.
+  bindings' `threshold` (`threshold2` through the planner, entity ids), approximate `knn_approx` (psi 3.5, 4.5, 6 in
+  the quick suite), all under `set_visible`. With the parameter `fit_from` (the `compare` suite: `fit`) the index is
+  built from a fit made beforehand under `DATA/fit/<dataset>` instead of running `fit.py`.
 - **faiss-flat**: pip `faiss-cpu` 1.16.0. `search` and `range_search` on `IndexFlatIP`; under a visible set through
   `IDSelectorBitmap` (`idselector`) and over a compacted `IndexFlatIP` of the visible rows (`compacted`, built when the
   set is set).
@@ -149,9 +150,47 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
 - **acorn**: ACORN-γ (stanford-futuredata/ACORN at c259f11 with `../threshold-db/acorn.patch`, the static
   `faiss_avx2` library) through `../threshold-db/acorn_bench.cpp`: M 32, γ 12, M_β 32, L2 over the unit vectors;
   efSearch 64, 256, 1024. The build is one piece on the build cores.
+- **faiss-ivf-panorama**: `IndexIVFFlatPanorama` (faiss 1.14 and later), 8 levels, inner product, after the same PCA
+  rotation as faiss-panorama; nlist 4096 from a million vectors, else the power of two nearest 4 sqrt(N); approximate
+  k-NN by nprobe, under a visible set through `IDSelectorBitmap`.
+- **Unfiltered only** (the public suites' quick algorithms, as adapters on this runner so that they are timed as every
+  other system; `systems/ann_libs.py` and `faiss_sys.py`): **hnswlib** 0.8.0 (pip; space `ip`, M 16 and 36,
+  efConstruction 500); **faiss-ivfpqfs** (`IVF1024,PQ{d/2}x4fs` under `IndexRefineFlat`, nprobe by k_factor, as
+  ANN-Benchmarks' faiss-ivfpqfs); **glass** 2.1 (github.com/zilliztech/pyglass at d2296ec, built from source with
+  `-march=native` against pybind11 2.x; the pip wheel `glassppy` needs AVX-512), VIBE's form: HNSW R 32, L 400, SQ8U
+  graph and search quantisers, FP16 refine; **pynndescent** (pip; metric `dot`, ANN-Benchmarks' angular groups NN-40
+  and NN-80-accurate, epsilon per query).
 - **pgvector**: PostgreSQL with pgvector, sequential scans, one worker; `ORDER BY v <#> q LIMIT k` and
   `WHERE (v <#> q) <= -t`, a visible set as `id IN (SELECT id FROM vis_...)`. Timed at the client as
   the earlier `threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
+
+## The comparison suite (`compare`)
+
+Every query type under every filter (none, random-1, random-25, region-1, region-25) on eight datasets, with
+approximate k-NN run unfiltered on this runner too, so that the public suites' graph and quantisation indexes are timed
+exactly as the filtered systems are. Exact k-NN at k = 10; threshold at 0.01%, 1% and 10% unfiltered and 1% of the
+visible set under a filter. Approximate k-NN at k = 10 over grids that reach from about recall 0.8 to as high as each
+system goes (`suites.py`, `COMPARE`): vexact psi 1.5 to 9; faiss HNSW and ACORN ef 10 to 16,384; faiss IVF-Panorama
+nprobe 1 to 4,096; IVF-PQ fast scan nprobe 1 to 128 by k_factor 4, 16, 64 and 256; hnswlib ef 10 to 1,000 on M 16 and
+36; glass ef 10 to 1,000; pynndescent epsilon 0 to 0.36 on two graphs. vexact is built from the fits under
+`DATA/fit/<dataset>` (`fit_from`), not refitted.
+
+`report.py` adds, for any suite with approximate k-NN, a table of each system's time at recall 0.8, 0.9, 0.95 and 0.99
+(the fastest grid point that reaches it, and its ratio to vexact's), an at-a-glance table against faiss HNSW and the
+fastest other system, and `approx_panels.png` (recall@10 against ms per query, one panel per dataset and filter, log
+time axis).
+
+```bash
+export SUITE_DATA=... ACORN_BENCH=.../acorn_bench
+python3 -I bench/suite/run.py compare --datasets inaturalist-resnet-2048-cosine --stages run,check,report \
+    --core 11 --build-cores 0-7
+```
+
+Results: `results/compare/` (2026-11-22, a Ryzen 9 5900X under WSL2, AVX2 without AVX-512; timing on core 11 with its
+sibling 10 idle, builds on cores 0-7), with vexact at 7510c55. Not run: qsgngt, which ANN-Benchmarks installs as a
+prebuilt wheel and binaries from a third-party repository with no source. The iNaturalist cells of faiss HNSW and
+IVF-Panorama under region-1, and of IVF-PQ fast scan, were rerun after their grids were widened; every other cell is
+from one run per dataset.
 
 ## The memory-cap axis (`--stages cap`): optional and synthetic
 

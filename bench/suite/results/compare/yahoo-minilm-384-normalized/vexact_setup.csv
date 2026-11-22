@@ -1,0 +1,16 @@
+type,filter,setting,set_visible_ms,setting_ms
+exact,none,default,0.00,0.00
+exact,random-1,default,0.80,0.00
+exact,random-25,default,8.97,0.00
+exact,region-1,default,0.81,0.00
+exact,region-25,default,9.11,0.00
+threshold,none,default,0.01,0.00
+threshold,random-1,default,0.41,0.00
+threshold,random-25,default,4.53,0.00
+threshold,region-1,default,0.38,0.00
+threshold,region-25,default,4.72,0.00
+approx,none,default,0.01,0.00
+approx,random-1,default,0.43,0.00
+approx,random-25,default,4.71,0.00
+approx,region-1,default,0.39,0.00
+approx,region-25,default,4.51,0.00

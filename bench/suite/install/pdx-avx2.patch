@@ -1,0 +1,124 @@
+diff --git a/include/distance_computers/avx2_computers.hpp b/include/distance_computers/avx2_computers.hpp
+index 4740278..69aecd7 100644
+--- a/include/distance_computers/avx2_computers.hpp
++++ b/include/distance_computers/avx2_computers.hpp
+@@ -41,7 +41,8 @@ public:
+             DISTANCE_TYPE *distances_p,
+             const uint32_t *pruning_positions = nullptr,
+             const uint32_t *indices_dimensions = nullptr,
+-            const int32_t *dim_clip_value = nullptr
++            const int32_t *dim_clip_value = nullptr,
++            const float * scaling_factors = nullptr
+     ) {
+         size_t dimensions_jump_factor = total_vectors;
+         for (size_t dimension_idx = start_dimension; dimension_idx < end_dimension; ++dimension_idx) {
+@@ -67,7 +68,8 @@ public:
+             const DATA_TYPE *__restrict data,
+             size_t start_dimension,
+             size_t end_dimension,
+-            DISTANCE_TYPE *distances_p
++            DISTANCE_TYPE *distances_p,
++            const float * scaling_factors = nullptr
+     ) {
+         for (size_t dim_idx = start_dimension; dim_idx < end_dimension; dim_idx++) {
+             size_t dimension_idx = dim_idx;
+@@ -82,7 +84,8 @@ public:
+     static DISTANCE_TYPE Horizontal(
+             const QUERY_TYPE *__restrict vector1,
+             const DATA_TYPE *__restrict vector2,
+-            size_t num_dimensions
++            size_t num_dimensions,
++            const float * scaling_factors = nullptr
+     ) {
+         __m256 d2_vec = _mm256_setzero_ps();
+         size_t i = 0;
+@@ -146,7 +149,8 @@ public:
+             DISTANCE_TYPE * distances_p,
+             const uint32_t * pruning_positions = nullptr,
+             const uint32_t * indices_dimensions = nullptr,
+-            const int32_t * dim_clip_value = nullptr
++            const int32_t * dim_clip_value = nullptr,
++            const float * scaling_factors = nullptr
+     ){
+         // TODO
+     }
+@@ -157,7 +161,8 @@ public:
+             const DATA_TYPE *__restrict data,
+             size_t start_dimension,
+             size_t end_dimension,
+-            DISTANCE_TYPE * distances_p
++            DISTANCE_TYPE * distances_p,
++            const float * scaling_factors = nullptr
+     ){
+         // TODO
+     }
+@@ -165,7 +170,8 @@ public:
+     static DISTANCE_TYPE Horizontal(
+             const QUERY_TYPE *__restrict vector1,
+             const DATA_TYPE *__restrict vector2,
+-            size_t num_dimensions
++            size_t num_dimensions,
++            const float * scaling_factors = nullptr
+     ){
+         __m256 d2_vec = _mm256_setzero_ps();
+         size_t i = 0;
+diff --git a/include/distance_computers/base_computers.hpp b/include/distance_computers/base_computers.hpp
+index f3be17e..6456e82 100644
+--- a/include/distance_computers/base_computers.hpp
++++ b/include/distance_computers/base_computers.hpp
+@@ -39,6 +39,7 @@ public:
+     constexpr static auto Horizontal = computer::Horizontal;
+ };
+ 
++#ifdef __AVX512F__
+ template<>
+ class DistanceComputer<L2, Quantization::U8> {
+     using computer = SIMDComputer<L2, U8>;
+@@ -52,6 +53,7 @@ public:
+     constexpr static auto Horizontal = computer::Horizontal;
+ };
+ 
++#endif
+ 
+ }; // namespace PDX
+ 
+diff --git a/include/lib/lib.hpp b/include/lib/lib.hpp
+index cd97959..25b667d 100644
+--- a/include/lib/lib.hpp
++++ b/include/lib/lib.hpp
+@@ -23,6 +23,7 @@ namespace py = pybind11;
+  ******************************************************************/
+ namespace PDX {
+ 
++#ifdef __AVX512F__
+ class IndexADSamplingIVF2SQ8 {
+ 
+     using KNNCandidate = KNNCandidate<U8>;
+@@ -117,6 +118,7 @@ public:
+ 
+ };
+ 
++#endif
+ class IndexADSamplingIVF2Flat {
+ 
+     using KNNCandidate = KNNCandidate<F32>;
+diff --git a/python/lib.cpp b/python/lib.cpp
+index dbf5199..b849e4a 100644
+--- a/python/lib.cpp
++++ b/python/lib.cpp
+@@ -32,6 +32,7 @@ PYBIND11_MODULE(compiled, m) {
+         .def_readwrite("index", &PDX::KNNCandidate<PDX::F32>::index)
+         .def_readwrite("distance", &PDX::KNNCandidate<PDX::F32>::distance);
+ 
++#ifdef __AVX512F__
+     py::class_<PDX::KNNCandidate<PDX::U8>>(m, "KNNCandidateSQ8")
+         .def(py::init<>())
+         .def_readwrite("index", &PDX::KNNCandidate<PDX::U8>::index)
+@@ -45,6 +46,7 @@ PYBIND11_MODULE(compiled, m) {
+         .def("search", &PDX::IndexADSamplingIVF2SQ8::_py_Search, py::arg("q"), py::arg("k"), py::arg("n_probe"))
+         .def("filtered_search", &PDX::IndexADSamplingIVF2SQ8::_py_FilteredSearch, py::arg("q"), py::arg("k"), py::arg("n_probe"), py::arg("n_passing_tuples"), py::arg("selection_vector"));
+ 
++#endif
+     py::class_<PDX::IndexADSamplingIVF2Flat>(m, "IndexADSamplingIVF2Flat")
+         .def(py::init<>())
+         .def("restore", &PDX::IndexADSamplingIVF2Flat::Restore, py::arg("path"), py::arg("matrix_path"))
