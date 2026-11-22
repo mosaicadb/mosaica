@@ -186,7 +186,7 @@ python3 -I bench/suite/run.py compare --datasets inaturalist-resnet-2048-cosine 
     --core 11 --build-cores 0-7
 ```
 
-Results: `results/compare/` (2026-11-22, a Ryzen 9 5900X under WSL2, AVX2 without AVX-512; timing on core 11 with its
+Results: `results/compare/` (all eight datasets, 2026-11-22, a Ryzen 9 5900X under WSL2, AVX2 without AVX-512; timing on core 11 with its
 sibling 10 idle, builds on cores 0-7), with vexact at 7510c55. Not run: qsgngt, which ANN-Benchmarks installs as a
 prebuilt wheel and binaries from a third-party repository with no source. The iNaturalist cells of faiss HNSW and
 IVF-Panorama under region-1, and of IVF-PQ fast scan, were rerun after their grids were widened; every other cell is
