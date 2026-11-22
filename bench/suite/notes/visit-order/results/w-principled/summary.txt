@@ -251,7 +251,10 @@ Adopted (after the study): the height width is the reader's only level width
 --------------------------------------------------------------------------
 - `wrule::factor(psi, tau2, zeta, sigma, dwa, u)` is the height width.
   - It returns the certified width (1) wherever an input is not finite, psi, tau^2, dwa or U is negative, sigma is not
-    above 0, or w / (dwa sqrt U) is not a number below 1. A zeta below 0 is valid.
+    above 0, or w / (dwa sqrt U) is not a number in [0, 1). A zeta below 0 is valid.
+  - It also returns the certified width where tau^2 >= sigma^2 (f <= 0), where the model does not apply (Joe's
+    choice). The study's `height` rule clamped f at 0 there instead, so this case may read more rows than the study
+    counted; it has not been measured.
   - `CQ2::set_width` and `KnnReader::width` call it for every index-path cluster k-NN opens.
 - Deleted: the W2-only width (the old `factor` and `CQ2::set_w2`), `q::LevelWidth`, `KnnReader::with_level`,
   `Adaptive::level`, the bindings' `level_width` and ab_orders.py's `--level-width`. Section 8's knob no longer exists.

@@ -107,18 +107,20 @@ impl WForms {
 
 /// The factor on a row's upper half-width at a deterministic level, the height width: min(1, w / (dwa sqrt U)), dwa the
 /// query's factor on the rows' stored norms and U their mean square, with w = (sqrt(1 - f) max(0, zeta) + psi sqrt(f))
-/// tau; tau^2 the predicted spread of a row's error (`WForms::tau2`), f = max(0, 1 - tau^2 / sigma^2) the share of the
-/// cluster's score variance along the query the level explains (sigma its spread), zeta = (t - mu) / sigma the running
-/// k-th best's height in the cluster. With the level's error e and a row's deviation d = s - mu jointly Gaussian and e
+/// tau; tau^2 the predicted spread of a row's error (`WForms::tau2`), f = 1 - tau^2 / sigma^2 the share of the cluster's
+/// score variance along the query the level explains (sigma its spread), zeta = (t - mu) / sigma the running k-th
+/// best's height in the cluster. With the level's error e and a row's deviation d = s - mu jointly Gaussian and e
 /// uncorrelated with the estimate (a linear least-squares predictor), e given d has mean (1 - f) d and spread sqrt(f)
 /// tau, so w keeps a row scoring t with probability Phi(psi). The certified width (1) where w / (dwa sqrt U) is not a
-/// number in [0, 1), and wherever an input is not finite or is negative (zeta may be negative; sigma must be above 0).
+/// number in [0, 1); wherever an input is not finite or is negative (zeta may be negative; sigma must be above 0); and
+/// where tau^2 >= sigma^2 (f <= 0), where the predicted error is as large as the cluster's whole spread and the model
+/// does not apply.
 pub fn factor(psi: f64, tau2: f64, zeta: f64, sigma: f64, dwa: f64, u: f64) -> f32 {
     let finite = [psi, tau2, zeta, sigma, dwa, u].iter().all(|x| x.is_finite());
-    if !finite || psi < 0.0 || tau2 < 0.0 || sigma <= 0.0 || dwa < 0.0 || u < 0.0 {
+    if !finite || psi < 0.0 || tau2 < 0.0 || sigma <= 0.0 || dwa < 0.0 || u < 0.0 || tau2 >= sigma * sigma {
         return 1.0;
     }
-    let f = (1.0 - tau2 / (sigma * sigma)).max(0.0);
+    let f = 1.0 - tau2 / (sigma * sigma);
     let x = ((1.0 - f).sqrt() * zeta.max(0.0) + psi * f.sqrt()) * tau2.sqrt() / (dwa * u.sqrt());
     if (0.0..1.0).contains(&x) { x as f32 } else { 1.0 }
 }
@@ -385,8 +387,8 @@ mod tests {
 
     /// The factor is w / (dwa sqrt U) below 1: psi tau / (dwa sqrt U) where the level explains all the cluster's spread
     /// along the query and the k-th best is at most the cluster's mean, wider as the k-th best rises in the cluster; 0 at
-    /// tau 0; and 1 (the certified width) at 1 and above, at dwa or U 0, and wherever an input is not finite or is
-    /// negative (a zeta below 0 is a k-th best below the mean, not an error).
+    /// tau 0; and 1 (the certified width) at 1 and above, at dwa or U 0, at tau at or above sigma, and wherever an input
+    /// is not finite or is negative (a zeta below 0 is a k-th best below the mean, not an error).
     #[test]
     fn the_factor_is_the_certified_width_where_it_cannot_be_less() {
         let (psi, tau2, dwa, u) = (1.0f64, 0.0004f64, 0.5f64, 0.2f64);
@@ -414,5 +416,11 @@ mod tests {
             assert_eq!(factor(psi, tau2, 1.0, 0.2, d, uu), 1.0, "dwa {d}, U {uu}");
         }
         assert_eq!(factor(psi, tau2, 1.0, 0.0, dwa, u), 1.0);
+        // tau at or above sigma: the level explains none of the cluster's spread, and the model does not apply
+        for sigma in [0.02, 0.019, 1e-6] {
+            assert_eq!(factor(psi, tau2, 1.0, sigma, dwa, u), 1.0, "sigma {sigma}");
+            assert_eq!(factor(psi, tau2, -1.0, sigma, dwa, u), 1.0, "sigma {sigma}, zeta -1");
+        }
+        assert!(factor(psi, tau2, 1.0, 0.021, dwa, u) < 1.0);
     }
 }
