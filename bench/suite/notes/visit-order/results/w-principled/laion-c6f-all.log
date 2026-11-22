@@ -1,0 +1,19 @@
+
+running 1 test
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wfix/laion-clip-512-normalized/encoded in 0.221s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash 2107fc24c7d63498
+[repack] occupancy thresholds by level [0.13, 0.13, 0.06, 0.12, 0.14, 0.19] (timed in 0.0s)
+[open] 0.392s in all: fit read 0.123s, key 0.011s, index opened 0.222s, repack timed 0.037s; anon 113 MB
+/home/joe/code/vexact-data/wfix/laion-clip-512-normalized: 100 queries, k 10, groups 64, levels 6 (2 deterministic); constants dir_us=0.49489130373677603 row_us_1=0.05656737992859773 row_us_4=0.06340049438008871 row_us_16=0.06000590455718017 row_us_64=0.03743814456134723 cl_us=6.518089568808356 cut_row_us_1=0.017560666031925198 cut_row_us_4=0.06023436530520597 cut_row_us_16=0.11940428153149181 cut_row_us_64=0.22497497116475673 cut_us=1.4570625 grp_us=36.33 sig_us=0.87071875 
+none       built        psi=2: recall 0.4580 visited 1.1 direct 0.0 index 1.1 opened 1.1 groups 1.05 spreads 8.1 batched 0.0 stored 1306 touched 2511 past_det 1823 enter 2501/1995/1823/1818/1453/825/349 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=3: recall 0.6230 visited 2.7 direct 0.1 index 2.6 opened 2.6 groups 1.84 spreads 9.7 batched 0.0 stored 1439 touched 5845 past_det 2065 enter 5755/2260/2065/2061/1689/944/400 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=4: recall 0.7970 visited 10.0 direct 0.4 index 9.6 opened 9.6 groups 4.43 spreads 17.0 batched 0.0 stored 1718 touched 20742 past_det 2401 enter 20420/2922/2401/2396/1977/1058/446 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=5: recall 0.9370 visited 29.6 direct 1.0 index 28.6 opened 28.6 groups 10.77 spreads 36.6 batched 0.0 stored 2278 touched 61101 past_det 3175 enter 60263/5130/3175/3170/2518/1180/489 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=6: recall 0.9760 visited 78.0 direct 2.5 index 75.5 opened 75.5 groups 21.28 spreads 85.0 batched 0.1 stored 3594 touched 156206 past_det 5184 enter 154094/11660/5184/5179/3780/1310/530 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=7: recall 0.9970 visited 175.0 direct 5.2 index 169.7 opened 169.7 groups 36.66 spreads 182.0 batched 0.1 stored 5975 touched 344994 past_det 10197 enter 340543/28778/10197/10191/6834/1457/572 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=8: recall 0.9990 visited 318.3 direct 8.0 index 310.2 opened 310.2 groups 51.42 spreads 325.1 batched 0.3 stored 8408 touched 626124 past_det 21306 enter 619276/65605/21306/21295/13254/1614/608 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=9: recall 0.9990 visited 433.8 direct 9.9 index 423.9 opened 423.9 groups 58.92 spreads 439.6 batched 0.7 stored 10037 touched 857692 past_det 42433 enter 849215/127586/42433/42416/19428/1616/608 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+test v2::e2e::study_w_principled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 2.10s
+

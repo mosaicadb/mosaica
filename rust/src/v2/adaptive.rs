@@ -558,7 +558,7 @@ pub struct Adaptive {
     /// per randomised level, the spread of a row's error as a share of its certified half-width, the median over the
     /// groups of 1 / c (its half-width is c times the spread, c the certified constant `GroupPlan2::csgl`); k-NN at psi
     /// reads each randomised level at psi / c of its half-width (at most the certified width), and each deterministic
-    /// one at its cluster's W2 width (`KnnReader::with_width`): psi spreads of the row's error at every level
+    /// one at its cluster's level width (`KnnReader::with_width`)
     inv_c: Vec<f64>,
     ndl: usize,
 }

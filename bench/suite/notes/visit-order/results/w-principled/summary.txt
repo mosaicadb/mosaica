@@ -1,0 +1,274 @@
+A principled width for the approximate k-NN's deterministic levels: why W2 as built beat the centre-corrected form on
+iNaturalist, and what to time instead
+====================================================================================================================
+
+Branch research/w-principled off 92afad9b7. Nothing here is timed: the reader ran on cores 0-3 at nice 19 while the
+benchmark held core 11. Every count is the real reader's (`Adaptive::knn`) on the suite's fits and prepared queries,
+100 queries, k 10. Time is modelled from the counts (see "The cost model").
+
+Short answer
+------------
+- **Part of the gap in tonight's timing comes from the constants, not the width.** With the constants held equal, the two
+  forms make the same stop and path decisions at every psi: the same clusters read, direct, opened, groups and stored
+  vectors. The two timing runs each measured their own constants (dir_us 0.61 against 0.50, grp_us 600 against 520).
+  That moves clusters between the direct and index paths. It explains all of "11,346 against 8,451 stored reads" and
+  about 0.004 of the 0.011 recall gap at psi 5.
+- **The rest is the levels.** At psi 5 on iNaturalist, with the same constants:
+  - as built: recall 0.985, 7 true neighbours per 1,000 dropped at the deterministic levels;
+  - corrected: recall 0.976, 16 dropped;
+  - both: 7 unread, and none dropped at the randomised levels.
+  The corrected form is the better model of an average row's error. True neighbours are not average rows: in its own
+  spreads, a true neighbour's error is its height in the cluster (z0 = 1.0 h on all four datasets). W2 does not model
+  that.
+- **Widening the levels is almost free; raising psi is not.** At psi 5 on iNaturalist, as built, corrected and the fix
+  below all model at 2,418 us. Corrected reaches the same recall only near psi 5.5, at 2,946 us. As built's extra width
+  is larger in the clusters that hold neighbours: a median 1.07 times corrected's, 1.13 in those clusters. So it buys
+  back neighbours cheaply. On LAION the extra width is about 1.01, which is why the forms tie there.
+- **A principled fix exists and is implemented as a knob: the height width.** It is the width that keeps a row scoring
+  the running k-th best with probability Phi(psi), with the level's error and the row's deviation modelled as jointly
+  Gaussian:
+  - w = (sqrt(1 - f) max(0, zeta) + psi sqrt(f)) tau;
+  - f = 1 - tau^2 / sigma^2, and zeta = (t - mu) / sigma.
+  It needs nothing stored beyond W2. Against corrected it is 0.70 to 0.97 of the modelled time to recall 0.9 to 0.99
+  unfiltered on the four datasets. It is level or better on region-25, and level with or better than as built in every
+  cell.
+- **Recommendation: time `--level-width height` against the default (W2 corrected) on the same index copy**, so that
+  the two runs share one set of constants.
+
+1. The constants, separated from the width (inat-c92.txt, inat-c6f.txt; table.py)
+--------------------------------------------------------------------------------
+Each study run fixes the measured constants from a file (`costs-*.kv`, read from the timing runs' own headers), so that
+every rule meets the same path choices for the same running k-th best. iNaturalist unfiltered, psi 5:
+
+  constants of                 rule       recall  read  direct  opened  groups  stored  past det | unread  det
+  92afad9 (tonight)            as built   0.985   17.8   4.2    13.5    1.64    8451     296     |   7      7
+  92afad9                      corrected  0.976   17.8   4.2    13.6    1.64    8451     215     |   7     16
+  6f86a1c (as built's run)     as built   0.987   17.7   5.5    12.2    1.40   11346     139     |   7      5
+  6f86a1c                      corrected  0.980   17.7   5.5    12.2    1.40   11346     101     |   7     12
+
+("unread" and "det": true neighbours missed over the 100 queries, out of 1,000, because their cluster was not read or
+because a deterministic level dropped them; no rule dropped one at a randomised level.)
+- Under 6f86a1c's constants this reader reproduces the timed as-built run exactly (0.987, 11,346, 139). Under tonight's,
+  it reproduces tonight's corrected run (0.976, 8,451, 215).
+- Under one set of constants the two forms differ only past the levels. The visited, direct, opened, group and stored
+  counts are identical at every psi 2 to 9, on all four datasets, unfiltered and region-25.
+- So a back-to-back comparison of two builds compares their constants as well as their widths, whenever each build times
+  its own. Comparing on one index copy (one cache, one set of constants) removes that.
+
+2. Why the corrected width drops true neighbours (inat-post.txt, *.nb, nbfit.py, post.py)
+-----------------------------------------------------------------------------------------
+For each true neighbour in an index-path cluster, the study reads that cluster again alone, with the same width and
+running k-th best, to find the level that drops it. It also takes the neighbour's height h = (s - mu) / sigma and its
+level-0 error over W2's tau, z0 = (s - est0) / tau0, using the interval midpoint at the certified width.
+
+- **A neighbour's error is its height.** Least squares z0 = a h over the neighbours (corrected, psi 9, unfiltered):
+
+  | dataset | neighbours | median h | median z0 | a | MMSE's a, tau/sigma |
+  |---|---|---|---|---|---|
+  | iNaturalist | 265 | 3.38 | 3.26 | 1.01 | 0.28 |
+  | LAION | 994 | 3.39 | 3.33 | 1.00 | 0.48 |
+  | yahoo | 998 | 3.99 | 3.53 | 0.90 | 0.40 |
+  | arxiv | 877 | 4.05 | 4.06 | 1.01 | 0.41 |
+
+  log(z0 / h) does not move with log(tau / sigma) (slope -0.25 to 0.18). In its own spreads, the error of a row at
+  height 4 is about 4, whatever share of the cluster's spread the level codes. W2 predicts the spread of an average
+  row's error, about 1 in those units.
+- **Which neighbours are dropped.** At psi 5, corrected drops neighbours at a median h of 4.2, zeta 4.0 and z0 6.2. Those
+  it keeps have a median h of 3.3, zeta 2.8 and z0 3.1. They are the far tail of far clusters.
+- **What the bulk shows** (inat-post: every row of every index-path cluster at psi 5, 1,356 clusters):
+  - corrected is well calibrated for the bulk: sd(e0) / tau0 is a median 0.88 (0.98 in clusters holding a neighbour);
+    as built is wide (0.82);
+  - the error's regression on the row's deviation, c = cov(e0, d) / var(d), is 1.96 times the least-squares-predictor
+    value (MMSE: (sd_e / sd_d)^2) on iNaturalist, against 1.13 on LAION;
+  - corr(e0, est0) is 0.27 on iNaturalist and 0.10 on LAION; MMSE would make it 0.
+- **The share of rows at or above the final k-th best, by x0 = (t_fin - est0) / tau0, grows with the cluster's
+  zeta_fin** (iNaturalist, psi 5):
+
+  | x0 | zeta < 3 | 3 to 4.5 | >= 4.5 |
+  |---|---|---|---|
+  | 4 to 5 | 0 (3,724 rows) | 3.7e-3 (6,411) | 8.2e-3 (855) |
+  | 5 to 6 | 0 (6,335) | 7.3e-4 (16,350) | 1.9e-3 (3,116) |
+  | 6 to 8 | 0 (20,325) | 3.5e-5 (84,700) | 3.7e-5 (27,303) |
+
+  W2's psi tau keeps a row by x0 alone. The chance that a row near the cut is a neighbour depends on how far above its
+  cluster the threshold sits, and that is the term W2 lacks.
+- **Where as built's extra width falls.** Median tau_built / tau_corrected over index-path clusters at psi 5:
+
+  | dataset | all clusters | clusters holding a neighbour |
+  |---|---|---|
+  | iNaturalist | 1.069 | 1.133 |
+  | arxiv | 1.087 | 1.139 |
+  | yahoo | 1.036 | 1.055 |
+  | LAION | 1.010 | 1.016 |
+
+  The centre's term is largest where the query lines up with the cluster's centre, which is where neighbours are. The
+  extra width mimics a height term in part, by accident. On LAION it is too small to matter.
+
+3. Why that recall is cheap at the levels and dear through psi (lead 2)
+----------------------------------------------------------------------
+- At one psi every rule makes the same stop and path choices (section 1). A rule that drops fewer neighbours at the
+  levels therefore gains recall at the cost of the extra rows past the levels alone.
+- Modelled time at psi 5, iNaturalist:
+  - corrected, as built and height: 2,419, 2,418 and 2,418 us, at recall 0.976, 0.985 and 0.986;
+  - tail (below): 2,424 us at recall 0.992;
+  - corrected at psi 5.5: 2,946 us for 0.987.
+  Raising psi buys clusters, groups and stored vectors. Widening the levels buys rows through a 16 B level and a few
+  more through the randomised levels.
+- **A principled level dial from the stop's psi does not come out of W2's own model.** Equating marginal recall per
+  unit cost:
+  - opening a cluster at the stop's margin gives n_v Phi_bar(psi_s) expected neighbours for C_cl;
+  - keeping a row at x gives Phi_bar(x) for c_row;
+  - so Phi_bar(psi_l) = kappa Phi_bar(psi_s), with kappa = c_row n_v / C_cl, about 7 to 30 on iNaturalist;
+  - that gives psi_l of about 4.3 to 4.5 at psi_s 5, narrower than the stop.
+  The data say the opposite. The earlier psi - 1.5 dial lost everywhere, and every wider rule here wins. The Gaussian
+  row model misprices the neighbours' tail by orders of magnitude (Phi_bar(5) = 3e-7 against the 7e-4 to 2e-3 measured
+  above). So the coupling cannot be derived until the level's error model is selection-aware. Once it is (section 4),
+  one psi means a per-neighbour miss rate of about Phi_bar(psi) at both the stop and the levels. Sharing psi is then the
+  natural coupling, not an accident.
+
+4. The fixes, derived (`study_width_rule` in rust/src/v2/e2e.rs; the knob in q.rs and wrule.rs)
+---------------------------------------------------------------------------------------------
+Notation: tau is W2's (corrected) spread at the level, sigma = sigma_c(q) the cluster's spread along the query (the
+order state's), mu its centre score, t the running k-th best, zeta = (t - mu) / sigma, and f = max(0, 1 - tau^2 /
+sigma^2) the share of the cluster's score variance along the query that the level explains.
+
+**height** (the recommendation; library knob `LevelWidth::Height`, bindings `level_width = "height"`, ab_orders.py
+`--level-width height`).
+- Assumptions:
+  - a row's deviation d = s - mu and the level's error e are jointly Gaussian over the cluster;
+  - the estimate is a least-squares predictor of the score, so its error is uncorrelated with it (MMSE).
+- Then cov(e, d) = tau^2, and e given d has mean (1 - f) d and spread sqrt(f) tau.
+- A row scoring t is kept with probability Phi(psi) when the width is (1 - f)(t - mu) + psi sqrt(f) tau, that is
+  w = (sqrt(1 - f) max(0, zeta) + psi sqrt(f)) tau. zeta is taken at least 0: below the cluster's mean, the threshold
+  needs no shift.
+- No constant, and nothing stored beyond W2. The reader computes sigma from the coefficients it already holds (r
+  products), so the cost is a few flops per index-path cluster.
+- It is the earlier sampled-width round's "kappa = 1 - f" width, with W2's tau in place of a sample.
+- The assumption is measurably wrong in one direction: the neighbours' errors are about h tau, not sqrt(1 - f) h tau.
+  So height under-corrects. It still removes nearly every level drop at psi 5 and above: 6, 3, 2 and 0 per 1,000 on
+  iNaturalist, LAION, arxiv and yahoo, against corrected's 16, 20, 21 and 4.
+
+**tail**, the measured law instead of MMSE: w = (max(0, zeta) + psi sqrt(f)) tau.
+- The fitted slope a of z0 on h is 0.9 to 1.0, not a chosen constant, but it is an empirical regularity, not a
+  derivation.
+- It removes every level drop. On iNaturalist it is the best rule found (0.68 to 0.89 of corrected).
+- It passes 3 to 4 times height's rows past the deterministic levels on LAION and yahoo, and loses there at recall 0.99
+  (1.07 to 1.09 of corrected).
+
+**cross**, the stored cross form, as an oracle: e = c d + noise, with c = cov(e, d) / var(d) taken from every row of
+the cluster (what one more r x r form per cluster and level, like W2's M, would supply per query).
+- w = (cs max(0, zeta) + psi sqrt(1 - cs^2)) tau, with cs = min(1, c sigma / tau). MMSE's c gives height.
+- On iNaturalist it is about height (0.92 / 0.83 / 0.81 / 0.79 of corrected).
+- On LAION it is far worse: 48 neighbours per 1,000 dropped at the levels at both psi 5 and 6 (corrected 20 and 5),
+  and 1.27 and 3.5 times corrected's time to 0.9 and 0.95; 0.97 and 0.99 are not reached.
+- The cause: LAION's own regression is large (c 0.37, cs about 0.7), which cuts the spread term to 0.7 psi tau. The
+  neighbours' tail is wider than a linear-Gaussian conditional allows, so a more exact second moment narrows the width
+  where it should widen.
+- So one more stored form per cluster and level is not worth its 1 KB: the arxiv and yahoo runs are in cross-*.txt.
+
+Also run, as references for the width alone: corrected times 1.2 and 1.5 (a fitted multiplier, which is what this study
+was asked to avoid). Times 1.2 tracks height within a few percent everywhere; times 1.5 tracks tail.
+
+5. The results (fine grid: psi 2 to 9 by 0.25; fine-*.txt; fine-*-cost.txt)
+---------------------------------------------------------------------------
+Modelled time to recall 0.9 / 0.95 / 0.97 / 0.99, as a share of corrected's (cost.py; recall interpolated linearly in
+psi). Below 1 is faster.
+
+  dataset / filter        as built                 height                   tail                     corr x1.2
+  iNaturalist none        0.95/0.86/0.88/0.84      0.94/0.84/0.82/0.83      0.89/0.79/0.68/0.74      0.95/0.84/0.84/0.80
+              region-25   0.96/0.93/1.00/1.00      0.94/0.91/0.99/1.00      0.94/0.91/0.99/1.00      0.95/0.91/0.99/1.00
+  LAION       none        0.98/0.99/1.00/1.00      0.84/0.81/0.92/0.97      0.87/0.85/0.85/1.07      0.84/0.81/0.86/0.93
+              region-25   1.00/1.00/1.00/1.00      0.98/0.99/1.01/0.93      0.99/0.98/1.01/0.98      0.97/0.99/0.99/0.93
+  arxiv       none        0.90/0.93/0.85/0.98      0.88/0.86/0.70/0.82      0.89/0.87/0.72/0.86      0.89/0.88/0.73/0.93
+              region-25   0.96/0.97/0.97/1.00      0.96/0.97/0.97/0.93      0.97/0.97/0.98/0.94      0.96/0.97/0.97/0.93
+  yahoo       none        1.00/1.00/0.96/0.96      0.99/0.96/0.88/0.98      1.03/1.02/0.95/1.09      0.99/0.98/0.91/0.97
+              region-25   1.00/1.00/1.00/1.00      0.99/1.00/1.01/0.96      1.01/1.03/1.04/1.00      0.99/1.00/1.01/0.96
+
+Recall at psi 5 / 6, unfiltered (corrected -> height):
+- iNaturalist: 0.976 / 0.995 -> 0.986 / 0.998;
+- LAION: 0.934 / 0.976 -> 0.950 / 0.980;
+- arxiv: 0.934 / 0.981 -> 0.950 / 0.989;
+- yahoo: 0.897 / 0.962 -> 0.901 / 0.969.
+
+- Height is at or below as built in every cell but three region-25 cells, each within 0.7%. It is below corrected
+  everywhere unfiltered. The table for every rule is ratios.txt; yahoo's and arxiv's use fitted unit costs (section 7).
+- The filtered sets read most clusters directly, so the width has little to act on there.
+- psi moves: height reaches a given recall at a psi 0.1 to 0.35 lower than corrected's.
+
+6. The running threshold (lead 3)
+--------------------------------
+- In iNaturalist's index-path clusters at psi 5, (t_fin - t_run) / tau0 is 0 at the median and 0.27 at p90. In the
+  clusters holding a neighbour, which are opened earlier, it is 0.37 at the median and 1.7 at p90.
+- A neighbour scores at least t_fin, so a running t below t_fin only adds slack. Every rule drops fewer neighbours
+  against t_run than it would against t_fin. The running threshold costs rows, never recall, and calls for no change to
+  the error model.
+- Height takes zeta at t_run, which is the conservative side.
+
+7. The cost model
+-----------------
+T = a0 + c_vis read + sig spreads + c_open opened + c_byte sum_l enter_l bytes_l + c_full stored + c_grp groups, per
+query. bytes_l is each level's code bytes per row (from the code files). The unit costs come from these sources:
+- iNaturalist: the W2 phase profile (results/w-rule/profile-*.txt) against this study's counts for the same build and
+  constants:
+  - c_full = FULL / stored = 0.119, c_vis = (ORDER + CHOICE) / read = 2.6, sig = 2.2;
+  - c_open = (CLSETUP + INIT + LVSETUP + TABLES) / opened = 14.8;
+  - c_byte = (DECODE + BOUNDS) / byte-rows = 1.19e-4, the same at psi 5 and 6;
+  - c_grp = the remainder over groups = 620 (grp_us measured 600).
+  It reproduces the profile's mean QUERY (2,585 against 2,587). Against the timed medians it is within 0.86 to 1.15.
+- LAION: the same, with the unlisted phases (REPACK, COMPACT) put on opened: c_open 27.8, c_byte 1.55e-4, c_full 0.061,
+  c_vis 1.68, sig 0.85, c_grp 34.4. It matches the profile's means within 2%. It is 1.1 to 1.3 times the timed medians
+  (mean against median).
+- yahoo and arxiv have no W2 profile:
+  - c_byte is LAION's;
+  - c_full is scaled by bytes from the profiles (yahoo 0.034 from rand-sample's FULL; arxiv 0.092);
+  - c_grp and sig are the measured constants;
+  - a0 and c_open are fitted to the timed medians of 6f86a1c's run (fitcost.py: yahoo 117 and 13.5, arxiv 88 and 8.2),
+    within 0.84 to 1.11.
+  Read these two datasets' ratios as rough.
+- The rules differ, at one psi, only in rows past level 0 and the stored vectors behind them. So the ratios between
+  rules depend mostly on c_byte and c_full, both read straight from the profiles.
+
+8. The knob, its checks, and what stays the same
+-----------------------------------------------
+- `q::LevelWidth { W2, Height }`, `KnnReader::with_level`, `Adaptive::level` (W2 unless set), `CQ2::set_height`,
+  `wrule::height_factor`; bindings: `Index.level_width` ("w2" / "height"); ab_orders.py `--level-width`.
+- The library's Height against the study's hook rule (lib-*.txt): every count identical at psi 3 to 7, unfiltered and region-25, on iNaturalist, LAION and arxiv. lib:w2 equals the hook's corrected rule and this study's earlier runs.
+- Tests: cargo test --release --no-fail-fast gave 117 passed, 4 failed (the known synth4k four), 15 ignored; the second binary 4 passed. The exact-path hash is f1f482ad11b64d9e and knn2_fast's 90d7892d504ef425, both unchanged. The_statistical_width_drops_only_what_the_certified_width_keeps now covers Height and passes. wrule's the_height_width_is_w2s_at_the_cluster_mean_and_widens_above_it was written after that run and has not been run yet.
+- The exact paths and the approximate threshold query do not read the rule.
+- Study only: `q::WIDTH_HOOK` (an optional override of the factor of every index-path cluster k-NN opens at a W2 width,
+  for these studies); study_w_principled.
+
+Files
+-----
+- summary.txt;
+- table.py (counts), cost.py and fitcost.py (the cost model), analyse.py, post.py and nbfit.py (the error studies);
+- run_study.sh and queue*.sh (every run), costs-*.kv (the constants);
+- *.txt (summary lines), *.txt.nb (true neighbours on the index path), *.txt.cl (index-path clusters), *.txt.post
+  (iNaturalist's and LAION's error moments per cluster); the per-row file inat-post.txt.rows is not committed (52 MB).
+- build_wheel_03.sh is build_wheel_nice.sh on cores 0-3.
+
+Adopted (after the study): the height width is the reader's only level width
+--------------------------------------------------------------------------
+- `wrule::factor(psi, tau2, zeta, sigma, dwa, u)` is the height width.
+  - It returns the certified width (1) wherever an input is not finite, psi, tau^2, dwa or U is negative, sigma is not
+    above 0, or w / (dwa sqrt U) is not a number in [0, 1). A zeta below 0 is valid.
+  - It also returns the certified width where tau^2 >= sigma^2 (f <= 0), where the model does not apply (Joe's
+    choice). The study's `height` rule clamped f at 0 there instead, so this case may read more rows than the study
+    counted; it has not been measured.
+  - `CQ2::set_width` and `KnnReader::width` call it for every index-path cluster k-NN opens.
+- Deleted: the W2-only width (the old `factor` and `CQ2::set_w2`), `q::LevelWidth`, `KnnReader::with_level`,
+  `Adaptive::level`, the bindings' `level_width` and ab_orders.py's `--level-width`. Section 8's knob no longer exists.
+- Kept: W2's forms (tau comes from them).
+- Kept, now compiled only under test (`#[cfg(test)]`): `q::WIDTH_HOOK`, `WIDTH_HOOK_ON` and `WidthCall`. The ignored
+  study `study_w_principled` uses them; its mode `lib` reads the library's width.
+- Tests: cargo test --release --no-fail-fast gave 117 passed, 4 failed (the known synth4k four), 15 ignored; the second
+  binary 4 passed.
+  - The exact-path hash is f1f482ad11b64d9e and knn2_fast's 90d7892d504ef425, both unchanged.
+  - wrule's `the_factor_is_the_certified_width_where_it_cannot_be_less` covers the height width and every bad input.
+  - `the_statistical_width_drops_only_what_the_certified_width_keeps` covers the reader's width.
+- clippy --all-targets: the same 172 findings as 92afad9b7, including its 2 errors (approximate LN_2 and SQRT_2
+  constants), none in the changed code. cargo check on the bindings: clean.
+
+Raw per-cluster and per-neighbour dumps (*.cl, *.nb, *.rows; 692 MB) are not in the repository. They are kept
+locally at /home/joe/code/vexact-data/w-principled-raw/, and post.py, nbfit.py and analyse.py read them from there
+or from this folder.

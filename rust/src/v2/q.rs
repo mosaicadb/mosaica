@@ -65,6 +65,30 @@ pub static ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// Study only (VEXACT_DUMP): in verify mode, one record per (item, randomised level) checked, tagged with DUMP_TAG.
 pub static DUMP: std::sync::Mutex<Option<std::io::BufWriter<std::fs::File>>> = std::sync::Mutex::new(None);
 pub static DUMP_TAG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Study only (tests): what `WIDTH_HOOK` sees of an index-path cluster as k-NN opens it: the cluster, its group's and
+/// its own setup, the query's coefficients on its order directions, psi, the running k-th best t, and tau^2 per level.
+#[cfg(test)]
+pub struct WidthCall<'a> {
+    pub ix: &'a Index2,
+    pub pr: &'a Prep2,
+    pub ci: usize,
+    pub gq: &'a GQ2,
+    pub cq: &'a CQ2,
+    pub a: &'a [f32],
+    pub psi: f64,
+    pub t: f64,
+    pub tau2: [f64; NDL_MAX],
+}
+
+/// Study only (tests): when set (and `WIDTH_HOOK_ON`), the factor on each deterministic level's upper half-width of
+/// every index-path cluster k-NN opens at its level width, in place of `wrule::factor`'s.
+#[cfg(test)]
+pub type WidthHook = dyn Fn(&WidthCall) -> [f32; NDL_MAX] + Send + Sync;
+#[cfg(test)]
+pub static WIDTH_HOOK: std::sync::RwLock<Option<Box<WidthHook>>> = std::sync::RwLock::new(None);
+#[cfg(test)]
+pub static WIDTH_HOOK_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[inline(always)]
 pub fn tick() -> u64 {
     if PROF.load(std::sync::atomic::Ordering::Relaxed) { unsafe { core::arch::x86_64::_rdtsc() } } else { 0 }
@@ -75,7 +99,7 @@ pub struct GQ2 {
     // two products and their sum round, within about u (2 |q| + 2 sqrt n) of the exact value, far inside the
     // 1e-12 |qv| the bounds allow
     pub qv: Vec<f64>,
-    pub qv32: Vec<f32>, // qv in f32 (the W2 width's T, `w2_tau2`)
+    pub qv32: Vec<f32>, // qv in f32 (the W2 forms' T, `w2_tau2`)
     pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // qv*sig by coordinate (the deterministic levels' weights)
@@ -632,7 +656,7 @@ pub struct CQ2 {
     pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
     /// per deterministic level, the factor on the item intervals' upper half-width: the query's (`Prep2::dial`), or
-    /// the cluster's W2 width (`set_w2`)
+    /// the cluster's level width (`set_width`)
     pub ddial: [f32; NDL_MAX],
 }
 
@@ -647,13 +671,14 @@ pub struct IntDet {
 }
 
 impl CQ2 {
-    /// The deterministic levels read at the W2 width for `psi`: min(1, psi tau / (dwa_l sqrt U)) of each upper
-    /// half-width (`wrule::factor`), `tau2` cluster ci's predicted spread squared per level (`w2_tau2`).
-    pub fn set_w2(&mut self, ix: &Index2, ci: usize, psi: f64, tau2: &[f64]) {
+    /// The deterministic levels read at the level width for `psi` (`wrule::factor`): `tau2` cluster ci's predicted
+    /// spread squared per level (`w2_tau2`), `zeta` the running k-th best's height in the cluster, (t - mu) / sigma, and
+    /// `sigma` its spread along the query.
+    pub fn set_width(&mut self, ix: &Index2, ci: usize, psi: f64, tau2: &[f64], zeta: f64, sigma: f64) {
         let ndl = ix.meta.ndl();
-        let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+        let wf = ix.wforms.as_ref().expect("the level width reads the index's W2 forms");
         for (l, &t2) in tau2.iter().enumerate().take(ndl) {
-            self.ddial[l] = super::wrule::factor(psi, t2, self.dwa[l] as f64, wf.u(ndl, ci, l));
+            self.ddial[l] = super::wrule::factor(psi, t2, zeta, sigma, self.dwa[l] as f64, wf.u(ndl, ci, l));
         }
     }
 
@@ -1187,7 +1212,7 @@ const PF: usize = 8;
 /// `centred_sq2`); and tau^2 from a''s packed outer product and T' (`WForms::tau2_outer`).
 pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; NDL_MAX] {
     let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
-    let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
+    let wf = ix.wforms.as_ref().expect("the level width reads the index's W2 forms");
     let pm = wf.pm(ndl, ci);
     let mut ac = [0f32; super::order::R_MAX];
     for ((x, &aj), &y) in ac.iter_mut().zip(a).zip(pm) {
@@ -4001,8 +4026,10 @@ pub struct KnnReader<'a> {
     zcl: Vec<(usize, usize, f64, f64)>,
     /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
     z: (f64, f64, f64),
-    /// psi of the deterministic levels' W2 width (`with_width`)
+    /// psi of the deterministic levels' width (`with_width`)
     width: Option<f64>,
+    /// |q|^2 of the query's f32 values, once a rule needs it
+    qq: Option<f64>,
     /// the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
     pub coef: Option<[f32; super::order::R_MAX]>,
     pub st: Stats,
@@ -4012,24 +4039,37 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, qq: None, coef: None, st }
     }
 
-    /// The reader with each cluster's deterministic levels on the index path read at its W2 width for `psi` (at least
-    /// 0; infinity is the certified width; `CQ2::set_w2`), not at the query's dial.
+    /// The reader with each cluster's deterministic levels on the index path read at its level width for `psi` (at
+    /// least 0; infinity is the certified width; `CQ2::set_width`), not at the query's dial.
     pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
-        assert!(psi >= 0.0, "the W2 width needs a psi of at least 0, not {psi}");
+        assert!(psi >= 0.0, "the level width needs a psi of at least 0, not {psi}");
         self.width = Some(psi);
         self
     }
 
-    /// Cluster ci's W2 width on `cq` (its group's setup `gq`), from its coefficients on its order directions (given by
-    /// the caller, else computed as its sigma computes them; `w2_tau2`).
-    fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<[f32; super::order::R_MAX]>) {
+    /// Cluster ci's level width on `cq` (its group's setup `gq`) at the running k-th best t, from its coefficients on
+    /// its order directions (given by the caller, else computed as its sigma computes them): tau^2 from the W2 forms
+    /// (`w2_tau2`) and sigma_c(q) from the same coefficients, as `adaptive::sigma_of` computes it.
+    fn width(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<[f32; super::order::R_MAX]>, t: f64) {
         let (ix, st) = (self.ix, self.ix.order.as_ref().unwrap());
         let a = coef.unwrap_or_else(|| st.coefs_of(ci, ix.n(), &self.pr.q32));
         let tau2 = w2_tau2(ix, ci, gq, cq.alr as f64, &a[..st.r]);
-        cq.set_w2(ix, ci, psi, &tau2);
+        #[cfg(test)]
+        if WIDTH_HOOK_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(h) = WIDTH_HOOK.read().unwrap().as_ref() {
+                let d = h(&WidthCall { ix, pr: self.pr, ci, gq, cq, a: &a[..st.r], psi, t, tau2 });
+                cq.ddial[..ix.meta.ndl()].copy_from_slice(&d[..ix.meta.ndl()]);
+                return;
+            }
+        }
+        let qq = *self.qq.get_or_insert_with(|| self.pr.q32.iter().map(|&x| x as f64 * x as f64).sum());
+        let (r, lam) = (st.r, &st.lam[ci * st.r..(ci + 1) * st.r]);
+        let (v, pp) = a[..r].iter().zip(lam).fold((0f64, 0f64), |(v, pp), (&x, &l)| (v + l as f64 * x as f64 * x as f64, pp + x as f64 * x as f64));
+        let sigma = (v + st.rest(ci) * (qq - pp).max(0.0)).max(0.0).sqrt();
+        cq.set_width(ix, ci, psi, &tau2, (t - cq.qm as f64) / sigma, sigma);
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -4146,7 +4186,7 @@ impl<'a> KnnReader<'a> {
                 let tq = tick();
                 let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
                 if let Some(psi) = self.width {
-                    self.w2(ci, gq, &mut cq, psi, coef);
+                    self.width(ci, gq, &mut cq, psi, coef, t);
                 }
                 self.st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };

@@ -1,0 +1,21 @@
+
+running 1 test
+no index is saved in /home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized (/home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized/encoded/index.json: No such file or directory (os error 2)); create it (v2::create; vexact --vectors VECTORS.npy --index /home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized create), or rebuild it from its fit (v2::rebuild; vexact --v2 --index /home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized --rebuild)
+[build2] fit loaded; anon 43 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 677305 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 6.7s (sub-Gaussian c = 8.482): [([47], 5.994, ExactTail), ([47, 63, 127, 143], 7.805, Certificate), ([47, 127], 7.551, ConvexOrder)]
+[build2] plans 7.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.02e-12; rates g0 [[4.0, 0.0, 0.0, 0.0], [5.0, 1.0, 1.0, 0.5], [5.0, 4.0, 3.0, 1.0], [7.0, 6.0, 5.0, 3.0]]
+[build2] calibration sample 437769 items from 339 clusters
+[build2] calibrated 23.3s; anon 387 MB
+[build2] encoded 31.9s, with it the support table of 339 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 3.7 thread-seconds); anon 503 MB
+[build2] W2 forms: 1.4 thread-seconds of sums during the encoding, then 0.1s
+[build2] assembled 32.4s; anon 517 MB; x2 bound 3.052e-4; escapes: det norms 24, |y| 2597, kappa 9908, tan 16991; code hash 25d0c4be6d18a504
+[build2] saved to /home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized/encoded; store hash 20cbffa3efe8ca0c
+[repack] occupancy thresholds by level [0.14, 0.13, 0.06, 0.11, 0.14, 0.2] (timed in 0.0s)
+/home/joe/code/vexact-data/wfix/yahoo-minilm-384-normalized: 1 queries, k 10, groups 64, levels 6 (2 deterministic); constants dir_us=0.33275346244492665 row_us_1=0.05838642318847739 row_us_4=0.06739089398683053 row_us_16=0.0643012715035612 row_us_64=0.04075557055418718 cl_us=6.476082145715738 cut_row_us_1=0.01577707651834586 cut_row_us_4=0.05790106774349917 cut_row_us_16=0.11814367322169392 cut_row_us_64=0.21889665317413246 cut_us=1.2053125 grp_us=32.509 sig_us=0.90934375 
+none       corr         psi=2: recall 0.3000 visited 1.0 direct 0.0 index 1.0 opened 1.0 groups 1.00 spreads 8.0 batched 0.0 stored 736 touched 2414 past_det 1231 enter 2404/1475/1231/1231/864/342/95 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+test v2::e2e::study_w_principled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 32.89s
+

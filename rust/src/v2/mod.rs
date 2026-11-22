@@ -1260,7 +1260,7 @@ pub struct Index2 {
     /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
     /// None for an index without stored vectors.
     pub order: Option<Arc<order::OrderState>>,
-    /// The W2 width's stored forms (`wrule::WForms`; a compaction shares its parent's); None for an index without
+    /// The W2 forms, the level width's tau (`wrule::WForms`; a compaction shares its parent's); None for an index without
     /// stored vectors.
     pub wforms: Option<Arc<wrule::WForms>>,
 }

@@ -2324,7 +2324,7 @@ fn thr_plans() -> [(&'static str, Plan); 2] {
     [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
 }
 
-/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at the W2 width) and
+/// The query's dial leaves the deterministic levels certified (k-NN sets them cluster by cluster, at their level width) and
 /// reads a randomised level at min(1, psi / c) of its half-width; every level is certified when psi is infinite.
 #[test]
 fn the_query_dial_leaves_the_deterministic_levels_to_the_reader() {
@@ -2469,8 +2469,8 @@ fn the_w2_spread_takes_the_centre_term_off() {
     assert!(checked > 0 && moved > 0, "{checked} spreads checked, {moved} moved by the centre's term");
 }
 
-/// A cluster read on the index path at the W2 width (each deterministic level at min(1, psi tau / (dwa sqrt U)) of its
-/// half-width, tau from the cluster's stored forms) sends on from each level no row the certified width would drop:
+/// A cluster read on the index path at its level width (each deterministic level at `wrule::factor` of its half-width,
+/// tau from the cluster's stored forms) sends on from each level no row the certified width would drop:
 /// against the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and
 /// the items it finds above t are among those the certified read finds, each with its own score. Over synth4k's
 /// clusters of at least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels,
@@ -4881,4 +4881,330 @@ fn study_layered_group_timing() {
         let sp = if a == 0 { String::new() } else { format!(" | clusters read directly {:.1}, on the index path {:.1}, groups set up {:.1}; with a group's setup priced at 0: directly {:.1}, index path {:.1}", split[a][0], split[a][1], split[a][2], split[a][3], split[a][4]) };
         eprintln!("{name:<20} median {:.0} mean {:.0} recall {:.4}{sp}", v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, recall[a]);
     }
+}
+
+/// The study rules for the approximate k-NN's deterministic-level width (`study_w_principled`), each a width w in score
+/// units per level, read as min(1, w / (dwa sqrt U)) of each row's upper half-width, as `wrule::factor` reads its w:
+/// - `corr`: W2's psi tau (the centre's term taken off), the reader's width before the height width;
+/// - `built`: W2 as first built, tau from D = qv d_l and a = P'q (the centre's term left in);
+/// - `height`: the conditional width, w = sqrt(1 - f) max(0, zeta) tau + psi sqrt(f) tau, f = max(0, 1 - tau^2 /
+///   sigma^2) and zeta = (t - mu) / sigma at the running k-th best t (mu, sigma the cluster's centre score and spread);
+/// - `tail`: the width for a true neighbour's error being its height (e / tau = h, measured), w = (max(0, zeta) + psi
+///   sqrt(f)) tau; `tailp` the same with psi tau for the spread;
+/// - `cross`: e = c d + noise with c the error's regression on the row's deviation (an oracle from every row of the
+///   cluster), w = (cs max(0, zeta) + psi sqrt(1 - cs^2)) tau, cs = min(1, c sigma / tau); MMSE's c gives `height`;
+/// - `x<c>` after a rule's name (e.g. `corrx1.2`): its w times c.
+///
+/// Each call adds a record of the cluster to `STUDY_REC`.
+fn study_width_rule(mode: &str) -> Box<WidthHook> {
+    let (base, mul) = match mode.split_once('x') {
+        Some((b, c)) => (b.to_string(), c.parse::<f64>().unwrap()),
+        None => (mode.to_string(), 1.0),
+    };
+    Box::new(move |c: &WidthCall| {
+        let (ix, ndl, n) = (c.ix, c.ix.meta.ndl(), c.ix.n());
+        let (wf, st) = (ix.wforms.as_ref().unwrap(), ix.order.as_ref().unwrap());
+        let built = w2_tau2(ix, c.ci, c.gq, 0.0, c.a);
+        let qq: f64 = c.pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
+        let mut p = vec![0f32; st.r];
+        let sigma = adaptive::sigma_of(st, st.rest(c.ci), n, c.ci, &c.pr.q32, qq, &mut p);
+        let mu = c.cq.qm as f64;
+        let zeta = (c.t - mu) / sigma;
+        let mut d = [1f32; NDL_MAX];
+        let mut w = [0f64; NDL_MAX];
+        for l in 0..ndl {
+            let tau = if base == "built" { built[l] } else { c.tau2[l] }.max(0.0).sqrt();
+            let f = (1.0 - tau * tau / (sigma * sigma)).max(0.0);
+            w[l] = mul * match base.as_str() {
+                "corr" | "built" => c.psi * tau,
+                "height" => ((1.0 - f).sqrt() * zeta.max(0.0) + c.psi * f.sqrt()) * tau,
+                "tail" => (zeta.max(0.0) + c.psi * f.sqrt()) * tau,
+                "cross" => {
+                    // the error's regression on the row's deviation, cov(e, d) / var(d), from every row of the cluster
+                    // (an oracle for a stored cross form), in tau units of sigma: cs = c sigma / tau, at most 1
+                    let cs = (oracle_c(c, l) * sigma / tau).clamp(0.0, 1.0);
+                    (cs * zeta.max(0.0) + c.psi * (1.0 - cs * cs).sqrt()) * tau
+                }
+                "tailp" => (zeta.max(0.0) + c.psi) * tau,
+                _ => panic!("no width rule {base}"),
+            };
+            let x = w[l] / (c.cq.dwa[l] as f64 * wf.u(ndl, c.ci, l).sqrt());
+            d[l] = if (0.0..1.0).contains(&x) { x as f32 } else { 1.0 };
+        }
+        STUDY_REC.with(|r| r.borrow_mut().push(StudyRec { ci: c.ci, t: c.t, mu, sigma, alr: c.cq.alr as f64, tau: c.tau2.map(|x| x.max(0.0).sqrt()), built: built.map(|x| x.max(0.0).sqrt()), w, dial: d }));
+        d
+    })
+}
+
+/// The `cross` rule's oracle: over every row of the hook's cluster, cov(e, d) / var(d) at deterministic level l, e the
+/// error of the row's interval midpoint (certified width) and d = s - mu its deviation, s from its stored vector.
+fn oracle_c(c: &WidthCall, l: usize) -> f64 {
+    let (ix, pr, ci) = (c.ix, c.pr, c.ci);
+    let cl = &ix.cl[ci];
+    let nr = cl.r1 - cl.r0;
+    let mut st = crate::kernel::Stats::new(ix.meta.nl());
+    let cands: Vec<u32> = (0..nr as u32).collect();
+    let (mut sv, mut rin, mut pend, mut iv) = (State::default(), Vec::new(), Vec::new(), Vec::new());
+    let mut cq = open_cluster(ix, ci, c.gq, pr, c.cq.qm as f64, Plan::default(), false);
+    cq.ddial = [1.0; NDL_MAX];
+    let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+    unsafe { run_cluster(ix, ci, pr, c.gq, &mut cq, &cands, f64::NAN, Mode2::Interval(l), false, &mut sv, &mut st, &mut ro) };
+    let (mut n, mut sd, mut se, mut sdd, mut sde) = (0f64, 0f64, 0f64, 0f64, 0f64);
+    for x in &iv {
+        let s = unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(x.0 as usize)) } as f64;
+        let (d, e) = (s - c.cq.qm as f64, s - (x.1 as f64 + x.2 as f64) / 2.0);
+        (n, sd, se, sdd, sde) = (n + 1.0, sd + d, se + e, sdd + d * d, sde + d * e);
+    }
+    let var = sdd / n - (sd / n).powi(2);
+    (sde / n - sd * se / (n * n)) / var
+}
+
+/// One index-path cluster as `study_width_rule` saw it.
+#[derive(Clone)]
+struct StudyRec {
+    ci: usize,
+    t: f64,
+    mu: f64,
+    sigma: f64,
+    alr: f64,
+    tau: [f64; NDL_MAX],
+    built: [f64; NDL_MAX],
+    w: [f64; NDL_MAX],
+    dial: [f32; NDL_MAX],
+}
+
+thread_local! {
+    static STUDY_REC: std::cell::RefCell<Vec<StudyRec>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Study (ignored; run by hand on a fit, rebuilt when stale): approximate k-NN (`Adaptive::knn`, the real reader) with
+/// the deterministic levels' width under each study rule (`study_width_rule`, through `q::WIDTH_HOOK`), with the
+/// measured constants fixed from a file (DIAG_COSTS, `Measured::to_kv`'s lines) so that every rule meets the same path
+/// choices for the same running k-th best. For each visible set, rule and psi, over the prep's queries: recall@10, the
+/// clusters read, read directly and opened on the index path, groups, spreads, rows entering each level, stored vectors
+/// read and rows past the deterministic levels (means per query). With DIAG_MISS, each true neighbour of each query
+/// is classed: found, or missed with its cluster unread or dropped at a level of its index-path read (that cluster
+/// read again alone with the same width and running k-th best); and for those in index-path clusters its height
+/// h = (s - mu) / sigma, the threshold's zeta = (t - mu) / sigma, and its error over tau at each deterministic level
+/// (the interval's midpoint). Writes DIAG_OUT (the summary lines), DIAG_OUT.nb (one line per true neighbour in an
+/// index-path cluster) and DIAG_OUT.cl (one line per index-path cluster). DIAG_DIR, DIAG_PREP, DIAG_SETS (none,...),
+/// DIAG_MODES (study rules, or lib for the library's own width, `height`), DIAG_PSIS, DIAG_THREADS (4), DIAG_NQ (all).
+#[test]
+#[ignore]
+fn study_w_principled() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let env = |k: &str| std::env::var(k).ok();
+    let dir = env("DIAG_DIR").unwrap();
+    let prep = env("DIAG_PREP").unwrap();
+    let outp = env("DIAG_OUT").unwrap();
+    let sets: Vec<String> = env("DIAG_SETS").unwrap_or("none".into()).split(',').map(String::from).collect();
+    let modes: Vec<String> = env("DIAG_MODES").unwrap_or("built,corr".into()).split(',').map(String::from).collect();
+    let psis: Vec<f64> = env("DIAG_PSIS").unwrap_or("2,3,4,5,6,7,8,9".into()).split(',').map(|s| s.parse().unwrap()).collect();
+    let threads: usize = env("DIAG_THREADS").map_or(4, |s| s.parse().unwrap());
+    let miss = env("DIAG_MISS").is_some();
+    // DIAG_POST: every visible row of every index-path cluster at these psis, scored exactly and given its interval
+    // midpoint at each deterministic level (certified width), for the error's moments per cluster and the rows near
+    // the final k-th best
+    let post: Vec<f64> = env("DIAG_POST").map_or(Vec::new(), |s| s.split(',').map(|x| x.parse().unwrap()).collect());
+    let kk = 10;
+    let m = adaptive::Measured::from_kv(&std::fs::read_to_string(env("DIAG_COSTS").unwrap()).unwrap()).unwrap();
+    let mut log = |s: String| eprintln!("{s}");
+    let (_, ix) = match open(&dir, &OpenOptions::default(), &mut log) {
+        Ok(x) => x,
+        Err(e) => {
+            eprintln!("{e}");
+            rebuild(&dir, &BuildOptions::default(), &mut log).unwrap()
+        }
+    };
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let (n, nl, ndl) = (ix.n(), ix.meta.nl(), ix.meta.ndl());
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let mut nq = qs.len() / d;
+    if let Some(x) = env("DIAG_NQ") {
+        nq = nq.min(x.parse().unwrap());
+    }
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| {
+        let mut v = vec![0f32; n];
+        v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]);
+        v
+    }).collect();
+    let plan = Plan::default();
+    let cl_of = |row: usize| ix.cl.partition_point(|c| c.r1 <= row);
+    let mut out = std::fs::File::create(&outp).unwrap();
+    let mut onb = std::fs::File::create(format!("{outp}.nb")).unwrap();
+    let mut ocl = std::fs::File::create(format!("{outp}.cl")).unwrap();
+    let mut opo = std::fs::File::create(format!("{outp}.post")).unwrap();
+    let mut opr = std::fs::File::create(format!("{outp}.rows")).unwrap();
+    writeln!(opo, "set mode psi qi ci n mu sigma t_run t_fin tau0 built0 tau1 built1 mean_d sd_d mean_e0 sd_e0 cov_e0_d cov_e0_est0 mean_e1 sd_e1 cov_e1_d above").unwrap();
+    writeln!(opr, "set mode psi qi ci above h x0 x0b x1 x1b").unwrap();
+    writeln!(onb, "set mode psi qi ent ci fate h zeta z0 z1 tau0_sig tau1_sig built0_tau0 built1_tau1 dial0 dial1 w0_tau0").unwrap();
+    writeln!(ocl, "set mode psi qi ci t_mu_sig tau0_sig tau1_sig built0_tau0 built1_tau1 dial0 dial1 alr holds").unwrap();
+    let head = format!("{dir}: {nq} queries, k {kk}, groups {}, levels {nl} ({ndl} deterministic); constants {}", ix.groups.len(), m.to_kv().replace('\n', " "));
+    eprintln!("{head}");
+    writeln!(out, "# {head}").unwrap();
+    for set in &sets {
+        let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+        let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+        let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
+        let (ow, ord) = (on.shape[1], on.i32s());
+        for mode in &modes {
+            // "lib": the library's own width, no hook and no records
+            let lib = mode == "lib";
+            *WIDTH_HOOK.write().unwrap() = (!lib).then(|| study_width_rule(mode));
+            WIDTH_HOOK_ON.store(!lib, Ordering::Relaxed);
+            for &psi in &psis {
+                // per query: the counts, then the lines for .nb and .cl
+                let next = AtomicUsize::new(0);
+                let res: Vec<(usize, Vec<f64>, String, String, String, String)> = std::thread::scope(|s| {
+                    let hs: Vec<_> = (0..threads).map(|_| s.spawn(|| {
+                        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+                        let mut got = Vec::new();
+                        pool.install(|| loop {
+                            let qi = next.fetch_add(1, Ordering::Relaxed);
+                            if qi >= nq {
+                                break;
+                            }
+                            let q = &qsp[qi][..];
+                            STUDY_REC.with(|r| r.borrow_mut().clear());
+                            let (o, info) = ad.knn(&ix, q, kk, vis.as_ref(), psi, plan);
+                            let recs = STUDY_REC.with(|r| std::mem::take(&mut *r.borrow_mut()));
+                            let truth: Vec<u32> = ord[qi * ow..qi * ow + kk].iter().map(|&e| e as u32).collect();
+                            let found: std::collections::HashSet<u32> = o.ents.iter().map(|x| x.1).collect();
+                            let recall = truth.iter().filter(|e| found.contains(e)).count() as f64 / kk as f64;
+                            // misses: [unread, read directly, dropped at each level, dropped at no level, kept but not returned]
+                            let mut cls = vec![0f64; 4 + nl];
+                            let (mut nbl, mut cll) = (String::new(), String::new());
+                            let holds: std::collections::HashSet<usize> = truth.iter().map(|&e| cl_of(ix.row_of_ent(e))).collect();
+                            for r in &recs {
+                                let s = |x: f64| x / r.sigma;
+                                cll += &format!("{set} {mode} {psi} {qi} {} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {}\n", r.ci, s(r.t - r.mu), s(r.tau[0]), s(r.tau[1.min(ndl - 1)]), r.built[0] / r.tau[0], r.built[1.min(ndl - 1)] / r.tau[1.min(ndl - 1)], r.dial[0], r.dial[1.min(ndl - 1)], r.alr, holds.contains(&r.ci) as u8);
+                            }
+                            if miss {
+                                let mut pr = prep2(&ix, q).unit();
+                                pr.dial = ad.dial(psi);
+                                for &e in &truth {
+                                    let row = ix.row_of_ent(e);
+                                    let ci = cl_of(row);
+                                    let rec = recs.iter().find(|r| r.ci == ci);
+                                    let hit = found.contains(&e);
+                                    let Some(r) = rec else {
+                                        if !hit {
+                                            cls[if info.read.contains(&(ci as u32)) { 1 } else { 0 }] += 1.0;
+                                        }
+                                        continue;
+                                    };
+                                    let mut st = crate::kernel::Stats::new(nl);
+                                    let gq = get_gq2(&ix, &pr, ix.cl[ci].g, &mut st);
+                                    let qm = pr.qm(&ix, ci);
+                                    let idx = (row - ix.cl[ci].r0) as u32;
+                                    let sc = unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(row)) } as f64;
+                                    // the row's decision as the reader made it, and its interval midpoints at the certified width
+                                    let mut sv = State::default();
+                                    let (mut rin, mut pend) = (Vec::new(), Vec::new());
+                                    let mut cq = open_cluster(&ix, ci, gq, &pr, qm, plan, plan.int_det);
+                                    cq.ddial[..ndl].copy_from_slice(&r.dial[..ndl]);
+                                    let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: None };
+                                    unsafe { run_cluster(&ix, ci, &pr, gq, &mut cq, &[idx], r.t, Mode2::Thr, false, &mut sv, &mut st, &mut ro) };
+                                    let kept = !rin.is_empty() || !pend.is_empty();
+                                    let lv = (0..nl).find(|&l| st.dec_out[l] > 0);
+                                    let fate = if kept { if hit { "found".to_string() } else { "kept-lost".to_string() } } else { lv.map_or("none".into(), |l| format!("drop{l}")) };
+                                    if !hit {
+                                        cls[if kept { 3 + nl } else { 2 + lv.unwrap_or(nl) }] += 1.0;
+                                    }
+                                    let mut z = [0f64; 2];
+                                    for (l, zl) in z.iter_mut().enumerate().take(ndl.min(2)) {
+                                        let mut iv = Vec::new();
+                                        let mut cq = open_cluster(&ix, ci, gq, &pr, qm, plan, false);
+                                        cq.ddial = [1.0; NDL_MAX];
+                                        let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+                                        unsafe { run_cluster(&ix, ci, &pr, gq, &mut cq, &[idx], f64::NAN, Mode2::Interval(l), false, &mut sv, &mut st, &mut ro) };
+                                        *zl = iv.first().map_or(f64::NAN, |x| (sc - (x.1 as f64 + x.2 as f64) / 2.0) / r.tau[l]);
+                                    }
+                                    let l1 = 1.min(ndl - 1);
+                                    nbl += &format!("{set} {mode} {psi} {qi} {e} {ci} {fate} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}\n", (sc - r.mu) / r.sigma, (r.t - r.mu) / r.sigma, z[0], z[1], r.tau[0] / r.sigma, r.tau[l1] / r.sigma, r.built[0] / r.tau[0], r.built[l1] / r.tau[l1], r.dial[0], r.dial[l1], r.w[0] / r.tau[0]);
+                                }
+                            }
+                            let (mut pol, mut prl) = (String::new(), String::new());
+                            if post.contains(&psi) && vis.is_none() {
+                                let mut pr = prep2(&ix, q).unit();
+                                pr.dial = ad.dial(psi);
+                                let score = |row: usize| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(row)) } as f64;
+                                let mut tv: Vec<f64> = truth.iter().map(|&e| score(ix.row_of_ent(e))).collect();
+                                tv.sort_by(f64::total_cmp);
+                                let t_fin = tv[0];
+                                for r in &recs {
+                                    let (ci, c) = (r.ci, &ix.cl[r.ci]);
+                                    let nr = c.r1 - c.r0;
+                                    let mut st = crate::kernel::Stats::new(nl);
+                                    let gq = get_gq2(&ix, &pr, c.g, &mut st);
+                                    let qm = pr.qm(&ix, ci);
+                                    let cands: Vec<u32> = (0..nr as u32).collect();
+                                    let sc: Vec<f64> = (c.r0..c.r1).map(score).collect();
+                                    let mut est = vec![vec![f64::NAN; nr]; 2];
+                                    for (l, el) in est.iter_mut().enumerate().take(ndl.min(2)) {
+                                        let (mut sv, mut rin, mut pend, mut iv) = (State::default(), Vec::new(), Vec::new(), Vec::new());
+                                        let mut cq = open_cluster(&ix, ci, gq, &pr, qm, plan, false);
+                                        cq.ddial = [1.0; NDL_MAX];
+                                        let mut ro = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+                                        unsafe { run_cluster(&ix, ci, &pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(l), false, &mut sv, &mut st, &mut ro) };
+                                        for x in &iv {
+                                            el[x.0 as usize - c.r0] = (x.1 as f64 + x.2 as f64) / 2.0;
+                                        }
+                                    }
+                                    let nf = nr as f64;
+                                    let mean = |v: &mut dyn Iterator<Item = f64>| v.sum::<f64>() / nf;
+                                    let d: Vec<f64> = sc.iter().map(|&x| x - r.mu).collect();
+                                    let e: Vec<Vec<f64>> = (0..2).map(|l| (0..nr).map(|i| sc[i] - est[l][i]).collect()).collect();
+                                    let md = mean(&mut d.iter().copied());
+                                    let me: Vec<f64> = (0..2).map(|l| mean(&mut e[l].iter().copied())).collect();
+                                    let cov = |a: &[f64], ma: f64, b: &[f64], mb: f64| a.iter().zip(b).map(|(x, y)| (x - ma) * (y - mb)).sum::<f64>() / nf;
+                                    let est0: Vec<f64> = est[0].clone();
+                                    let mest0 = mean(&mut est0.iter().copied());
+                                    let above = sc.iter().filter(|&&x| x >= t_fin).count();
+                                    let l1 = 1.min(ndl - 1);
+                                    pol += &format!("{set} {mode} {psi} {qi} {ci} {nr} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6e} {:.6e} {:.6} {:.6} {:.6e} {above}\n",
+                                        r.mu, r.sigma, r.t, t_fin, r.tau[0], r.built[0], r.tau[l1], r.built[l1], md, cov(&d, md, &d, md).sqrt(), me[0], cov(&e[0], me[0], &e[0], me[0]).sqrt(),
+                                        cov(&e[0], me[0], &d, md), cov(&e[0], me[0], &est0, mest0), me[1], cov(&e[1], me[1], &e[1], me[1]).sqrt(), cov(&e[1], me[1], &d, md));
+                                    for i in 0..nr {
+                                        let x0 = (t_fin - est[0][i]) / r.tau[0];
+                                        if x0 <= 12.0 {
+                                            prl += &format!("{set} {mode} {psi} {qi} {ci} {} {:.4} {:.4} {:.4} {:.4} {:.4}\n", (sc[i] >= t_fin) as u8, d[i] / r.sigma, x0, (t_fin - est[0][i]) / r.built[0], (t_fin - est[1][i]) / r.tau[l1], (t_fin - est[1][i]) / r.built[l1]);
+                                        }
+                                    }
+                                }
+                            }
+                            let st = &o.st;
+                            let mut v = vec![recall, info.read.len() as f64, info.direct as f64, info.index as f64, st.clusters_open as f64, info.groups as f64, info.spreads as f64, info.batched as f64, st.full_reads as f64, st.touched as f64];
+                            v.extend((0..=nl).map(|l| st.enter.get(l).copied().unwrap_or(0) as f64));
+                            v.extend(cls);
+                            got.push((qi, v, nbl, cll, pol, prl));
+                        });
+                        got
+                    })).collect();
+                    hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
+                });
+                let mut res = res;
+                res.sort_by_key(|x| x.0);
+                let w = res[0].1.len();
+                let mean: Vec<f64> = (0..w).map(|j| res.iter().map(|x| x.1[j]).sum::<f64>() / nq as f64).collect();
+                let enter: Vec<String> = (0..=nl).map(|l| format!("{:.0}", mean[10 + l])).collect();
+                let c0 = 11 + nl;
+                let lv: Vec<String> = (0..nl).map(|l| format!("{:.0}", mean[c0 + 2 + l] * nq as f64)).collect();
+                let line = format!("{set:<10} {mode:<12} psi={psi}: recall {:.4} visited {:.1} direct {:.1} index {:.1} opened {:.1} groups {:.2} spreads {:.1} batched {:.1} stored {:.0} touched {:.0} past_det {:.0} enter {} | misses (all queries): unread {:.0} direct {:.0} dropped by level {} kept {:.0}",
+                    mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], mean[6], mean[7], mean[8], mean[9], mean[10 + ndl], enter.join("/"), mean[c0] * nq as f64, mean[c0 + 1] * nq as f64, lv.join("/"), mean[c0 + 3 + nl] * nq as f64);
+                eprintln!("{line}");
+                writeln!(out, "{line}").unwrap();
+                for x in &res {
+                    onb.write_all(x.2.as_bytes()).unwrap();
+                    ocl.write_all(x.3.as_bytes()).unwrap();
+                    opo.write_all(x.4.as_bytes()).unwrap();
+                    opr.write_all(x.5.as_bytes()).unwrap();
+                }
+            }
+        }
+    }
+    WIDTH_HOOK_ON.store(false, Ordering::Relaxed);
+    *WIDTH_HOOK.write().unwrap() = None;
 }

@@ -1,0 +1,13 @@
+
+running 1 test
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/joe/code/vexact-data/wfix/laion-clip-512-normalized/encoded in 0.233s: 1000448 rows, 500 clusters; when built: code hash f282d680b4f756a9, store hash 2107fc24c7d63498
+[repack] occupancy thresholds by level [0.13, 0.11, 0.06, 0.1, 0.13, 0.16] (timed in 0.0s)
+[open] 0.423s in all: fit read 0.140s, key 0.011s, index opened 0.235s, repack timed 0.037s; anon 113 MB
+/home/joe/code/vexact-data/wfix/laion-clip-512-normalized: 100 queries, k 10, groups 64, levels 6 (2 deterministic); constants dir_us=0.49489130373677603 row_us_1=0.05656737992859773 row_us_4=0.06340049438008871 row_us_16=0.06000590455718017 row_us_64=0.03743814456134723 cl_us=6.518089568808356 cut_row_us_1=0.017560666031925198 cut_row_us_4=0.06023436530520597 cut_row_us_16=0.11940428153149181 cut_row_us_64=0.22497497116475673 cut_us=1.4570625 grp_us=36.33 sig_us=0.87071875 
+none       built        psi=5: recall 0.9370 visited 29.6 direct 1.0 index 28.6 opened 28.6 groups 10.77 spreads 36.6 batched 0.0 stored 2278 touched 61101 past_det 3175 enter 60263/5130/3175/3170/2518/1180/489 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+none       built        psi=6: recall 0.9760 visited 78.0 direct 2.5 index 75.5 opened 75.5 groups 21.28 spreads 85.0 batched 0.1 stored 3594 touched 156206 past_det 5184 enter 154094/11660/5184/5179/3780/1310/530 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+test v2::e2e::study_w_principled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 0.79s
+
