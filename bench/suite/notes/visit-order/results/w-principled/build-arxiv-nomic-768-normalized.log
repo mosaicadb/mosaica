@@ -1,0 +1,22 @@
+
+running 1 test
+no index is saved in /home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized (/home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized/encoded/index.json: No such file or directory (os error 2)); create it (v2::create; vexact --vectors VECTORS.npy --index /home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized create), or rebuild it from its fit (v2::rebuild; vexact --v2 --index /home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized --rebuild)
+[build2] fit loaded; anon 158 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 2097152 (2^21; 1344643 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 36.6657
+[build2] randomised constants 8.2s (sub-Gaussian c = 8.563): [([95], 6.98, ExactTail), ([95, 127, 255, 287], 8.041, Certificate)]
+[build2] plans 14.0s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 3.0, 1.0, 0.25], [5.0, 4.0, 2.0, 1.0]]
+[build2] calibration sample 494394 items from 672 clusters
+[build2] calibrated 38.2s; anon 1021 MB
+test v2::e2e::study_w_principled has been running for over 60 seconds
+[build2] encoded 110.8s, with it the support table of 672 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 28.6 thread-seconds); anon 1189 MB
+[build2] W2 forms: 9.9 thread-seconds of sums during the encoding, then 0.8s
+[build2] assembled 112.7s; anon 1232 MB; x2 bound 1.564e-4; escapes: det norms 35, |y| 3784, kappa 14362, tan 33131; code hash 54cb35f7407f53f5
+[build2] saved to /home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized/encoded; store hash 3ddad1528ea82f15
+[repack] occupancy thresholds by level [0.13, 0.12, 0.25, 0.11, 0.15, 0.18] (timed in 0.0s)
+/home/joe/code/vexact-data/wfix/arxiv-nomic-768-normalized: 1 queries, k 10, groups 64, levels 6 (2 deterministic); constants dir_us=0.33275346244492665 row_us_1=0.05838642318847739 row_us_4=0.06739089398683053 row_us_16=0.0643012715035612 row_us_64=0.04075557055418718 cl_us=6.476082145715738 cut_row_us_1=0.01577707651834586 cut_row_us_4=0.05790106774349917 cut_row_us_16=0.11814367322169392 cut_row_us_64=0.21889665317413246 cut_us=1.2053125 grp_us=32.509 sig_us=0.90934375 
+none       corr         psi=2: recall 1.0000 visited 1.0 direct 0.0 index 1.0 opened 1.0 groups 1.00 spreads 8.0 batched 0.0 stored 601 touched 2129 past_det 857 enter 2119/1028/857/829/457/231/88 | misses (all queries): unread 0 direct 0 dropped by level 0/0/0/0/0/0 kept 0
+test v2::e2e::study_w_principled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 115.76s
+

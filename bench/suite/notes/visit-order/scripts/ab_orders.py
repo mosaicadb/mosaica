@@ -13,7 +13,7 @@
 # deterministic levels.
 # usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
 #        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
-#        [--index DIR]
+#        [--index DIR] [--level-width w2|height]
 import argparse
 import os
 import random
@@ -46,6 +46,8 @@ def main():
     ap.add_argument("--nq", type=int, default=0, help="the first this many queries (0: all)")
     ap.add_argument("--index", default="", help="the index directory (default: the suite's work directory); give each "
                     "build of the library its own copy (`cp -al` of the fit), since a build re-encodes a stale index")
+    ap.add_argument("--level-width", default="", help="the adaptive arm's deterministic-level width rule (w2, height; "
+                    "default the library's)")
     a = ap.parse_args()
     data = os.environ["SUITE_DATA"]
     prep = Prep(prep_dir(data, a.dataset))
@@ -62,6 +64,9 @@ def main():
           f"{'threshold' if a.threshold else 'k-NN'} arms " + ", ".join(a.arms))
     if "adaptive" in ix:
         print(f"adaptive: measured constants {ix['adaptive'].measured_costs}")
+        if a.level_width:
+            ix["adaptive"].level_width = a.level_width
+            print(f"adaptive: level width {ix['adaptive'].level_width}")
     for f in a.filters.split(","):
         vis = prep.vis(f)
         for x in ix.values():

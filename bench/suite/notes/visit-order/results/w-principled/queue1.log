@@ -1,0 +1,26 @@
++ DIAG_SETS=none
++ DIAG_MODES=corr
++ DIAG_PSIS=5
++ DIAG_POST=5
++ ./run_study.sh inaturalist-resnet-2048-cosine /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-inat-92afad9.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/inat-post.txt
++ DIAG_SETS=none
++ DIAG_MODES=built,corr
++ DIAG_MISS=1
++ ./run_study.sh inaturalist-resnet-2048-cosine /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-inat-6f86a1c.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/inat-c6f.txt
++ DIAG_SETS=none,region-25
++ DIAG_MODES=built,corr
++ DIAG_MISS=1
++ DIAG_POST=5
++ ./run_study.sh laion-clip-512-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-laion-92afad9.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/laion-c92.txt
++ DIAG_SETS=none,region-25
++ DIAG_MODES=built,corr
++ DIAG_MISS=1
++ ./run_study.sh yahoo-minilm-384-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-yahoo-6f86a1c.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/yahoo-c6f.txt
++ DIAG_SETS=none,region-25
++ DIAG_MODES=built,corr
++ DIAG_MISS=1
++ ./run_study.sh arxiv-nomic-768-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-arxiv-6f86a1c.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/arxiv-c6f.txt
++ DIAG_SETS=region-25
++ DIAG_MODES=built,corr
++ DIAG_MISS=1
++ ./run_study.sh inaturalist-resnet-2048-cosine /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-inat-92afad9.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/inat-c92-r25.txt

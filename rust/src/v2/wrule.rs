@@ -114,6 +114,19 @@ pub fn factor(psi: f64, tau2: f64, dwa: f64, u: f64) -> f32 {
     if tau2 >= 0.0 && f < 1.0 { f as f32 } else { 1.0 }
 }
 
+/// The factor of the height width on a row's upper half-width: w / (dwa sqrt U), at most 1, with
+/// w = (sqrt(1 - f) max(0, zeta) + psi sqrt(f)) tau, f = max(0, 1 - tau^2 / sigma^2) the share of the cluster's score
+/// variance along the query the level explains, zeta = (t - mu) / sigma the running k-th best's height in the cluster.
+/// The level's error e and a row's deviation d = s - mu taken as jointly Gaussian with e uncorrelated with the
+/// estimate (the estimate a linear least-squares predictor), e given d has mean (1 - f) d and spread sqrt(f) tau: w
+/// keeps a row scoring t with probability Phi(psi). The certified width (1) where that is not a number below 1.
+pub fn height_factor(psi: f64, tau2: f64, zeta: f64, sigma: f64, dwa: f64, u: f64) -> f32 {
+    let tau = tau2.max(0.0).sqrt();
+    let f = (1.0 - tau2 / (sigma * sigma)).max(0.0);
+    let x = ((1.0 - f).sqrt() * zeta.max(0.0) + psi * f.sqrt()) * tau / (dwa * u.sqrt());
+    if tau2 >= 0.0 && !zeta.is_nan() && x < 1.0 { x as f32 } else { 1.0 }
+}
+
 /// The most values a packed r x r symmetric matrix holds (r at most `order::R_MAX`).
 pub const RP_MAX: usize = super::order::R_MAX * (super::order::R_MAX + 1) / 2;
 
@@ -384,5 +397,19 @@ mod tests {
         for (psi, tau2, dwa, u) in [(f64::INFINITY, 0.25, 4.0, 1.0), (f64::INFINITY, 0.0, 1.0, 1.0), (2.0, 0.25, 4.0, 0.0), (2.0, 0.25, 0.0, 1.0), (2.0, 0.0, 0.0, 0.0), (2.0, f64::NAN, 4.0, 1.0), (2.0, -1e-30, 4.0, 1.0)] {
             assert_eq!(factor(psi, tau2, dwa, u), 1.0, "psi {psi}, tau^2 {tau2}, dwa {dwa}, U {u}");
         }
+    }
+
+    /// The height width is W2's where the level explains all the cluster's spread along the query and the k-th best is
+    /// at most the cluster's mean; it widens as the k-th best rises in the cluster, and reads at the certified width
+    /// where it cannot be computed.
+    #[test]
+    fn the_height_width_is_w2s_at_the_cluster_mean_and_widens_above_it() {
+        let (psi, tau2, dwa, u) = (1.0, 0.0004, 0.5, 0.2);
+        let at = |zeta: f64, sigma: f64| height_factor(psi, tau2, zeta, sigma, dwa, u);
+        assert!((at(-1.0, 1e9) - factor(psi, tau2, dwa, u)).abs() < 1e-6);
+        assert!(at(0.0, 0.2) < at(2.0, 0.2) && at(2.0, 0.2) < at(4.0, 0.2));
+        assert_eq!(at(1e9, 0.2), 1.0);
+        assert_eq!(height_factor(psi, f64::NAN, 1.0, 0.2, dwa, u), 1.0);
+        assert_eq!(height_factor(psi, tau2, f64::NAN, 0.2, dwa, u), 1.0);
     }
 }

@@ -1,0 +1,37 @@
+
+running 1 test
+no index is saved in /home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine (/home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine/encoded/index.json: No such file or directory (os error 2)); create it (v2::create; vexact --vectors VECTORS.npy --index /home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine create), or rebuild it from its fit (v2::rebuild; vexact --v2 --index /home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine --rebuild)
+[build2] fit loaded; anon 199 MB
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+test v2::e2e::study_w_principled has been running for over 60 seconds
+[build2] query budget: N = 524288 (2^19; 499000 items), L = 6, eps = 1e-9, one side per event: ln(1/delta) = 35.6848
+[build2] randomised constants 12.4s (sub-Gaussian c = 8.448): [([255, 335], 7.988, ConvexOrder), ([255, 335, 687], 8.03, Certificate), ([255, 335, 687, 767], 8.03, Certificate)]
+[build2] plans 98.7s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.04e-12; rates g0 [[0.5, 0.125, 0.0, 0.0], [1.0, 0.25, 0.125, 0.0], [2.0, 0.5, 0.25, 0.125], [3.0, 1.0, 0.5, 0.25], [4.0, 3.0, 1.0, 0.25], [6.0, 4.0, 2.0, 1.0]]
+[build2] calibration sample 93886 items from 250 clusters
+[build2] calibrated 112.1s; anon 1269 MB
+[build2] encoded 171.0s, with it the support table of 250 anchors and the order state (16 directions per cluster from up to 4096 of its rows: 15.7 thread-seconds); anon 1317 MB
+[build2] W2 forms: 5.4 thread-seconds of sums during the encoding, then 0.4s
+[build2] assembled 171.9s; anon 572 MB; x2 bound 6.430e-4; escapes: det norms 10393, |y| 1561, kappa 9166, tan 21324; code hash 7bbff7bb902f8483
+[build2] saved to /home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine/encoded; store hash 4ea45d30d3c85b6c
+[repack] occupancy thresholds by level [0.12, 0.13, 0.07, 0.1, 0.15, 0.17, 0.22, 0.26] (timed in 0.0s)
+/home/joe/code/vexact-data/wfix/inaturalist-resnet-2048-cosine: 100 queries, k 10, groups 12, levels 8 (2 deterministic); constants dir_us=0.496034504813056 row_us_1=0.13244064286274967 row_us_4=0.16446117733389584 row_us_16=0.16232410640739017 row_us_64=0.14853788235567822 cl_us=7.944125386733813 cut_row_us_1=0.01757755315910375 cut_row_us_4=0.05793991114041653 cut_row_us_16=0.08909239348113404 cut_row_us_64=0.18855604724328134 cut_us=1.38540625 grp_us=520.025 sig_us=2.14028125 
+none       built        psi=2: recall 0.6230 visited 1.1 direct 1.1 index 0.1 opened 0.1 groups 0.07 spreads 8.1 batched 0.0 stored 2234 touched 2480 past_det 68 enter 287/82/68/62/48/34/20/9/4 | misses (all queries): unread 376 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+none       built        psi=3: recall 0.8280 visited 2.6 direct 1.6 index 1.0 opened 1.0 groups 0.46 spreads 9.6 batched 0.0 stored 3392 touched 6156 past_det 108 enter 2811/141/108/94/69/46/27/13/5 | misses (all queries): unread 164 direct 1 dropped by level 5/2/0/0/0/0/0/0 kept 0
+none       built        psi=4: recall 0.9520 visited 8.0 direct 2.7 index 5.3 opened 5.3 groups 1.00 spreads 15.0 batched 0.0 stored 5467 touched 18400 past_det 181 enter 12982/260/181/142/96/60/34/16/6 | misses (all queries): unread 28 direct 1 dropped by level 17/2/0/0/0/0/0/0 kept 0
+none       built        psi=5: recall 0.9850 visited 17.8 direct 4.2 index 13.5 opened 13.5 groups 1.64 spreads 24.8 batched 0.0 stored 8451 touched 39699 past_det 296 enter 31298/494/296/219/133/74/39/18/7 | misses (all queries): unread 7 direct 1 dropped by level 4/3/0/0/0/0/0/0 kept 0
+none       built        psi=6: recall 0.9970 visited 29.3 direct 5.6 index 23.6 opened 23.6 groups 2.29 spreads 36.3 batched 0.0 stored 11116 touched 63965 past_det 493 enter 52900/950/493/351/188/92/44/20/8 | misses (all queries): unread 0 direct 1 dropped by level 1/1/0/0/0/0/0/0 kept 0
+none       built        psi=7: recall 0.9990 visited 43.4 direct 7.6 index 35.8 opened 35.8 groups 3.01 spreads 50.4 batched 0.0 stored 14389 touched 91989 past_det 814 enter 77652/1779/814/587/272/114/50/22/9 | misses (all queries): unread 0 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+none       built        psi=8: recall 0.9990 visited 56.1 direct 9.3 index 46.7 opened 46.7 groups 3.80 spreads 63.1 batched 0.0 stored 17270 touched 115570 past_det 1286 enter 98353/3113/1286/969/401/142/57/24/9 | misses (all queries): unread 0 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+none       built        psi=9: recall 0.9990 visited 71.0 direct 11.3 index 59.7 opened 59.6 groups 4.47 spreads 78.0 batched 0.0 stored 20424 touched 141680 past_det 1990 enter 121308/5146/1990/1413/466/145/57/24/9 | misses (all queries): unread 0 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+none       corr         psi=2: recall 0.6210 visited 1.1 direct 1.1 index 0.1 opened 0.1 groups 0.07 spreads 8.1 batched 0.0 stored 2234 touched 2480 past_det 57 enter 287/66/57/54/44/32/19/9/3 | misses (all queries): unread 376 direct 1 dropped by level 2/0/0/0/0/0/0/0 kept 0
+none       corr         psi=3: recall 0.8160 visited 2.7 direct 1.6 index 1.1 opened 1.1 groups 0.46 spreads 9.7 batched 0.0 stored 3391 touched 6231 past_det 83 enter 2886/102/83/75/61/43/26/12/5 | misses (all queries): unread 161 direct 1 dropped by level 20/2/0/0/0/0/0/0 kept 0
+none       corr         psi=4: recall 0.9410 visited 8.1 direct 2.7 index 5.4 opened 5.4 groups 1.00 spreads 15.1 batched 0.0 stored 5480 touched 18643 past_det 135 enter 13212/182/135/105/84/57/33/16/6 | misses (all queries): unread 28 direct 1 dropped by level 25/5/0/0/0/0/0/0 kept 0
+none       corr         psi=5: recall 0.9760 visited 17.8 direct 4.2 index 13.6 opened 13.6 groups 1.64 spreads 24.8 batched 0.0 stored 8451 touched 39756 past_det 215 enter 31355/331/215/151/115/71/38/18/7 | misses (all queries): unread 7 direct 1 dropped by level 12/4/0/0/0/0/0/0 kept 0
+none       corr         psi=6: recall 0.9950 visited 29.3 direct 5.6 index 23.6 opened 23.6 groups 2.29 spreads 36.3 batched 0.0 stored 11116 touched 63965 past_det 351 enter 52900/638/351/231/161/89/44/20/8 | misses (all queries): unread 0 direct 1 dropped by level 3/1/0/0/0/0/0/0 kept 0
+none       corr         psi=7: recall 0.9980 visited 43.4 direct 7.6 index 35.8 opened 35.8 groups 3.01 spreads 50.4 batched 0.0 stored 14389 touched 91990 past_det 574 enter 77652/1229/574/382/233/111/50/22/9 | misses (all queries): unread 0 direct 1 dropped by level 0/1/0/0/0/0/0/0 kept 0
+none       corr         psi=8: recall 0.9990 visited 56.1 direct 9.3 index 46.7 opened 46.7 groups 3.80 spreads 63.1 batched 0.0 stored 17270 touched 115570 past_det 899 enter 98353/2206/899/637/345/139/56/24/9 | misses (all queries): unread 0 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+none       corr         psi=9: recall 0.9990 visited 71.0 direct 11.3 index 59.7 opened 59.6 groups 4.47 spreads 78.0 batched 0.0 stored 20424 touched 141680 past_det 1404 enter 121308/3803/1404/976/420/143/57/24/9 | misses (all queries): unread 0 direct 1 dropped by level 0/0/0/0/0/0/0/0 kept 0
+test v2::e2e::study_w_principled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 176.93s
+

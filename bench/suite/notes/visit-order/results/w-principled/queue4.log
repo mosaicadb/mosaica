@@ -1,0 +1,23 @@
++ M=corr,built,height,tail,corrx1.2,corrx1.5
+++ python3 -c 'print('\'','\''.join(f'\''{2+0.25*i:g}'\'' for i in range(29)))'
++ PS=2,2.25,2.5,2.75,3,3.25,3.5,3.75,4,4.25,4.5,4.75,5,5.25,5.5,5.75,6,6.25,6.5,6.75,7,7.25,7.5,7.75,8,8.25,8.5,8.75,9
++ DIAG_PSIS=2,2.25,2.5,2.75,3,3.25,3.5,3.75,4,4.25,4.5,4.75,5,5.25,5.5,5.75,6,6.25,6.5,6.75,7,7.25,7.5,7.75,8,8.25,8.5,8.75,9
++ DIAG_SETS=none,region-25
++ DIAG_MODES=corr,built,height,tail,corrx1.2,corrx1.5
++ DIAG_MISS=1
++ ./run_study.sh inaturalist-resnet-2048-cosine /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-inat-92afad9.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/fine-inat.txt
++ DIAG_PSIS=2,2.25,2.5,2.75,3,3.25,3.5,3.75,4,4.25,4.5,4.75,5,5.25,5.5,5.75,6,6.25,6.5,6.75,7,7.25,7.5,7.75,8,8.25,8.5,8.75,9
++ DIAG_SETS=none,region-25
++ DIAG_MODES=corr,built,height,tail,corrx1.2,corrx1.5
++ DIAG_MISS=1
++ ./run_study.sh laion-clip-512-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-laion-92afad9.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/fine-laion.txt
++ DIAG_PSIS=2,2.25,2.5,2.75,3,3.25,3.5,3.75,4,4.25,4.5,4.75,5,5.25,5.5,5.75,6,6.25,6.5,6.75,7,7.25,7.5,7.75,8,8.25,8.5,8.75,9
++ DIAG_SETS=none,region-25
++ DIAG_MODES=corr,built,height,tail,corrx1.2,corrx1.5
++ DIAG_MISS=1
++ ./run_study.sh arxiv-nomic-768-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-arxiv-6f86a1c.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/fine-arxiv.txt
++ DIAG_PSIS=2,2.25,2.5,2.75,3,3.25,3.5,3.75,4,4.25,4.5,4.75,5,5.25,5.5,5.75,6,6.25,6.5,6.75,7,7.25,7.5,7.75,8,8.25,8.5,8.75,9
++ DIAG_SETS=none,region-25
++ DIAG_MODES=corr,built,height,tail,corrx1.2,corrx1.5
++ DIAG_MISS=1
++ ./run_study.sh yahoo-minilm-384-normalized /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/costs-yahoo-6f86a1c.kv /home/joe/code/vexact-wfix/bench/suite/notes/visit-order/results/w-principled/fine-yahoo.txt
