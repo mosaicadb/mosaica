@@ -1,5 +1,5 @@
 {
- "when": "2026-11-22 05:46:08 GMT",
+ "when": "2026-11-22 10:24:08 GMT",
  "kernel": "6.18.58.1-microsoft-standard-WSL2",
  "virtualisation": "wsl2",
  "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
@@ -9,12 +9,12 @@
   "fma"
  ],
  "ram_gib": 47.0,
- "ram_available_gib": 40.5,
+ "ram_available_gib": 40.7,
  "swap_gib": 12.0,
- "data_dir_free_gib": 54.6,
+ "data_dir_free_gib": 54.1,
  "data_dir_total_gib": 1006.9,
  "datasets": [
-  "arxiv-nomic-768-normalized"
+  "sift-128-euclidean"
  ],
  "stages": [
   "run",

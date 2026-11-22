@@ -1,0 +1,11 @@
+type,filter,setting,set_visible_ms,setting_ms
+exact,none,default,0.00,0.00
+exact,random-1,idselector,0.28,0.00
+exact,random-25,idselector,0.74,0.00
+exact,region-1,idselector,0.30,0.00
+exact,region-25,idselector,0.73,0.00
+threshold,none,default,0.01,0.00
+threshold,random-1,idselector,0.15,0.00
+threshold,random-25,idselector,0.56,0.00
+threshold,region-1,idselector,0.14,0.00
+threshold,region-25,idselector,0.56,0.00
