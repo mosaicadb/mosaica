@@ -268,3 +268,7 @@ Adopted (after the study): the height width is the reader's only level width
   - `the_statistical_width_drops_only_what_the_certified_width_keeps` covers the reader's width.
 - clippy --all-targets: the same 172 findings as 92afad9b7, including its 2 errors (approximate LN_2 and SQRT_2
   constants), none in the changed code. cargo check on the bindings: clean.
+
+Raw per-cluster and per-neighbour dumps (*.cl, *.nb, *.rows; 692 MB) are not in the repository. They are kept
+locally at /home/joe/code/vexact-data/w-principled-raw/, and post.py, nbfit.py and analyse.py read them from there
+or from this folder.
