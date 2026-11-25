@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mosaica"
 version = "0.4.1"
-description = "Read and map a Mosaica database from Python, and make one from data frames."
+description = "A database and visualiser for interactive maps of billions of points"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
