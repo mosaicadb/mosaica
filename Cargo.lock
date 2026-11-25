@@ -2152,7 +2152,6 @@ name = "mosaica-build"
 version = "0.4.1"
 dependencies = [
  "arrow",
- "chrono",
  "croaring",
  "libc",
  "memmap2",

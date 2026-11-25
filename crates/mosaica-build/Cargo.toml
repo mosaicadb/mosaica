@@ -44,7 +44,6 @@ parquet = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "0.8"
-chrono = { workspace = true }
 
 [dev-dependencies]
 # The read route, for the text index's end-to-end test only: a build crate that depended on the

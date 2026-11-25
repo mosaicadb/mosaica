@@ -95,7 +95,6 @@ parquet = { version = "60", default-features = false, features = ["arrow", "snap
 # writes.
 zstd = "0.14"
 clap = { version = "4", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 postcard = { version = "1", features = ["use-std"] }
 crc32fast = "1"
 # Keyword keys in the key index are the XXH3-128 hash of the string (`mosaica_store::key_index`).

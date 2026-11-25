@@ -2615,7 +2615,11 @@ fn write_manifests(
 
     let manifest = Manifest {
         bundle_format: BUNDLE_FORMAT,
-        created_at: chrono::Utc::now().to_rfc3339(),
+        created_at: mosaica_types::written::rfc3339_utc(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs().try_into().unwrap_or(i64::MAX)),
+        ),
         // The schema, compiled. `MANIFEST.declared_scalars` is the *only* thing downstream reads:
         // `columns.arrow`'s tail is written in this order, `/control/ingest` builds each row's
         // scalar vector in this order, and flush, merge and the fold all take their writer schema
