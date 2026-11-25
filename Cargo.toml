@@ -75,8 +75,8 @@ proptest = "1"
 # what stops a `cargo update` from reaching that in the first place. The writer is in arrow-ipc, and arrow takes
 # its sub-crates by caret, so the arrow-ipc pin is the one that holds the writer; arrow is pinned
 # to the same version so the two move together.
-arrow = { version = "=60.0.0", default-features = false, features = ["ipc"] }
-arrow-ipc = { version = "=60.0.0", default-features = false }
+arrow = { version = "=60.2.0", default-features = false, features = ["ipc"] }
+arrow-ipc = { version = "=60.2.0", default-features = false }
 tempfile = "3"
 # Test-only, and dev-only everywhere it is used: compile-fail harness for the invariants that
 # are upheld by the type system (I4). See crates/mosaica-types/tests/compile_fail.rs.
