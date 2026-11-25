@@ -1,6 +1,6 @@
 # Mosaica
 
-**Interactive maps of billions of points, from Python.**
+**A database and visualiser for interactive maps of billions of points.**
 
 *Try the demo: [demo.mosaicadb.com](https://demo.mosaicadb.com/)*
 
