@@ -7,17 +7,8 @@ package, start with its [README](README.md), and look calls up in the
 
 ## From a checkout
 
-To work on the package, install both from a checkout of the repository, `mosaica-native` first:
-
-```
-pip install -e clients/py-native     # the mosaica binary and the extension module; runs cargo
-pip install -e 'clients/py[widget]'  # read, create, declare, insert, commit, and the notebook widget, Map
-```
-
-The order matters: pip can satisfy `mosaica`'s exact pin on `mosaica-native` only from the copy
-already installed. `mosaica-native`'s build hook runs cargo, so it needs a Rust toolchain, and
-copies the binary into `clients/py-native`, so a binary from a later `cargo build` runs only once
-`mosaica-native` is reinstalled or `MOSAICA_BIN` names it.
+[CONTRIBUTING.md](../../CONTRIBUTING.md#building) gives the two editable installs and the order
+they go in. `mosaica-native`'s build hook runs cargo, so it needs a Rust toolchain.
 `mosaica`'s build hook (`hatch_build.py`) runs `npm ci` (when the install is stale) and
 `npm run bundle -w @mosaicajs/components` in `clients/ts`, and copies the single-file bundle into
 `mosaica/static/`, so it needs Node 22.15 or later, with or without `[widget]`. Nothing built is

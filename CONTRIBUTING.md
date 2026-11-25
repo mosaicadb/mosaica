@@ -23,6 +23,18 @@ npm --prefix clients/ts ci          # the TypeScript workspace
 `clients/py/check.sh` makes its own virtualenv and builds the Python packages, including the
 `mosaica-native` wheel, which runs cargo.
 
+To work on the Python package in a virtualenv of your own, install `mosaica-native` first, because
+`mosaica` pins it to its exact version and pip can satisfy that pin only from the copy already
+installed:
+
+```bash
+pip install -e clients/py-native         # the mosaica binary and the extension module; runs cargo
+pip install -e 'clients/py[widget]'      # the SDK and the notebook map; builds the components with npm
+```
+
+`mosaica-native` copies the binary in when it is installed, so a later `cargo build` reaches Python
+only once you reinstall it or name the new binary with `MOSAICA_BIN`.
+
 ## The checks
 
 While you work, and before you open a pull request, run the checks your change reaches:
