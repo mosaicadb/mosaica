@@ -31,7 +31,7 @@ pip install 'mosaica[widget]'
 
 Mosaica needs Python 3.12 or later. The `widget` extra adds the notebook map, and the `demo` extra adds what the demo datasets are prepared with. Leave both out for the SDK alone.
 
-On Linux and macOS, on x86_64 or ARM64, the package depends on `mosaica-native==0.4.1`, a companion wheel that carries the `mosaica` server and command-line program, so you need no Rust toolchain. On any other platform, Windows included, `mosaica` installs without it and still reads a database someone else runs; to make or serve one there, point `MOSAICA_BIN` at a `mosaica` binary from a [release archive](https://github.com/mosaicadb/mosaica/releases/latest).
+On Linux and macOS, on x86_64 or ARM64, the package depends on `mosaica-native==0.4.2`, a companion wheel that carries the `mosaica` server and command-line program, so you need no Rust toolchain. On any other platform, Windows included, `mosaica` installs without it and still reads a database someone else runs; to make or serve one there, point `MOSAICA_BIN` at a `mosaica` binary from a [release archive](https://github.com/mosaicadb/mosaica/releases/latest).
 
 ## See a map in one command
 
