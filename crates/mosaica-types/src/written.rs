@@ -80,6 +80,19 @@ impl WrittenAs {
     }
 }
 
+/// A second counted from the Unix epoch, written as an RFC 3339 date-time in UTC:
+/// `2026-04-01T09:30:00Z`. [`timestamp_us`] reads it back as the same second.
+pub fn rfc3339_utc(seconds: i64) -> String {
+    let (year, month, day) = civil_from_days(seconds.div_euclid(86_400));
+    let of_day = seconds.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        of_day / 3_600,
+        of_day / 60 % 60,
+        of_day % 60
+    )
+}
+
 /// A timestamp written as text, in microseconds since the Unix epoch.
 pub fn timestamp_us(text: &str) -> Result<i64, WrittenError> {
     let micros = WrittenAs::Timestamp.parse(text)?;
@@ -177,6 +190,26 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+/// The proleptic Gregorian date of a day counted from 1970-01-01: the inverse of
+/// [`days_from_civil`].
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * from_march + 2) / 5 + 1;
+    let month = if from_march < 10 {
+        from_march + 3
+    } else {
+        from_march - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +240,28 @@ mod tests {
             ts("9999-12-31T23:59:59.999999Z"),
             Ok(253_402_300_799_999_999)
         );
+    }
+
+    #[test]
+    fn a_written_second_reads_back_as_itself() {
+        assert_eq!(rfc3339_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339_utc(951_847_215), "2000-02-29T18:00:15Z");
+        assert_eq!(rfc3339_utc(-1), "1969-12-31T23:59:59Z");
+        for seconds in [
+            -62_135_596_800,
+            -1,
+            0,
+            951_782_399,
+            951_782_400,
+            1_775_001_600,
+            253_402_300_799,
+        ] {
+            assert_eq!(
+                ts(&rfc3339_utc(seconds)),
+                Ok(seconds * 1_000_000),
+                "{seconds}"
+            );
+        }
     }
 
     #[test]

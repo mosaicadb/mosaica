@@ -192,7 +192,7 @@ impl<'a> KeyCells<'a> {
                 (!list.is_null(row)).then(|| offsets[row] as usize..offsets[row + 1] as usize)
             }
             KeyCells::FixedSizeList(list) => (!list.is_null(row)).then(|| {
-                let start = list.value_offset(row) as usize;
+                let start = list.value_offset_at(row);
                 start..start + list.value_length() as usize
             }),
         }

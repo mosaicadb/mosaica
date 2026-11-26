@@ -1819,10 +1819,10 @@ fn dechunk(body: &[u8]) -> (Vec<u8>, bool) {
 /// its own memory while nothing polls it; a body absorbed that way creates no backpressure, so the
 /// producer never parks and the stream completes. With the raw socket the client's receive buffer
 /// is fixed small, so the only room for unread frames is the server's send buffer and the bounded
-/// body channel. Measured on Linux with the default `tcp_wmem`: 2.8 MB of the 3.5 MB response is
-/// held there once the reader stops, and the rest parks the producer until the stall budget
-/// fires. The response is zoom 6 with `k` 200; its size is tiles × k, so more items than fill
-/// every occupied tile to `k` would not widen that margin.
+/// body channel. Measured on Linux with the default `tcp_wmem`: 2.8 MB of the response is held
+/// there once the reader stops, and the rest parks the producer until the stall budget fires. A
+/// response that fits in those buffers completes without parking, so the test first checks that
+/// the response is over 3 MB; at zoom 6 with `k` 200 it is 3.47 MB.
 #[tokio::test]
 async fn a_stalled_or_disconnected_stream_is_shed_and_the_gauge_returns_to_zero() {
     use tokio::io::AsyncReadExt as _;
@@ -1878,7 +1878,7 @@ async fn a_stalled_or_disconnected_stream_is_shed_and_the_gauge_returns_to_zero(
         .await
         .unwrap();
     assert!(
-        whole.len() > 3_500_000,
+        whole.len() > 3_000_000,
         "the response is {} bytes, too small to fill the socket buffers",
         whole.len()
     );
