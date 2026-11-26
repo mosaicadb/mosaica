@@ -8,6 +8,30 @@ container image.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-26
+
+A filtered map thinned by density like an unfiltered one, dependencies moved past three RustSec
+advisories, and a Python package page that introduces Mosaica. Bundles and clients from 0.4.1 work
+unchanged.
+
+### Changed
+
+- **A filtered map is thinned by density.** A filter used to draw every match in a tile up to the
+  per-tile cap, so the tile grid showed as rectangles of differing density wherever matches were
+  dense. A filtered map now spends about as many points over the whole view as an unfiltered one,
+  shared among its matches, and adding a filter keeps every drawn point that passes it. The
+  TypeScript client budgets a filtered tile the same way.
+- arrow and parquet move to 60.2.0 and url to 2.5.9, past RUSTSEC-2026-0595 and
+  RUSTSEC-2026-0592, and the build no longer depends on chrono (RUSTSEC-2026-0543). A bundle's
+  `created_at` is written to the second with `Z`, as `2026-11-26T09:30:00Z`.
+
+### Documentation
+
+- The `mosaica` package's page on PyPI introduces Mosaica and walks from `pip install` to a map,
+  queries and a map per viewer in a notebook.
+- The README and the documentation home page lead with the CELLxGENE map, and the datasets page
+  shows each demo dataset.
+
 ## [0.4.1] - 2026-11-11
 
 Faster browsing of nested annotation layers, a build report that says what it measures, histogram
@@ -288,6 +312,7 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[0.4.2]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.2
 [0.4.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.3.0

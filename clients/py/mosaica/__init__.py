@@ -53,7 +53,7 @@ __all__ = [
     "side_by_side",
     "__version__",
 ]
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 _SDK = {"create": "create", "open": "open", "Database": "Database"}
 
