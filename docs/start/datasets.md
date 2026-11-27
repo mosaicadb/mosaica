@@ -6,7 +6,7 @@ To look before installing anything, open the hosted demo at [demo.mosaicadb.com]
 
 ![Overture Maps places across Europe on the hosted demo, with each country named](../assets/screenshots/mosaica_europe.webp)
 
-To run it on your own machine, install the Python package with its `demo` extra and name a dataset:
+To run it on your own machine, install the [Python package](https://pypi.org/project/mosaica/) with its `demo` extra and name a dataset:
 
 ```bash
 pip install 'mosaica[demo]'

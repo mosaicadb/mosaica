@@ -76,7 +76,7 @@ db.map(colour_by="feature_class")
 
 | For | Install |
 |---|---|
-| Python 3.12+ (brings the server on Linux and macOS) | `pip install mosaica` |
+| Python 3.12+ (brings the server on Linux and macOS) | [`pip install mosaica`](https://pypi.org/project/mosaica/) |
 | A web page | `npm install @mosaicajs/components` |
 | A server | `docker pull ghcr.io/mosaicadb/mosaica:latest` |
 | The command line | a [release archive](https://github.com/mosaicadb/mosaica/releases/latest), or `cargo install --locked mosaica` |
